@@ -1924,22 +1924,35 @@ export default function App() {
       const sampleRate = audioBuffer.sampleRate;
       const audioDuration = targetDuration || audioBuffer.duration;
       
-      // Chia khung 50ms, chồng lấp 25ms để đo năng lượng dựa trên cấu hình thanh trượt thủ công của người dùng
-      const windowSize = Math.floor(sampleRate * 0.05); // 50ms
-      const stepSize = Math.floor(sampleRate * 0.025);  // 25ms
-      const silences = [];
-      let isSilent = false;
-      let startSilence = 0;
+      // 1. Chia khung 30ms, step 15ms để đo năng lượng RMS năng động
+      const windowSize = Math.floor(sampleRate * 0.03); // 30ms
+      const stepSize = Math.floor(sampleRate * 0.015);  // 15ms
       
+      const rmsValues = [];
+      let minRms = Infinity;
+      let maxRms = 0;
+
       for (let i = 0; i < rawData.length - windowSize; i += stepSize) {
         let sum = 0;
         for (let j = 0; j < windowSize; j++) {
           sum += rawData[i + j] * rawData[i + j];
         }
         const rms = Math.sqrt(sum / windowSize);
-        const time = (i + windowSize / 2) / sampleRate;
-        
-        if (rms < silenceThreshold) {
+        rmsValues.push({ time: (i + windowSize / 2) / sampleRate, rms });
+        if (rms < minRms) minRms = rms;
+        if (rms > maxRms) maxRms = rms;
+      }
+
+      // Ngưỡng phát hiện khoảng lặng linh hoạt (tự động điều chỉnh theo mức dither / nhiễu nền của LucyLab & VClip)
+      const dynamicThreshold = Math.max(silenceThreshold, minRms + (maxRms - minRms) * 0.06);
+
+      const silences = [];
+      let isSilent = false;
+      let startSilence = 0;
+
+      for (let k = 0; k < rmsValues.length; k++) {
+        const { time, rms } = rmsValues[k];
+        if (rms < dynamicThreshold) {
           if (!isSilent) {
             isSilent = true;
             startSilence = time;
@@ -1949,25 +1962,25 @@ export default function App() {
             isSilent = false;
             const endSilence = time;
             const silenceDuration = endSilence - startSilence;
-            if (silenceDuration > minSilenceDuration) {
+            if (silenceDuration >= 0.10) { // Giảm xuống 100ms để bắt được mọi khoảng ngắt nghỉ ngắn
               silences.push({ start: startSilence, end: endSilence, mid: (startSilence + endSilence) / 2 });
             }
           }
         }
       }
-      
+
       if (isSilent) {
         silences.push({ start: startSilence, end: audioDuration, mid: (startSilence + audioDuration) / 2 });
       }
-      
-      // Gộp các khoảng lặng quá gần nhau (dưới 1.2 giây)
+
+      // Chỉ gộp các khoảng lặng quá sát nhau (dưới 0.15s)
       const cleanSilences = [];
       silences.forEach(s => {
         if (cleanSilences.length === 0) {
           cleanSilences.push(s);
         } else {
           const last = cleanSilences[cleanSilences.length - 1];
-          if (s.mid - last.mid < 1.2) {
+          if (s.start - last.end < 0.15) {
             last.end = s.end;
             last.mid = (last.start + s.end) / 2;
           } else {
@@ -1975,59 +1988,62 @@ export default function App() {
           }
         }
       });
-      
-      // Lưu lại số lượng khoảng nghỉ phát hiện được
+
       setDetectedSilencesCount(cleanSilences.length);
 
       const updated = [...timelineBlocks];
       const totalChars = timelineBlocks.reduce((sum, b) => sum + b.text.length, 0);
-      const propTransitions = [];
-      let acc = 0;
-      for (let i = 0; i < timelineBlocks.length - 1; i++) {
-        acc += (timelineBlocks[i].text.length / totalChars) * audioDuration;
-        propTransitions.push(acc);
-      }
-      
-      // 2. Khớp từng mốc chuyển câu vào khoảng lặng gần nhất (Sử dụng con trỏ tuần tự có hiệu chỉnh nhảy chỉ số để tránh trôi nhịp)
-      const matchedTimes = [];
-      let lastMatchIdx = -1;
-      
-      propTransitions.forEach(targetTime => {
-        let closest = null;
-        let closestDist = Infinity;
-        let closestIdx = -1;
-        
-        for (let sIdx = lastMatchIdx + 1; sIdx < cleanSilences.length; sIdx++) {
-          const silence = cleanSilences[sIdx];
-          const dist = Math.abs(silence.mid - targetTime);
-          if (dist < closestDist) {
-            closestDist = dist;
-            closest = silence;
-            closestIdx = sIdx;
+      const neededCount = timelineBlocks.length - 1;
+
+      if (neededCount > 0 && totalChars > 0) {
+        const propTransitions = [];
+        let acc = 0;
+        for (let i = 0; i < neededCount; i++) {
+          acc += (timelineBlocks[i].text.length / totalChars) * audioDuration;
+          propTransitions.push(acc);
+        }
+
+        const matchedTimes = [];
+        let lastMatchIdx = -1;
+
+        for (let i = 0; i < neededCount; i++) {
+          const targetTime = propTransitions[i];
+          let closest = null;
+          let closestDist = Infinity;
+          let closestIdx = -1;
+
+          for (let sIdx = lastMatchIdx + 1; sIdx < cleanSilences.length; sIdx++) {
+            const silence = cleanSilences[sIdx];
+            const dist = Math.abs(silence.mid - targetTime);
+            if (dist < closestDist) {
+              closestDist = dist;
+              closest = silence;
+              closestIdx = sIdx;
+            }
+          }
+
+          if (closest && closestDist < 5.0) {
+            // Đặt mốc chuyển phụ đề ở mốc tạm dừng (khi vừa đọc xong câu)
+            const transitionTime = closest.start + Math.min(0.08, (closest.end - closest.start) * 0.3);
+            matchedTimes.push(transitionTime);
+            lastMatchIdx = closestIdx;
+          } else {
+            matchedTimes.push(targetTime);
+            lastMatchIdx = lastMatchIdx + 1;
           }
         }
-        
-        // Chỉ nhận diện nếu khoảng lặng cách mốc ước tính dưới 4.5 giây
-        if (closest && closestDist < 4.5) {
-          matchedTimes.push(closest.mid);
-          lastMatchIdx = closestIdx;
-        } else {
-          matchedTimes.push(targetTime);
-          // Tiến lên một chỉ số ảo để tránh việc câu sau lấy mất khoảng lặng của câu trước bị hụt
-          lastMatchIdx = lastMatchIdx + 1;
+
+        updated[0].start = 0;
+        for (let i = 0; i < matchedTimes.length; i++) {
+          const t = parseFloat(matchedTimes[i].toFixed(2));
+          updated[i].end = t;
+          updated[i + 1].start = t;
         }
-      });
-      
-      // Cập nhật lại mốc thời gian phụ đề
-      updated[0].start = 0;
-      for (let i = 0; i < matchedTimes.length; i++) {
-        const t = parseFloat(matchedTimes[i].toFixed(2));
-        updated[i].end = t;
-        updated[i + 1].start = t;
+        updated[updated.length - 1].end = parseFloat(audioDuration.toFixed(2));
+
+        setTimelineBlocks(updated);
       }
-      updated[updated.length - 1].end = parseFloat(audioDuration.toFixed(2));
-      
-      setTimelineBlocks(updated);
+
       setDuration(audioDuration);
       setCurrentTime(0);
     } catch (err) {
