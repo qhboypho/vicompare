@@ -207,6 +207,10 @@ export default function App() {
     const saved = localStorage.getItem('mascotChromaThreshold');
     return saved !== null ? parseInt(saved, 10) : 230;
   });
+  const [mascotWhiteBacking, setMascotWhiteBacking] = useState(() => {
+    const saved = localStorage.getItem('mascotWhiteBacking');
+    return saved !== null ? saved === 'true' : true;
+  });
 
   // Audio Playback
   const [audioUrl, setAudioUrl] = useState('');
@@ -1762,6 +1766,7 @@ export default function App() {
     mascotScale,
     mascotChromaKey,
     mascotChromaThreshold,
+    mascotWhiteBacking,
     headerLogoUrl,
     logoFileName,
     titleFontSize,
@@ -1806,6 +1811,7 @@ export default function App() {
       mascotScale,
       mascotChromaKey,
       mascotChromaThreshold,
+      mascotWhiteBacking,
       titleFontSize,
       titleOutlineColor,
       titleOutlineWidth,
@@ -1841,6 +1847,7 @@ export default function App() {
     mascotScale,
     mascotChromaKey,
     mascotChromaThreshold,
+    mascotWhiteBacking,
     titleFontSize,
     titleOutlineColor,
     titleOutlineWidth,
@@ -2720,6 +2727,7 @@ export default function App() {
           mascotScale,
           mascotChromaKey,
           mascotChromaThreshold,
+          mascotWhiteBacking,
           titleFontSize,
           titleOutlineColor,
           titleOutlineWidth,
@@ -4364,6 +4372,25 @@ export default function App() {
                     <option value="white">⚪ Chỉ tách phông TRẮNG / Trắng Kem (White Removal)</option>
                     <option value="none">🚫 Tắt tách nền (Dùng phông PNG trong suốt gốc)</option>
                   </select>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.1)', marginTop: '0.5rem' }}>
+                    <input 
+                      type="checkbox" 
+                      id="mascot_white_backing_chk"
+                      checked={mascotWhiteBacking}
+                      onChange={(e) => {
+                        setMascotWhiteBacking(e.target.checked);
+                        localStorage.setItem('mascotWhiteBacking', e.target.checked.toString());
+                      }}
+                      style={{ width: '16px', height: '16px', cursor: 'pointer', margin: 0 }}
+                    />
+                    <label htmlFor="mascot_white_backing_chk" style={{ fontSize: '0.75rem', color: '#fff', cursor: 'pointer', userSelect: 'none', margin: 0, fontWeight: 'bold' }}>
+                      🛡️ Khôi phục áo trắng & chi tiết Mascot (Bù nền trắng lót phía sau thân)
+                    </label>
+                  </div>
+                  <span style={{ fontSize: '0.65rem', color: '#888', display: 'block', marginTop: '0.25rem', lineHeight: '1.3' }}>
+                    * Tự động bù lớp lót màu trắng bên trong thân Mascot để khắc phục triệt để hiện tượng áo trắng/cổ áo bị thủng mờ do file ảnh gốc tải lên bị tách lẹm từ trước.
+                  </span>
 
                   {mascotChromaKey !== 'none' && (
                     <div style={{ marginTop: '0.5rem' }}>

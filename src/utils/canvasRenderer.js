@@ -156,6 +156,61 @@ export function getTransparentMascotCanvas(img, mode = 'green', threshold = 230)
 }
 
 /**
+ * Creates a solid white silhouette backing inside the mascot body
+ * Fills any semi-transparent holes in shirt, beard, collar, etc. caused by external image cutters
+ */
+export function getMascotWithWhiteBacking(mascotCanvas) {
+  if (!mascotCanvas || !mascotCanvas.width || !mascotCanvas.height) return mascotCanvas;
+
+  const cacheKey = '_white_backed';
+  if (mascotCanvas[cacheKey]) {
+    return mascotCanvas[cacheKey];
+  }
+
+  const w = mascotCanvas.width;
+  const h = mascotCanvas.height;
+
+  const resultCanvas = document.createElement('canvas');
+  resultCanvas.width = w;
+  resultCanvas.height = h;
+  const ctx = resultCanvas.getContext('2d');
+
+  try {
+    // 1. Create a solid white silhouette mask of the mascot's body
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = w;
+    maskCanvas.height = h;
+    const maskCtx = maskCanvas.getContext('2d');
+    
+    maskCtx.drawImage(mascotCanvas, 0, 0);
+    const imgData = maskCtx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] > 15) { // If pixel belongs to mascot (non-transparent)
+        data[i] = 255;     // R
+        data[i + 1] = 255; // G
+        data[i + 2] = 255; // B
+        data[i + 3] = 255; // Solid Opaque Alpha
+      }
+    }
+    maskCtx.putImageData(imgData, 0, 0);
+
+    // 2. Draw solid white silhouette base first
+    ctx.drawImage(maskCanvas, 0, 0);
+
+    // 3. Draw original mascot image on top
+    ctx.drawImage(mascotCanvas, 0, 0);
+
+    mascotCanvas[cacheKey] = resultCanvas;
+    return resultCanvas;
+  } catch (e) {
+    console.warn('Mascot white backing failed:', e);
+    return mascotCanvas;
+  }
+}
+
+/**
  * Main draw frame function
  * @param {HTMLCanvasElement} canvas 
  * @param {Object} state - Current configuration & state
@@ -461,11 +516,15 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     
     ctx.translate(mascotX, mascotBottomY);
 
-    const renderMascotDrawable = getTransparentMascotCanvas(
+    let renderMascotDrawable = getTransparentMascotCanvas(
       mascotImg, 
-      state.mascotChromaKey || 'auto', 
+      state.mascotChromaKey || 'green', 
       state.mascotChromaThreshold !== undefined ? state.mascotChromaThreshold : 230
     );
+
+    if (state.mascotWhiteBacking !== false) {
+      renderMascotDrawable = getMascotWithWhiteBacking(renderMascotDrawable);
+    }
 
     ctx.drawImage(
       renderMascotDrawable, 
