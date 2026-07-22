@@ -264,7 +264,10 @@ export default function App() {
   // Trạng thái LucyLab (LucyAI / ViVibe)
   const [lucyLabApiKey, setLucyLabApiKey] = useState(() => localStorage.getItem('lucylab_api_key') || '');
   const [lucyLabVoiceId, setLucyLabVoiceId] = useState(() => localStorage.getItem('lucylab_voice_id') || '');
-  const [lucyLabSpeed, setLucyLabSpeed] = useState(1.0);
+  const [lucyLabSpeed, setLucyLabSpeed] = useState(() => {
+    const saved = localStorage.getItem('lucyLabSpeed');
+    return saved !== null ? parseFloat(saved) : 0.85;
+  });
   const [lucyLabVoices, setLucyLabVoices] = useState([]);
   const [isLoadingLucyLabVoices, setIsLoadingLucyLabVoices] = useState(false);
 
@@ -1144,8 +1147,14 @@ export default function App() {
 
     setIsGeneratingVoice(true);
     try {
-      // Use text from timeline blocks, adding small pauses between sentences
-      const combinedText = timelineBlocks.map(b => b.text).join('\n\n');
+      // Use text from timeline blocks, ensuring punctuation at end of each block for natural pauses
+      const combinedText = timelineBlocks.map(b => {
+        let text = (b.text || '').trim();
+        if (text && !/[.!?:]$/.test(text)) {
+          text += '.';
+        }
+        return text;
+      }).join('\n\n');
 
       const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
         method: 'POST',
@@ -1412,7 +1421,13 @@ export default function App() {
 
     setIsGeneratingVoice(true);
     try {
-      const combinedText = timelineBlocks.map(b => b.text).join('\n\n');
+      const combinedText = timelineBlocks.map(b => {
+        let text = (b.text || '').trim();
+        if (text && !/[.!?:]$/.test(text)) {
+          text += '.';
+        }
+        return text;
+      }).join('\n\n');
 
       // 1. Gọi API ttsLongText LucyLab
       const response = await fetch('https://api.lucylab.io/json-rpc', {
@@ -1546,7 +1561,13 @@ export default function App() {
 
     setIsGeneratingVoice(true);
     try {
-      const combinedText = timelineBlocks.map(b => b.text).join('\n\n');
+      const combinedText = timelineBlocks.map(b => {
+        let text = (b.text || '').trim();
+        if (text && !/[.!?:]$/.test(text)) {
+          text += '.';
+        }
+        return text;
+      }).join('\n\n');
 
       // 1. Gọi API tạo audio ttsLongText
       const response = await fetch('https://api-tts.vclip.io/json-rpc', {
@@ -4025,16 +4046,52 @@ export default function App() {
                     </div>
 
                     <div className="form-group">
-                      <label>Tốc độ đọc LucyLab ({lucyLabSpeed}x)</label>
+                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Tốc độ đọc LucyLab</span>
+                        <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{lucyLabSpeed}x</span>
+                      </label>
                       <input 
                         type="range" 
                         min="0.5" 
-                        max="2.0" 
-                        step="0.1" 
+                        max="1.5" 
+                        step="0.05" 
                         value={lucyLabSpeed} 
-                        onChange={(e) => setLucyLabSpeed(parseFloat(e.target.value))} 
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setLucyLabSpeed(val);
+                          localStorage.setItem('lucyLabSpeed', val.toString());
+                        }} 
+                        style={{ cursor: 'pointer', height: '6px' }}
                       />
-                      <span style={{ fontSize: '0.65rem', color: '#888' }}>Mặc định là 1.0 (Phạm vi từ 0.5 - 2.0)</span>
+                      <div style={{ display: 'flex', gap: '0.3rem', marginTop: '0.4rem' }}>
+                        {[
+                          { label: '🐢 0.8x (Chậm)', val: 0.8 },
+                          { label: '✨ 0.85x (Khuyên dùng)', val: 0.85 },
+                          { label: '🎙️ 0.9x (Vừa)', val: 0.9 },
+                          { label: '⚡ 1.0x (Gốc)', val: 1.0 }
+                        ].map(p => (
+                          <button 
+                            key={p.val}
+                            type="button"
+                            onClick={() => {
+                              setLucyLabSpeed(p.val);
+                              localStorage.setItem('lucyLabSpeed', p.val.toString());
+                            }}
+                            style={{
+                              flex: 1,
+                              padding: '0.35rem 0.2rem',
+                              fontSize: '0.65rem',
+                              borderRadius: '4px',
+                              border: lucyLabSpeed === p.val ? '1px solid var(--accent-indigo)' : '1px solid rgba(255,255,255,0.1)',
+                              background: lucyLabSpeed === p.val ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255,255,255,0.03)',
+                              color: lucyLabSpeed === p.val ? '#fff' : '#aaa',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     <div className="form-group">
