@@ -124,25 +124,28 @@ export function getTransparentMascotCanvas(img, mode = 'green', threshold = 230)
 
       if (a < 10) continue;
 
-      let isBackground = false;
-
       if (effectiveMode === 'green') {
-        // GREEN SCREEN CHROMA KEY ONLY: Green channel MUST be dominant over Red and Blue!
-        // Pure White or Off-White (r, g, b high & balanced) will NOT be removed!
-        if ((g > 80 && g > r * 1.25 && g > b * 1.25) || (g > 140 && r < 115 && b < 115)) {
-          isBackground = true;
+        // Strict Green Screen Background Detection:
+        // Pure Green background has HIGH green AND LOW red/blue (r < 130 and b < 140)
+        // White shirt/fur pixels have HIGH red and HIGH blue (r > 130 or b > 140), so they will NEVER be deleted!
+        const isGreenBackground = (g > 80 && r < 130 && b < 140 && (g - r > 35) && (g - b > 35)) ||
+                                  (g > 150 && r < 100 && b < 100);
+
+        if (isGreenBackground) {
+          data[i + 3] = 0; // Make background transparent
+        } else {
+          // Despill green light reflection on white shirt / fur
+          if (g > r && g > b && r > 110 && b > 110) {
+            data[i + 1] = Math.round((r + b) / 2); // Neutralize green spill to crisp white
+          }
         }
       } else if (effectiveMode === 'white') {
         // WHITE REMOVAL ONLY
         if (r >= threshold && g >= threshold && b >= threshold) {
-          isBackground = true;
+          data[i + 3] = 0;
         } else if (r > 195 && g > 195 && b > 195 && Math.abs(r - g) < 20 && Math.abs(g - b) < 20 && Math.abs(r - b) < 20) {
-          isBackground = true;
+          data[i + 3] = 0;
         }
-      }
-
-      if (isBackground) {
-        data[i + 3] = 0; // Transparent
       }
     }
 
