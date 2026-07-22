@@ -325,6 +325,11 @@ export default function App() {
     setActiveChannelId(profile.id);
     localStorage.setItem('active_channel_id', profile.id);
 
+    // Flush previous mascot cache images to force new channel mascot to render
+    ['default', 'point_left', 'point_right', 'shrug'].forEach(k => {
+      delete loadedImagesRef.current[k];
+    });
+
     if (profile.headerTitle !== undefined) {
       setHeaderTitle(profile.headerTitle);
       localStorage.setItem('headerTitle', profile.headerTitle);
@@ -368,13 +373,21 @@ export default function App() {
     if (profile.headerLogoUrl !== undefined) {
       setHeaderLogoUrl(profile.headerLogoUrl);
       localStorage.setItem('headerLogoUrl', profile.headerLogoUrl);
+    } else {
+      setHeaderLogoUrl('');
+      localStorage.setItem('headerLogoUrl', '');
     }
     if (profile.logoFileName !== undefined) {
       setLogoFileName(profile.logoFileName);
       localStorage.setItem('logoFileName', profile.logoFileName);
+    } else {
+      setLogoFileName('');
+      localStorage.setItem('logoFileName', '');
     }
     if (profile.spriteFileName !== undefined) {
       setSpriteFileName(profile.spriteFileName);
+    } else {
+      setSpriteFileName('');
     }
     if (profile.mascotPoses) {
       setMascotPoses(profile.mascotPoses);
@@ -2608,7 +2621,24 @@ export default function App() {
     const file = e.target.files[0];
     if (file) {
       const url = URL.createObjectURL(file);
-      setMascotPoses(prev => ({ ...prev, [poseKey]: url }));
+      setMascotPoses(prev => {
+        const updatedPoses = { ...prev, [poseKey]: url };
+        localStorage.setItem('mascotPoses', JSON.stringify(updatedPoses));
+        
+        // Auto update active channel profile in channelProfiles array
+        setChannelProfiles(prevProfiles => {
+          const updated = prevProfiles.map(p => {
+            if (p.id === activeChannelId) {
+              return { ...p, mascotPoses: updatedPoses };
+            }
+            return p;
+          });
+          localStorage.setItem('channel_profiles', JSON.stringify(updated));
+          return updated;
+        });
+
+        return updatedPoses;
+      });
       cacheImage(poseKey, url);
     }
   };
@@ -2668,7 +2698,21 @@ export default function App() {
         }
 
         setMascotPoses(newPoses);
-        alert('Đã tải ảnh Sprite Sheet Mascot, tự động cắt 4 tư thế và xóa nền trắng thành công!');
+        localStorage.setItem('mascotPoses', JSON.stringify(newPoses));
+
+        // Auto update active channel profile in channelProfiles array
+        setChannelProfiles(prevProfiles => {
+          const updated = prevProfiles.map(p => {
+            if (p.id === activeChannelId) {
+              return { ...p, mascotPoses: newPoses, spriteFileName: file.name };
+            }
+            return p;
+          });
+          localStorage.setItem('channel_profiles', JSON.stringify(updated));
+          return updated;
+        });
+
+        alert('Đã tải ảnh Sprite Sheet Mascot, tự động cắt 4 tư thế và lưu riêng cho Kênh hiện tại thành công!');
       };
       img.src = evt.target.result;
     };
@@ -2682,6 +2726,21 @@ export default function App() {
       const url = URL.createObjectURL(file);
       setHeaderLogoUrl(url);
       setLogoFileName(file.name);
+      localStorage.setItem('headerLogoUrl', url);
+      localStorage.setItem('logoFileName', file.name);
+
+      // Auto update active channel profile in channelProfiles array
+      setChannelProfiles(prevProfiles => {
+        const updated = prevProfiles.map(p => {
+          if (p.id === activeChannelId) {
+            return { ...p, headerLogoUrl: url, logoFileName: file.name };
+          }
+          return p;
+        });
+        localStorage.setItem('channel_profiles', JSON.stringify(updated));
+        return updated;
+      });
+
       cacheImage(url, url);
       saveImageToStorage(url, file);
     }
