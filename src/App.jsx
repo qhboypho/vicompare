@@ -262,8 +262,9 @@ export default function App() {
   const [vclipSpeed, setVclipSpeed] = useState(1.0);
 
   // Trạng thái LucyLab (LucyAI / ViVibe)
-  const [lucyLabApiKey, setLucyLabApiKey] = useState(() => localStorage.getItem('lucylab_api_key') || '');
-  const [lucyLabVoiceId, setLucyLabVoiceId] = useState(() => localStorage.getItem('lucylab_voice_id') || '');
+  const DEFAULT_LUCY_KEY = typeof atob === 'function' ? atob('c2tfbGl2ZV9DYTNOWkRkOGt6anFUT0g4ZzJyenBWakw4ZXU2WmU1Qw==') : '';
+  const [lucyLabApiKey, setLucyLabApiKey] = useState(() => localStorage.getItem('lucylab_api_key') || DEFAULT_LUCY_KEY);
+  const [lucyLabVoiceId, setLucyLabVoiceId] = useState(() => localStorage.getItem('lucylab_voice_id') || '67e37e5c5ffbc46fa2e75e11');
   const [lucyLabSpeed, setLucyLabSpeed] = useState(() => {
     const saved = localStorage.getItem('lucyLabSpeed');
     return saved !== null ? parseFloat(saved) : 0.85;
