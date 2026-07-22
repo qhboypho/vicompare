@@ -59,6 +59,17 @@ const safeAtob = (str) => {
   }
 };
 
+const DEFAULT_ELEVEN_VOICES = [
+  { voice_id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel (Nữ - Mỹ)' },
+  { voice_id: 'AZnzlk1XvdvUeBnXmlld', name: 'Domi (Nữ - Truyền cảm)' },
+  { voice_id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella (Nữ - Nhẹ nhàng)' },
+  { voice_id: 'ErXwobaYiN019PkySvjV', name: 'Antoni (Nam - Trầm ấm)' },
+  { voice_id: 'MF3mGyEYCl7XYWbV9V6O', name: 'Elli (Nữ - Trẻ trung)' },
+  { voice_id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh (Nam - Sôi nổi)' },
+  { voice_id: 'VR6AewLTigWG4xTVO1Vp', name: 'Arnold (Nam - Mạnh mẽ)' },
+  { voice_id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam (Nam - Thuyết minh)' }
+];
+
 const DEFAULT_COMPARISONS = [
   {
     id: 'comp-1',
@@ -255,8 +266,8 @@ export default function App() {
   // ElevenLabs TTS State (split base64 decoded fallback)
   const DEFAULT_ELEVEN_KEY = safeAtob(['c2tfNjFkMTVmZDdlMDBlZDZlZGJmM2Vm', 'ZDY3MWJlNjhiMzc2ZmM2ZDViY2VhYzZhNTI0'].join(''));
   const [elevenLabsApiKey, setElevenLabsApiKey] = useState(() => localStorage.getItem('elevenlabs_api_key') || DEFAULT_ELEVEN_KEY);
-  const [voices, setVoices] = useState([]);
-  const [selectedVoiceId, setSelectedVoiceId] = useState('');
+  const [voices, setVoices] = useState(DEFAULT_ELEVEN_VOICES);
+  const [selectedVoiceId, setSelectedVoiceId] = useState(() => localStorage.getItem('elevenlabs_voice_id') || '21m00Tcm4TlvDq8ikWAM');
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
   const [isProcessingAudio, setIsProcessingAudio] = useState(false);
 
@@ -1585,19 +1596,36 @@ export default function App() {
 
   // Fetch ElevenLabs Voices List
   const fetchVoices = async (key) => {
+    if (!key) {
+      alert('Vui lòng nhập API Key ElevenLabs.');
+      return;
+    }
     try {
       const res = await fetch('https://api.elevenlabs.io/v1/voices', {
         headers: { 'xi-api-key': key }
       });
       if (res.ok) {
         const data = await res.json();
-        setVoices(data.voices || []);
-        if (data.voices && data.voices.length > 0 && !selectedVoiceId) {
-          setSelectedVoiceId(data.voices[0].voice_id);
+        if (data.voices && data.voices.length > 0) {
+          setVoices(data.voices);
+          if (!selectedVoiceId) {
+            setSelectedVoiceId(data.voices[0].voice_id);
+          }
+          alert(`Đã tải thành công ${data.voices.length} giọng đọc từ ElevenLabs!`);
+        } else {
+          setVoices(DEFAULT_ELEVEN_VOICES);
+          alert('Tải thành công! Đã kích hoạt danh sách giọng đọc chuẩn của ElevenLabs.');
         }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        const msg = errData.detail?.message || errData.message || 'API Key đã hết hạn hoặc không hợp lệ';
+        setVoices(DEFAULT_ELEVEN_VOICES);
+        alert(`Thông báo ElevenLabs: ${msg}. Đã kích hoạt danh sách giọng đọc mặc định. Bạn có thể tự dán API Key mới lấy từ elevenlabs.io vào ô bên dưới.`);
       }
     } catch (err) {
       console.error('Failed to load ElevenLabs voices:', err);
+      setVoices(DEFAULT_ELEVEN_VOICES);
+      alert('Thông báo ElevenLabs: Đã sử dụng danh sách giọng đọc mặc định.');
     }
   };
 
