@@ -43,6 +43,22 @@ Sự khác nhau là gì?
 Trí tuệ nhân tạo xử lý dữ liệu với tốc độ cực nhanh và chính xác dựa trên các thuật toán cùng mô hình được lập trình sẵn.
 Trí tuệ con người sở hữu sự thấu cảm, ý thức, khả năng tư duy phản biện và sự sáng tạo vượt ra ngoài những quy tắc có sẵn.`;
 
+// Safe base64 decoding helper function to prevent InvalidCharacterError crashes
+const safeAtob = (str) => {
+  if (!str || typeof atob !== 'function') return '';
+  try {
+    let padded = str;
+    const mod = str.length % 4;
+    if (mod > 0) {
+      padded += '='.repeat(4 - mod);
+    }
+    return atob(padded);
+  } catch (e) {
+    console.warn('safeAtob decode skipped:', e);
+    return '';
+  }
+};
+
 const DEFAULT_COMPARISONS = [
   {
     id: 'comp-1',
@@ -256,14 +272,14 @@ export default function App() {
   const [isCloningVoice, setIsCloningVoice] = useState(false);
 
   // Trạng thái VClip
-  const DEFAULT_VCLIP_KEY = typeof atob === 'function' ? atob(['dmNfbGl2ZV9kODNlMjBlODMx', 'MjA0MGIyYTc1OGU1ZDA3MDEwNDFhYg=='].join('')) : '';
+  const DEFAULT_VCLIP_KEY = safeAtob(['dmNfbGl2ZV9kODNlMjBlODMx', 'MjA0MGIyYTc1OGU1ZDA3MDEwNDFhYg=='].join(''));
   const [ttsProvider, setTtsProvider] = useState(() => localStorage.getItem('tts_provider') || 'lucylab');
   const [vclipApiKey, setVclipApiKey] = useState(() => localStorage.getItem('vclip_api_key') || DEFAULT_VCLIP_KEY);
   const [vclipVoiceId, setVclipVoiceId] = useState(() => localStorage.getItem('vclip_voice_id') || '67e37e5c5ffbc46fa2e75e11');
   const [vclipSpeed, setVclipSpeed] = useState(1.0);
 
   // Trạng thái LucyLab (LucyAI / ViVibe)
-  const DEFAULT_LUCY_KEY = typeof atob === 'function' ? atob('c2tfbGl2ZV9DYTNOWkRkOGt6anFUT0g4ZzJyenBWakw4ZXU2WmU1Qw==') : '';
+  const DEFAULT_LUCY_KEY = safeAtob('c2tfbGl2ZV9DYTNOWkRkOGt6anFUT0g4ZzJyenBWakw4ZXU2WmU1Qw==');
   const [lucyLabApiKey, setLucyLabApiKey] = useState(() => localStorage.getItem('lucylab_api_key') || DEFAULT_LUCY_KEY);
   const [lucyLabVoiceId, setLucyLabVoiceId] = useState(() => localStorage.getItem('lucylab_voice_id') || '67e37e5c5ffbc46fa2e75e11');
   const [lucyLabSpeed, setLucyLabSpeed] = useState(() => {
@@ -792,17 +808,17 @@ export default function App() {
   const [publishingStatus, setPublishingStatus] = useState('');
   
   // Facebook credentials (split base64 decoded fallbacks)
-  const DEFAULT_FB_PAGE_ID = typeof atob === 'function' ? atob(['MTIyMzYzNDg0', 'NzQ5OTI2NA=='].join('')) : '';
-  const DEFAULT_FB_TOKEN = typeof atob === 'function' ? atob(['RUFBV0tpanRUWFJJQlNDVFpCdE82ZU1PYVd1TmMzemFrS1A5RWR0RUZ5OVNDeTJzbHNmdlBZa1pDS3FDMm1ybE9aQ010RjI5bU9aQ1BTSVA1REdXa1pDNzJNWkF5ZmV2Z2FuTWVIdFNoOFRUT2ZyWkE0WkJjUUZJOGZ6VFFIY2haQ1BPaFI4eUJPMDFieUJPZlA3WkJaQjVCV1hNbHZjYnZOVE5ZMURpQW1sYzNBQ3RBcmdBWHd3aTBUQlpCMzZ4T2VnWkNtQ1VVNXVDUXBOUWlycFRaQzZXZzNaQ2ZnWkJz'].join('')) : '';
+  const DEFAULT_FB_PAGE_ID = safeAtob(['MTIyMzYzNDg0', 'NzQ5OTI2NA=='].join(''));
+  const DEFAULT_FB_TOKEN = safeAtob(['RUFBV0tpanRUWFJJQlNDVFpCdE82ZU1PYVd1TmMzemFrS1A5RWR0RUZ5OVNDeTJzbHNmdlBZa1pDS3FDMm1ybE9aQ010RjI5bU9aQ1BTSVA1REdXa1pDNzJNWkF5ZmV2Z2FuTWVIdFNoOFRUT2ZyWkE0WkJjUUZJOGZ6VFFIY2haQ1BPaFI4eUJPMDFieUJPZlA3WkJaQjVCV1hNbHZjYnZOVE5ZMURpQW1sYzNBQ3RBcmdBWHd3aTBUQlpCMzZ4T2VnWkNtQ1VVNXVDUXBOUWlycFRaQzZXZzNaQ2ZnWkJz'].join(''));
   const [fbPageId, setFbPageId] = useState(() => localStorage.getItem('fb_page_id') || DEFAULT_FB_PAGE_ID);
   const [fbAccessToken, setFbAccessToken] = useState(() => localStorage.getItem('fb_access_token') || DEFAULT_FB_TOKEN);
   
   // YouTube credentials (split base64 decoded fallbacks)
-  const DEFAULT_YT_CHANNEL_ID = typeof atob === 'function' ? atob(['VUNZY2o0REFk', 'MUdGVUdVaTJCMnlZRzVn'].join('')) : '';
-  const DEFAULT_YT_TOKEN = typeof atob === 'function' ? atob(['eWEyOS5hMEFSR251MFoxeWJpREdLQkRQTng1UFkzTTdsYWlEQlNWSVFFamFjZ1RzMEJYYTQ1NDBNc2U1VU1KeEhEYnZkS1dBbkhLWTFJU1VQcVFpSUstbDRKdkZWeHlOd0FwaWtFYVBUYk9GU0VCTG9ROWhkXzZfbTZQqd6NNbKNX4dTGGQIYyC_VHJgpbeqfoP1NzIUuyue21RDadlnCDMuzyk7kCfNjMwrdmRyksywXyrtT-d-EQGyaCgYKAakSARISFQHGX2MiRcylzK2RxzMRN7K0eKnCNg0207'].join('')) : '';
-  const DEFAULT_YT_CLIENT_ID = typeof atob === 'function' ? atob(['ODMyODQzODk0MTE0LWMzaGM0ODMzdXQydjdqbHRiNzljcjVtMHNjZDZxam10', 'LmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29t'].join('')) : '';
-  const DEFAULT_YT_CLIENT_SECRET = typeof atob === 'function' ? atob(['R09DU1BYLWJXTExJ', 'emxyM3FsdHo1UmJHNGlORVZCS1VGeW8='].join('')) : '';
-  const DEFAULT_YT_REFRESH_TOKEN = typeof atob === 'function' ? atob(['MS8vMDRjNE1KQVZyVkVLX0NnWUlBUkFBR0FRU053Ri1MOUly', 'dnphZ3NzTndXV3N3SlJ3V2xZcm9EQnZISzZvelNZbnphT3NMWlVINEJVNlRFZzZ5U04xdEc4NC1iZ213OFMxcTAtTQ=='].join('')) : '';
+  const DEFAULT_YT_CHANNEL_ID = safeAtob(['VUNZY2o0REFk', 'MUdGVUdVaTJCMnlZRzVn'].join(''));
+  const DEFAULT_YT_TOKEN = safeAtob(['eWEyOS5hMEFSR251MFoxeWJpREdLQkRQTng1UFkzTTdsYWlEQlNWSVFFamFjZ1RzMEJYYTQ1NDBNc2U1VU1KeEhEYnZkS1dBbkhLWTFJU1VQcVFpSUstbDRKdkZWeHlOd0FwaWtFYVBUYk9GU0VCTG9ROWhkXzZfbTZQqd6NNbKNX4dTGGQIYyC_VHJgpbeqfoP1NzIUuyue21RDadlnCDMuzyk7kCfNjMwrdmRyksywXyrtT-d-EQGyaCgYKAakSARISFQHGX2MiRcylzK2RxzMRN7K0eKnCNg0207'].join(''));
+  const DEFAULT_YT_CLIENT_ID = safeAtob(['ODMyODQzODk0MTE0LWMzaGM0ODMzdXQydjdqbHRiNzljcjVtMHNjZDZxam10', 'LmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29t'].join(''));
+  const DEFAULT_YT_CLIENT_SECRET = safeAtob(['R09DU1BYLWJXTExJ', 'emxyM3FsdHo1UmJHNGlORVZCS1VGeW8='].join(''));
+  const DEFAULT_YT_REFRESH_TOKEN = safeAtob(['MS8vMDRjNE1KQVZyVkVLX0NnWUlBUkFBR0FRU053Ri1MOUly', 'dnphZ3NzTndXV3N3SlJ3V2xZcm9EQnZISzZvelNZbnphT3NMWlVINEJVNlRFZzZ5U04xdEc4NC1iZ213OFMxcTAtTQ=='].join(''));
 
   const [ytChannelId, setYtChannelId] = useState(() => localStorage.getItem('yt_channel_id') || DEFAULT_YT_CHANNEL_ID);
   const [ytAccessToken, setYtAccessToken] = useState(() => localStorage.getItem('yt_access_token') || DEFAULT_YT_TOKEN);
