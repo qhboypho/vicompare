@@ -319,11 +319,41 @@ export default function App() {
 
   const [activeChannelId, setActiveChannelId] = useState(() => localStorage.getItem('active_channel_id') || 'cat-thong-thai');
 
+  // Helper to safely serialize channel profiles for localStorage without exceeding 5MB quota
+  const safeSaveChannelProfiles = (profiles) => {
+    try {
+      const lightweightProfiles = profiles.map(p => {
+        const cleanPoses = {};
+        if (p.mascotPoses) {
+          Object.entries(p.mascotPoses).forEach(([k, v]) => {
+            if (v && v.length > 500 && v.startsWith('data:')) {
+              const dbKey = `channel_${p.id}_mascot_${k}`;
+              try {
+                fetch(v).then(r => r.blob()).then(b => saveImageToStorage(dbKey, b)).catch(() => {});
+              } catch {}
+              cleanPoses[k] = `idb:${dbKey}`;
+            } else {
+              cleanPoses[k] = v;
+            }
+          });
+        }
+        return {
+          ...p,
+          mascotPoses: cleanPoses,
+          headerLogoUrl: (p.headerLogoUrl && p.headerLogoUrl.length > 500 && p.headerLogoUrl.startsWith('data:')) ? '' : p.headerLogoUrl
+        };
+      });
+      localStorage.setItem('channel_profiles', JSON.stringify(lightweightProfiles));
+    } catch (e) {
+      console.warn('localStorage quota handled safely for channel_profiles:', e);
+    }
+  };
+
   // Swapping / applying a Channel Profile
   const handleApplyChannelProfile = (profile) => {
     if (!profile) return;
     setActiveChannelId(profile.id);
-    localStorage.setItem('active_channel_id', profile.id);
+    try { localStorage.setItem('active_channel_id', profile.id); } catch {}
 
     // Flush previous mascot cache images to force new channel mascot to render
     ['default', 'point_left', 'point_right', 'shrug'].forEach(k => {
@@ -332,57 +362,57 @@ export default function App() {
 
     if (profile.headerTitle !== undefined) {
       setHeaderTitle(profile.headerTitle);
-      localStorage.setItem('headerTitle', profile.headerTitle);
+      try { localStorage.setItem('headerTitle', profile.headerTitle); } catch {}
     }
     if (profile.bgColor !== undefined) {
       setBgColor(profile.bgColor);
-      localStorage.setItem('bgColor', profile.bgColor);
+      try { localStorage.setItem('bgColor', profile.bgColor); } catch {}
     }
     if (profile.headerTitleColor !== undefined) {
       setHeaderTitleColor(profile.headerTitleColor);
-      localStorage.setItem('headerTitleColor', profile.headerTitleColor);
+      try { localStorage.setItem('headerTitleColor', profile.headerTitleColor); } catch {}
     }
     if (profile.headerTitleFontSize !== undefined) {
       setHeaderTitleFontSize(profile.headerTitleFontSize);
-      localStorage.setItem('headerTitleFontSize', profile.headerTitleFontSize.toString());
+      try { localStorage.setItem('headerTitleFontSize', profile.headerTitleFontSize.toString()); } catch {}
     }
     if (profile.headerPosition !== undefined) {
       setHeaderPosition(profile.headerPosition);
-      localStorage.setItem('headerPosition', profile.headerPosition);
+      try { localStorage.setItem('headerPosition', profile.headerPosition); } catch {}
     }
     if (profile.mascotScale !== undefined) {
       setMascotScale(profile.mascotScale);
-      localStorage.setItem('mascotScale', profile.mascotScale.toString());
+      try { localStorage.setItem('mascotScale', profile.mascotScale.toString()); } catch {}
     }
     if (profile.mascotY !== undefined) {
       setMascotY(profile.mascotY);
-      localStorage.setItem('mascotY', profile.mascotY.toString());
+      try { localStorage.setItem('mascotY', profile.mascotY.toString()); } catch {}
     }
     if (profile.mascotChromaKey !== undefined) {
       setMascotChromaKey(profile.mascotChromaKey);
-      localStorage.setItem('mascotChromaKey', profile.mascotChromaKey);
+      try { localStorage.setItem('mascotChromaKey', profile.mascotChromaKey); } catch {}
     }
     if (profile.mascotChromaThreshold !== undefined) {
       setMascotChromaThreshold(profile.mascotChromaThreshold);
-      localStorage.setItem('mascotChromaThreshold', profile.mascotChromaThreshold.toString());
+      try { localStorage.setItem('mascotChromaThreshold', profile.mascotChromaThreshold.toString()); } catch {}
     }
     if (profile.mascotWhiteBacking !== undefined) {
       setMascotWhiteBacking(profile.mascotWhiteBacking);
-      localStorage.setItem('mascotWhiteBacking', profile.mascotWhiteBacking.toString());
+      try { localStorage.setItem('mascotWhiteBacking', profile.mascotWhiteBacking.toString()); } catch {}
     }
     if (profile.headerLogoUrl !== undefined) {
       setHeaderLogoUrl(profile.headerLogoUrl);
-      localStorage.setItem('headerLogoUrl', profile.headerLogoUrl);
+      try { localStorage.setItem('headerLogoUrl', profile.headerLogoUrl); } catch {}
     } else {
       setHeaderLogoUrl('');
-      localStorage.setItem('headerLogoUrl', '');
+      try { localStorage.setItem('headerLogoUrl', ''); } catch {}
     }
     if (profile.logoFileName !== undefined) {
       setLogoFileName(profile.logoFileName);
-      localStorage.setItem('logoFileName', profile.logoFileName);
+      try { localStorage.setItem('logoFileName', profile.logoFileName); } catch {}
     } else {
       setLogoFileName('');
-      localStorage.setItem('logoFileName', '');
+      try { localStorage.setItem('logoFileName', ''); } catch {}
     }
     if (profile.spriteFileName !== undefined) {
       setSpriteFileName(profile.spriteFileName);
@@ -391,9 +421,20 @@ export default function App() {
     }
     if (profile.mascotPoses) {
       setMascotPoses(profile.mascotPoses);
-      localStorage.setItem('mascotPoses', JSON.stringify(profile.mascotPoses));
+      
       Object.entries(profile.mascotPoses).forEach(([k, v]) => {
-        if (v) cacheImage(k, v);
+        if (v && v.startsWith('idb:')) {
+          const dbKey = v.replace('idb:', '');
+          getImageFromStorage(dbKey).then(blob => {
+            if (blob) {
+              const localUrl = URL.createObjectURL(blob);
+              setMascotPoses(prev => ({ ...prev, [k]: localUrl }));
+              cacheImage(k, localUrl);
+            }
+          }).catch(e => console.warn(e));
+        } else if (v) {
+          cacheImage(k, v);
+        }
       });
     }
   };
@@ -426,9 +467,9 @@ export default function App() {
 
     const updated = [...channelProfiles, newProfile];
     setChannelProfiles(updated);
-    localStorage.setItem('channel_profiles', JSON.stringify(updated));
+    safeSaveChannelProfiles(updated);
     setActiveChannelId(newId);
-    localStorage.setItem('active_channel_id', newId);
+    try { localStorage.setItem('active_channel_id', newId); } catch {}
     alert(`Đã lưu Mẫu Kênh "${name.trim()}" thành công!`);
   };
 
@@ -461,7 +502,7 @@ export default function App() {
     });
 
     setChannelProfiles(updated);
-    localStorage.setItem('channel_profiles', JSON.stringify(updated));
+    safeSaveChannelProfiles(updated);
     alert(`Đã cập nhật thay đổi cho Mẫu Kênh "${profileName}"!`);
   };
 
@@ -476,7 +517,7 @@ export default function App() {
 
     const updated = channelProfiles.filter(p => p.id !== id);
     setChannelProfiles(updated);
-    localStorage.setItem('channel_profiles', JSON.stringify(updated));
+    safeSaveChannelProfiles(updated);
 
     if (activeChannelId === id) {
       handleApplyChannelProfile(updated[0]);
