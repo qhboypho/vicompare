@@ -118,6 +118,9 @@ export async function exportVideo({
     const hasAudio = !!audioUrl;
     if (hasAudio) {
       previewAudioEl = new Audio(audioUrl);
+      previewAudioEl.onerror = (e) => {
+        console.warn('Preview audio element loading error (export will continue):', e);
+      };
       if (audioUrl.startsWith('http://') || audioUrl.startsWith('https://')) {
         previewAudioEl.crossOrigin = 'anonymous';
       }
@@ -140,9 +143,16 @@ export async function exportVideo({
           const isLocal = audioUrl.startsWith('blob:') || audioUrl.startsWith('data:');
           const requestUrl = isLocal ? audioUrl : `/cors-proxy?url=${encodeURIComponent(audioUrl)}`;
           const res = await fetch(requestUrl);
-          const arrayBuffer = await res.arrayBuffer();
-          audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-          duration = audioBuffer.duration;
+          if (res.ok) {
+            const arrayBuffer = await res.arrayBuffer();
+            audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            if (audioBuffer && audioBuffer.duration) {
+              duration = audioBuffer.duration;
+            }
+          } else {
+            console.warn(`Fetch audio failed with status ${res.status}`);
+            useAudioContext = false;
+          }
         } catch (decodeErr) {
           console.warn('Không thể giải mã tệp tin âm thanh để ghi, sẽ dùng fallback captureStream:', decodeErr);
           useAudioContext = false;
@@ -168,19 +178,21 @@ export async function exportVideo({
       } else {
         // FALLBACK: captureStream from previewAudioEl if AudioContext is unsupported/failed
         console.warn('Web Audio API AudioContext routing failed or unsupported, falling back to captureStream');
-        let fallbackStream = null;
-        if (typeof previewAudioEl.captureStream === 'function') {
-          fallbackStream = previewAudioEl.captureStream();
-        } else if (typeof previewAudioEl.mozCaptureStream === 'function') {
-          fallbackStream = previewAudioEl.mozCaptureStream();
-        }
-        
-        if (fallbackStream) {
-          fallbackStream.getAudioTracks().forEach(track => {
-            outputTracks.push(track);
-          });
-        } else {
-          console.error('Audio captureStream is not supported in this browser.');
+        try {
+          let fallbackStream = null;
+          if (typeof previewAudioEl.captureStream === 'function') {
+            fallbackStream = previewAudioEl.captureStream();
+          } else if (typeof previewAudioEl.mozCaptureStream === 'function') {
+            fallbackStream = previewAudioEl.mozCaptureStream();
+          }
+          
+          if (fallbackStream) {
+            fallbackStream.getAudioTracks().forEach(track => {
+              outputTracks.push(track);
+            });
+          }
+        } catch (streamErr) {
+          console.warn('Failed to capture stream from previewAudioEl:', streamErr);
         }
       }
     }
@@ -230,10 +242,14 @@ export async function exportVideo({
         } catch (e) {}
       }
       if (previewAudioEl) {
-        previewAudioEl.pause();
+        try {
+          previewAudioEl.pause();
+        } catch (e) {}
       }
       if (audioContext) {
-        audioContext.close();
+        try {
+          audioContext.close();
+        } catch (e) {}
       }
       window.exportPreviewAudio = null;
 
@@ -252,15 +268,23 @@ export async function exportVideo({
           console.warn('Failed to resume AudioContext:', resErr);
         }
       }
-      try {
-        // Chạy song song: luồng ghi ngầm (không phát tiếng) và luồng loa ngoài (kiểm soát tắt/bật)
-        if (bufferSourceNode) {
+      
+      // Chạy luồng ghi ngầm (không phát tiếng ra loa)
+      if (bufferSourceNode) {
+        try {
           bufferSourceNode.start(0);
+        } catch (bufErr) {
+          console.warn('Failed to start bufferSourceNode:', bufErr);
         }
-        await previewAudioEl.play();
-      } catch (err) {
-        console.error('Audio playback failed during export:', err);
-        throw err;
+      }
+
+      // Chạy luồng loa ngoài (kiểm soát tắt/bật, được bọc try/catch an toàn để lỗi nguồn phát không làm sập render)
+      if (previewAudioEl) {
+        try {
+          await previewAudioEl.play();
+        } catch (previewErr) {
+          console.warn('Preview speaker audio playback skipped or source invalid:', previewErr);
+        }
       }
     }
 
