@@ -521,19 +521,19 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     // Breathing animation & scaling preserving natural aspect ratio
     const breathScale = 1.0 + 0.012 * Math.sin(currentTime * Math.PI * 1.5);
     const scaleFactor = (state.mascotScale !== undefined ? state.mascotScale : 100) / 100;
-    const baseHeight = 340 * scaleFactor * breathScale;
+    const baseHeight = 420 * scaleFactor * breathScale; // Increased default unzoomed base height from 340 to 420 for prominent display
 
     // Intrinsic mascot dimensions
-    const nativeW = (renderMascotDrawable && renderMascotDrawable.width) || mascotImg.width || 280;
-    const nativeH = (renderMascotDrawable && renderMascotDrawable.height) || mascotImg.height || 340;
+    const nativeW = (renderMascotDrawable && renderMascotDrawable.width) || mascotImg.width || 320;
+    const nativeH = (renderMascotDrawable && renderMascotDrawable.height) || mascotImg.height || 420;
     const aspect = nativeW / nativeH;
 
     let targetH = baseHeight;
     let targetW = targetH * aspect;
 
     // Safety cap for exceptionally wide assets
-    if (targetW > 480 * scaleFactor) {
-      targetW = 480 * scaleFactor;
+    if (targetW > 580 * scaleFactor) {
+      targetW = 580 * scaleFactor;
       targetH = targetW / aspect;
     }
 
