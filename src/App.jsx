@@ -435,11 +435,20 @@ export default function App() {
       setLogoFileName('');
       try { localStorage.setItem('logoFileName', ''); } catch {}
     }
-    if (profile.spriteFileName !== undefined) {
-      setSpriteFileName(profile.spriteFileName);
-    } else {
-      setSpriteFileName('');
-    }
+    if (profile.subtitleFontSize !== undefined) updateSubtitleFontSize(profile.subtitleFontSize);
+    if (profile.titleFontSize !== undefined) updateTitleFontSize(profile.titleFontSize);
+    if (profile.subtitleY !== undefined) updateSubtitleY(profile.subtitleY);
+    if (profile.subtitleColor !== undefined) updateSubtitleColor(profile.subtitleColor);
+    if (profile.subtitleOutlineColor !== undefined) updateSubtitleOutlineColor(profile.subtitleOutlineColor);
+    if (profile.subtitleOutlineWidth !== undefined) updateSubtitleOutlineWidth(profile.subtitleOutlineWidth);
+    if (profile.subtitleFontFamily !== undefined) updateSubtitleFontFamily(profile.subtitleFontFamily);
+    if (profile.subtitleHighlightColor !== undefined) updateSubtitleHighlightColor(profile.subtitleHighlightColor);
+    if (profile.subtitleHighlightStyle !== undefined) updateSubtitleHighlightStyle(profile.subtitleHighlightStyle);
+    if (profile.subtitleMaxWidth !== undefined) updateSubtitleMaxWidth(profile.subtitleMaxWidth);
+    if (profile.subtitleMaxLines !== undefined) updateSubtitleMaxLines(profile.subtitleMaxLines);
+    if (profile.titleOutlineColor !== undefined) updateTitleOutlineColor(profile.titleOutlineColor);
+    if (profile.titleOutlineWidth !== undefined) updateTitleOutlineWidth(profile.titleOutlineWidth);
+
     const DEFAULT_MASCOT_POSES = {
       default: '/mascot/default.png',
       point_left: '/mascot/point_left.png',
@@ -498,7 +507,20 @@ export default function App() {
       logoFileName,
       headerLogoUrl,
       spriteFileName,
-      mascotPoses
+      mascotPoses,
+      subtitleFontSize,
+      titleFontSize,
+      subtitleY,
+      subtitleColor,
+      subtitleOutlineColor,
+      subtitleOutlineWidth,
+      subtitleFontFamily,
+      subtitleHighlightColor,
+      subtitleHighlightStyle,
+      subtitleMaxWidth,
+      subtitleMaxLines,
+      titleOutlineColor,
+      titleOutlineWidth
     };
 
     const updated = [...channelProfiles, newProfile];
@@ -531,7 +553,20 @@ export default function App() {
           logoFileName,
           headerLogoUrl,
           spriteFileName,
-          mascotPoses
+          mascotPoses,
+          subtitleFontSize,
+          titleFontSize,
+          subtitleY,
+          subtitleColor,
+          subtitleOutlineColor,
+          subtitleOutlineWidth,
+          subtitleFontFamily,
+          subtitleHighlightColor,
+          subtitleHighlightStyle,
+          subtitleMaxWidth,
+          subtitleMaxLines,
+          titleOutlineColor,
+          titleOutlineWidth
         };
       }
       return p;
@@ -621,6 +656,74 @@ export default function App() {
     const saved = localStorage.getItem('globalImageZoom');
     return saved !== null ? parseInt(saved, 10) : 100;
   });
+
+  // Persistence State Setters for sliders and font sizes
+  const updateSubtitleFontSize = (val) => {
+    setSubtitleFontSize(val);
+    try { localStorage.setItem('subtitleFontSize', val.toString()); } catch {}
+  };
+  const updateSubtitleY = (val) => {
+    setSubtitleY(val);
+    try { localStorage.setItem('subtitleY', val.toString()); } catch {}
+  };
+  const updateSubtitleColor = (val) => {
+    setSubtitleColor(val);
+    try { localStorage.setItem('subtitleColor', val); } catch {}
+  };
+  const updateSubtitleOutlineColor = (val) => {
+    setSubtitleOutlineColor(val);
+    try { localStorage.setItem('subtitleOutlineColor', val); } catch {}
+  };
+  const updateSubtitleOutlineWidth = (val) => {
+    setSubtitleOutlineWidth(val);
+    try { localStorage.setItem('subtitleOutlineWidth', val.toString()); } catch {}
+  };
+  const updateSubtitleFontFamily = (val) => {
+    setSubtitleFontFamily(val);
+    try { localStorage.setItem('subtitleFontFamily', val); } catch {}
+  };
+  const updateSubtitleHighlightColor = (val) => {
+    setSubtitleHighlightColor(val);
+    try { localStorage.setItem('subtitleHighlightColor', val); } catch {}
+  };
+  const updateSubtitleHighlightStyle = (val) => {
+    setSubtitleHighlightStyle(val);
+    try { localStorage.setItem('subtitleHighlightStyle', val); } catch {}
+  };
+  const updateSubtitleMaxWidth = (val) => {
+    setSubtitleMaxWidth(val);
+    try { localStorage.setItem('subtitleMaxWidth', val.toString()); } catch {}
+  };
+  const updateSubtitleMaxLines = (val) => {
+    setSubtitleMaxLines(val);
+    try { localStorage.setItem('subtitleMaxLines', val.toString()); } catch {}
+  };
+
+  const updateTitleFontSize = (val) => {
+    setTitleFontSize(val);
+    try { localStorage.setItem('titleFontSize', val.toString()); } catch {}
+  };
+  const updateTitleOutlineColor = (val) => {
+    setTitleOutlineColor(val);
+    try { localStorage.setItem('titleOutlineColor', val); } catch {}
+  };
+  const updateTitleOutlineWidth = (val) => {
+    setTitleOutlineWidth(val);
+    try { localStorage.setItem('titleOutlineWidth', val.toString()); } catch {}
+  };
+
+  const updateMascotScale = (val) => {
+    setMascotScale(val);
+    try { localStorage.setItem('mascotScale', val.toString()); } catch {}
+  };
+  const updateMascotY = (val) => {
+    setMascotY(val);
+    try { localStorage.setItem('mascotY', val.toString()); } catch {}
+  };
+  const updateHeaderTitleFontSize = (val) => {
+    setHeaderTitleFontSize(val);
+    try { localStorage.setItem('headerTitleFontSize', val.toString()); } catch {}
+  };
 
   // UI rendering & Export State
   const [isExporting, setIsExporting] = useState(false);
@@ -4943,11 +5046,7 @@ export default function App() {
                       max="50" 
                       step="1" 
                       value={headerTitleFontSize} 
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        setHeaderTitleFontSize(val);
-                        localStorage.setItem('headerTitleFontSize', val.toString());
-                      }} 
+                      onChange={(e) => updateHeaderTitleFontSize(parseInt(e.target.value, 10))} 
                       style={{ cursor: 'pointer', height: '6px' }}
                     />
                     <span style={{ fontSize: '0.65rem', color: '#888', marginTop: '0.2rem', display: 'block' }}>Mặc định 28px. Điều chỉnh phù hợp với độ dài tên kênh của bạn.</span>
@@ -4986,7 +5085,7 @@ export default function App() {
                     max="180" 
                     step="5" 
                     value={mascotScale} 
-                    onChange={(e) => setMascotScale(parseInt(e.target.value))} 
+                    onChange={(e) => updateMascotScale(parseInt(e.target.value, 10))} 
                     style={{ cursor: 'pointer', height: '6px' }}
                   />
                   <span style={{ fontSize: '0.6rem', color: '#777', marginTop: '0.2rem', display: 'block' }}>Mặc định 100%. Điều chỉnh để Mascot cân đối với chiều rộng khung hình.</span>
@@ -5003,11 +5102,7 @@ export default function App() {
                     max="1280" 
                     step="5" 
                     value={mascotY} 
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      setMascotY(val);
-                      localStorage.setItem('mascotY', val.toString());
-                    }} 
+                    onChange={(e) => updateMascotY(parseInt(e.target.value, 10))} 
                     style={{ cursor: 'pointer', height: '6px' }}
                   />
                   <span style={{ fontSize: '0.6rem', color: '#777', marginTop: '0.2rem', display: 'block' }}>Mặc định 1220px. Giảm xuống để đẩy Mascot cao lên, tăng lên để kéo Mascot xuống sát mép đáy.</span>
@@ -5231,7 +5326,7 @@ export default function App() {
                             max="950" 
                             step="5" 
                             value={subtitleY} 
-                            onChange={(e) => setSubtitleY(parseInt(e.target.value))} 
+                            onChange={(e) => updateSubtitleY(parseInt(e.target.value, 10))} 
                             style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                           />
                           <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mặc định 770px. Tăng để dịch chữ xuống thấp tránh đè hình ảnh so sánh.</span>
@@ -5248,7 +5343,7 @@ export default function App() {
                             max="60" 
                             step="1" 
                             value={subtitleFontSize} 
-                            onChange={(e) => setSubtitleFontSize(parseInt(e.target.value))} 
+                            onChange={(e) => updateSubtitleFontSize(parseInt(e.target.value, 10))} 
                             style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                           />
                         </div>
@@ -5265,7 +5360,7 @@ export default function App() {
                             max="12" 
                             step="1" 
                             value={subtitleOutlineWidth} 
-                            onChange={(e) => setSubtitleOutlineWidth(parseInt(e.target.value))} 
+                            onChange={(e) => updateSubtitleOutlineWidth(parseInt(e.target.value, 10))} 
                             style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                           />
                         </div>
@@ -5274,7 +5369,7 @@ export default function App() {
                           <label>Font chữ</label>
                           <select 
                             value={subtitleFontFamily} 
-                            onChange={(e) => setSubtitleFontFamily(e.target.value)}
+                            onChange={(e) => updateSubtitleFontFamily(e.target.value)}
                             style={{ marginTop: '0.25rem' }}
                           >
                             <option value='"Montserrat", Arial, sans-serif'>Montserrat (Modern)</option>
@@ -5289,7 +5384,7 @@ export default function App() {
                           <label>Kiểu hiệu ứng Highlight</label>
                           <select 
                             value={subtitleHighlightStyle} 
-                            onChange={(e) => setSubtitleHighlightStyle(e.target.value)}
+                            onChange={(e) => updateSubtitleHighlightStyle(e.target.value)}
                             style={{ marginTop: '0.25rem' }}
                           >
                             <option value="word-color">Đổi màu chữ từ đang đọc</option>
@@ -5310,7 +5405,7 @@ export default function App() {
                             max="650" 
                             step="10" 
                             value={subtitleMaxWidth} 
-                            onChange={(e) => setSubtitleMaxWidth(parseInt(e.target.value))} 
+                            onChange={(e) => updateSubtitleMaxWidth(parseInt(e.target.value, 10))} 
                             style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                           />
                           <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mức khuyến nghị: 400px - 480px để giữ chữ gọn gàng.</span>
@@ -5320,7 +5415,7 @@ export default function App() {
                           <label>Số dòng tối đa hiển thị cùng lúc</label>
                           <select 
                             value={subtitleMaxLines} 
-                            onChange={(e) => setSubtitleMaxLines(parseInt(e.target.value))}
+                            onChange={(e) => updateSubtitleMaxLines(parseInt(e.target.value, 10))}
                             style={{ marginTop: '0.25rem' }}
                           >
                             <option value="1">1 dòng (Chỉ dòng đang đọc)</option>
@@ -5337,7 +5432,7 @@ export default function App() {
                               <input 
                                 type="color" 
                                 value={subtitleColor} 
-                                onChange={(e) => setSubtitleColor(e.target.value)} 
+                                onChange={(e) => updateSubtitleColor(e.target.value)} 
                                 style={{ width: '100%', height: '24px', cursor: 'pointer', border: 'none', background: 'none', padding: 0 }}
                               />
                             </div>
@@ -5347,7 +5442,7 @@ export default function App() {
                               <input 
                                 type="color" 
                                 value={subtitleOutlineColor} 
-                                onChange={(e) => setSubtitleOutlineColor(e.target.value)} 
+                                onChange={(e) => updateSubtitleOutlineColor(e.target.value)} 
                                 style={{ width: '100%', height: '24px', cursor: 'pointer', border: 'none', background: 'none', padding: 0 }}
                               />
                             </div>
@@ -5357,7 +5452,7 @@ export default function App() {
                               <input 
                                 type="color" 
                                 value={subtitleHighlightColor} 
-                                onChange={(e) => setSubtitleHighlightColor(e.target.value)} 
+                                onChange={(e) => updateSubtitleHighlightColor(e.target.value)} 
                                 style={{ width: '100%', height: '24px', cursor: 'pointer', border: 'none', background: 'none', padding: 0 }}
                               />
                             </div>
@@ -5386,7 +5481,7 @@ export default function App() {
                         max="60" 
                         step="1" 
                         value={titleFontSize} 
-                        onChange={(e) => setTitleFontSize(parseInt(e.target.value))} 
+                        onChange={(e) => updateTitleFontSize(parseInt(e.target.value, 10))} 
                         style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                       />
                       <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mặc định 36px. Áp dụng khi hai bên ở kích thước mặc định.</span>
@@ -5404,7 +5499,7 @@ export default function App() {
                         max="12" 
                         step="1" 
                         value={titleOutlineWidth} 
-                        onChange={(e) => setTitleOutlineWidth(parseInt(e.target.value))} 
+                        onChange={(e) => updateTitleOutlineWidth(parseInt(e.target.value, 10))} 
                         style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                       />
                     </div>
@@ -5417,7 +5512,7 @@ export default function App() {
                           <input 
                             type="color" 
                             value={titleOutlineColor} 
-                            onChange={(e) => setTitleOutlineColor(e.target.value)} 
+                            onChange={(e) => updateTitleOutlineColor(e.target.value)} 
                             style={{ width: '28px', height: '24px', cursor: 'pointer', border: 'none', background: 'none', padding: 0 }}
                           />
                           <input 
