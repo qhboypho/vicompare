@@ -2025,32 +2025,102 @@ export default function App() {
         }
 
         const matchedTimes = [];
-        let lastMatchIdx = -1;
 
-        for (let i = 0; i < neededCount; i++) {
-          const targetTime = propTransitions[i];
-          let closest = null;
-          let closestDist = Infinity;
-          let closestIdx = -1;
+        // 2. Thuật toán Dynamic Programming (Quy hoạch động) tìm chuỗi khoảng nghỉ tối ưu:
+        // Đánh trọng số cao cho các khoảng nghỉ câu dài (kết thúc câu) hơn là các khoảng phẩy/ngắt nghỉ ngắn.
+        if (cleanSilences.length >= neededCount) {
+          const dp = Array.from({ length: neededCount + 1 }, () => Array(cleanSilences.length).fill(Infinity));
+          const parent = Array.from({ length: neededCount + 1 }, () => Array(cleanSilences.length).fill(-1));
 
-          for (let sIdx = lastMatchIdx + 1; sIdx < cleanSilences.length; sIdx++) {
-            const silence = cleanSilences[sIdx];
-            const dist = Math.abs(silence.mid - targetTime);
-            if (dist < closestDist) {
-              closestDist = dist;
-              closest = silence;
-              closestIdx = sIdx;
+          for (let j = 0; j < cleanSilences.length; j++) {
+            dp[0][j] = 0;
+          }
+
+          for (let i = 1; i <= neededCount; i++) {
+            const targetTime = propTransitions[i - 1];
+            for (let j = i - 1; j < cleanSilences.length; j++) {
+              const s = cleanSilences[j];
+              const sDur = s.end - s.start;
+              // Khoảng cách tới mốc thời gian kỳ vọng trừ đi ưu tiên độ dài khoảng nghỉ dài (ngắt câu chính)
+              const dist = Math.abs(s.mid - targetTime);
+              const pauseBonus = Math.min(1.8, sDur * 2.2);
+              const stepCost = dist - pauseBonus;
+
+              let minPrevCost = Infinity;
+              let bestPrevK = -1;
+
+              for (let k = i - 2; k < j; k++) {
+                const prevCost = k >= 0 ? dp[i - 1][k] : 0;
+                if (prevCost < minPrevCost) {
+                  minPrevCost = prevCost;
+                  bestPrevK = k;
+                }
+              }
+
+              dp[i][j] = minPrevCost + stepCost;
+              parent[i][j] = bestPrevK;
             }
           }
 
-          if (closest && closestDist < 5.0) {
-            // Đặt mốc chuyển phụ đề ở mốc tạm dừng (khi vừa đọc xong câu)
-            const transitionTime = closest.start + Math.min(0.08, (closest.end - closest.start) * 0.3);
-            matchedTimes.push(transitionTime);
-            lastMatchIdx = closestIdx;
-          } else {
-            matchedTimes.push(targetTime);
-            lastMatchIdx = lastMatchIdx + 1;
+          let bestLastJ = -1;
+          let minFinalCost = Infinity;
+          for (let j = neededCount - 1; j < cleanSilences.length; j++) {
+            if (dp[neededCount][j] < minFinalCost) {
+              minFinalCost = dp[neededCount][j];
+              bestLastJ = j;
+            }
+          }
+
+          if (bestLastJ !== -1) {
+            const chosenIndices = [];
+            let currI = neededCount;
+            let currJ = bestLastJ;
+            while (currI > 0 && currJ !== -1) {
+              chosenIndices.unshift(currJ);
+              currJ = parent[currI][currJ];
+              currI--;
+            }
+
+            for (let i = 0; i < chosenIndices.length; i++) {
+              const s = cleanSilences[chosenIndices[i]];
+              // Mốc chuyển câu đặt ở khoảnh khắc vừa kết thúc đọc câu cũ + 20% thời gian nghỉ
+              const transitionTime = s.start + Math.min(0.12, (s.end - s.start) * 0.25);
+              matchedTimes.push(transitionTime);
+            }
+          }
+        }
+
+        // Dự phòng nếu số khoảng nghỉ ít hơn hoặc DP bị vướng
+        if (matchedTimes.length < neededCount) {
+          matchedTimes.length = 0;
+          let lastMatchIdx = -1;
+
+          for (let i = 0; i < neededCount; i++) {
+            const targetTime = propTransitions[i];
+            let closest = null;
+            let closestDist = Infinity;
+            let closestIdx = -1;
+
+            for (let sIdx = lastMatchIdx + 1; sIdx < cleanSilences.length; sIdx++) {
+              const silence = cleanSilences[sIdx];
+              const sDur = silence.end - silence.start;
+              // Trừ ưu tiên khoảng nghỉ dài
+              const dist = Math.abs(silence.mid - targetTime) - Math.min(1.2, sDur * 1.5);
+              if (dist < closestDist) {
+                closestDist = dist;
+                closest = silence;
+                closestIdx = sIdx;
+              }
+            }
+
+            if (closest && Math.abs(closest.mid - targetTime) < 5.5) {
+              const transitionTime = closest.start + Math.min(0.12, (closest.end - closest.start) * 0.25);
+              matchedTimes.push(transitionTime);
+              lastMatchIdx = closestIdx;
+            } else {
+              matchedTimes.push(targetTime);
+              lastMatchIdx = lastMatchIdx + 1;
+            }
           }
         }
 
