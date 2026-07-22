@@ -271,6 +271,205 @@ export default function App() {
   const [lucyLabVoices, setLucyLabVoices] = useState([]);
   const [isLoadingLucyLabVoices, setIsLoadingLucyLabVoices] = useState(false);
 
+  // Bộ Quản Lý Mẫu Kênh (Channel Profiles / Presets)
+  const [channelProfiles, setChannelProfiles] = useState(() => {
+    try {
+      const saved = localStorage.getItem('channel_profiles');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to parse channel_profiles:', e);
+    }
+    return [
+      {
+        id: 'cat-thong-thai',
+        name: '🐱 Mèo Thông Thái',
+        headerTitle: 'Mèo Thông Thái',
+        bgColor: '#FAF6F0',
+        headerTitleColor: '#4A3E3D',
+        headerTitleFontSize: 28,
+        headerPosition: 'top-center',
+        mascotScale: 100,
+        mascotY: 1220,
+        mascotChromaKey: 'green',
+        mascotChromaThreshold: 230,
+        mascotWhiteBacking: true,
+        logoFileName: '',
+        headerLogoUrl: '',
+        spriteFileName: ''
+      },
+      {
+        id: 'ngua-biet-tuot',
+        name: '🐴 Ngựa Biết Tuốt',
+        headerTitle: 'Ngựa Biết Tuốt',
+        bgColor: '#0B0F19',
+        headerTitleColor: '#38BDF8',
+        headerTitleFontSize: 28,
+        headerPosition: 'top-center',
+        mascotScale: 105,
+        mascotY: 1220,
+        mascotChromaKey: 'green',
+        mascotChromaThreshold: 230,
+        mascotWhiteBacking: true,
+        logoFileName: '',
+        headerLogoUrl: '',
+        spriteFileName: ''
+      }
+    ];
+  });
+
+  const [activeChannelId, setActiveChannelId] = useState(() => localStorage.getItem('active_channel_id') || 'cat-thong-thai');
+
+  // Swapping / applying a Channel Profile
+  const handleApplyChannelProfile = (profile) => {
+    if (!profile) return;
+    setActiveChannelId(profile.id);
+    localStorage.setItem('active_channel_id', profile.id);
+
+    if (profile.headerTitle !== undefined) {
+      setHeaderTitle(profile.headerTitle);
+      localStorage.setItem('headerTitle', profile.headerTitle);
+    }
+    if (profile.bgColor !== undefined) {
+      setBgColor(profile.bgColor);
+      localStorage.setItem('bgColor', profile.bgColor);
+    }
+    if (profile.headerTitleColor !== undefined) {
+      setHeaderTitleColor(profile.headerTitleColor);
+      localStorage.setItem('headerTitleColor', profile.headerTitleColor);
+    }
+    if (profile.headerTitleFontSize !== undefined) {
+      setHeaderTitleFontSize(profile.headerTitleFontSize);
+      localStorage.setItem('headerTitleFontSize', profile.headerTitleFontSize.toString());
+    }
+    if (profile.headerPosition !== undefined) {
+      setHeaderPosition(profile.headerPosition);
+      localStorage.setItem('headerPosition', profile.headerPosition);
+    }
+    if (profile.mascotScale !== undefined) {
+      setMascotScale(profile.mascotScale);
+      localStorage.setItem('mascotScale', profile.mascotScale.toString());
+    }
+    if (profile.mascotY !== undefined) {
+      setMascotY(profile.mascotY);
+      localStorage.setItem('mascotY', profile.mascotY.toString());
+    }
+    if (profile.mascotChromaKey !== undefined) {
+      setMascotChromaKey(profile.mascotChromaKey);
+      localStorage.setItem('mascotChromaKey', profile.mascotChromaKey);
+    }
+    if (profile.mascotChromaThreshold !== undefined) {
+      setMascotChromaThreshold(profile.mascotChromaThreshold);
+      localStorage.setItem('mascotChromaThreshold', profile.mascotChromaThreshold.toString());
+    }
+    if (profile.mascotWhiteBacking !== undefined) {
+      setMascotWhiteBacking(profile.mascotWhiteBacking);
+      localStorage.setItem('mascotWhiteBacking', profile.mascotWhiteBacking.toString());
+    }
+    if (profile.headerLogoUrl !== undefined) {
+      setHeaderLogoUrl(profile.headerLogoUrl);
+      localStorage.setItem('headerLogoUrl', profile.headerLogoUrl);
+    }
+    if (profile.logoFileName !== undefined) {
+      setLogoFileName(profile.logoFileName);
+      localStorage.setItem('logoFileName', profile.logoFileName);
+    }
+    if (profile.spriteFileName !== undefined) {
+      setSpriteFileName(profile.spriteFileName);
+    }
+    if (profile.mascotPoses) {
+      setMascotPoses(profile.mascotPoses);
+      localStorage.setItem('mascotPoses', JSON.stringify(profile.mascotPoses));
+      Object.entries(profile.mascotPoses).forEach(([k, v]) => {
+        if (v) cacheImage(k, v);
+      });
+    }
+  };
+
+  // Save current setup as a new channel profile
+  const handleSaveNewChannelProfile = () => {
+    const defaultName = `Kênh Mới ${channelProfiles.length + 1}`;
+    const name = window.prompt('Nhập tên Mẫu Kênh mới (ví dụ: 🐯 Hổ Siberia, 🐶 Chó Thông Minh):', defaultName);
+    if (!name || !name.trim()) return;
+
+    const newId = `channel-${Date.now()}`;
+    const newProfile = {
+      id: newId,
+      name: name.trim(),
+      headerTitle,
+      bgColor,
+      headerTitleColor,
+      headerTitleFontSize,
+      headerPosition,
+      mascotScale,
+      mascotY,
+      mascotChromaKey,
+      mascotChromaThreshold,
+      mascotWhiteBacking,
+      logoFileName,
+      headerLogoUrl,
+      spriteFileName,
+      mascotPoses
+    };
+
+    const updated = [...channelProfiles, newProfile];
+    setChannelProfiles(updated);
+    localStorage.setItem('channel_profiles', JSON.stringify(updated));
+    setActiveChannelId(newId);
+    localStorage.setItem('active_channel_id', newId);
+    alert(`Đã lưu Mẫu Kênh "${name.trim()}" thành công!`);
+  };
+
+  // Update current active channel profile
+  const handleUpdateCurrentChannelProfile = () => {
+    const current = channelProfiles.find(p => p.id === activeChannelId);
+    const profileName = current ? current.name : 'Mẫu Kênh';
+
+    const updated = channelProfiles.map(p => {
+      if (p.id === activeChannelId) {
+        return {
+          ...p,
+          headerTitle,
+          bgColor,
+          headerTitleColor,
+          headerTitleFontSize,
+          headerPosition,
+          mascotScale,
+          mascotY,
+          mascotChromaKey,
+          mascotChromaThreshold,
+          mascotWhiteBacking,
+          logoFileName,
+          headerLogoUrl,
+          spriteFileName,
+          mascotPoses
+        };
+      }
+      return p;
+    });
+
+    setChannelProfiles(updated);
+    localStorage.setItem('channel_profiles', JSON.stringify(updated));
+    alert(`Đã cập nhật thay đổi cho Mẫu Kênh "${profileName}"!`);
+  };
+
+  // Delete custom channel profile
+  const handleDeleteChannelProfile = (id) => {
+    if (channelProfiles.length <= 1) {
+      alert('Không thể xóa mẫu kênh duy nhất còn lại.');
+      return;
+    }
+    const target = channelProfiles.find(p => p.id === id);
+    if (!window.confirm(`Bạn có chắc muốn xóa Mẫu Kênh "${target?.name}" không?`)) return;
+
+    const updated = channelProfiles.filter(p => p.id !== id);
+    setChannelProfiles(updated);
+    localStorage.setItem('channel_profiles', JSON.stringify(updated));
+
+    if (activeChannelId === id) {
+      handleApplyChannelProfile(updated[0]);
+    }
+  };
+
   // Cấu hình phát hiện khoảng lặng (Silence Detector)
   const [silenceThreshold, setSilenceThreshold] = useState(0.012);
   const [minSilenceDuration, setMinSilenceDuration] = useState(0.15); // Nhạy hơn với các giọng đọc nhanh
@@ -4300,6 +4499,79 @@ export default function App() {
           {/* TAB 4: SETTINGS & SUBTITLES */}
           {activeTab === 'settings' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {/* Channel Presets Manager */}
+              <div className="glass-card" style={{ borderLeft: '4px solid var(--accent-indigo)', background: 'linear-gradient(135deg, rgba(30,27,75,0.4) 0%, rgba(15,23,42,0.6) 100%)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <h2 className="card-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-indigo)' }}>
+                    <Sparkles size={18} /> Bộ Quản Lý Mẫu Kênh (Channel Presets)
+                  </h2>
+                  <button 
+                    type="button" 
+                    className="btn btn-primary btn-sm"
+                    onClick={handleSaveNewChannelProfile}
+                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                  >
+                    ➕ Tạo Kênh Mới
+                  </button>
+                </div>
+                <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.75rem', lineHeight: '1.4' }}>
+                  Chuyển đổi 1-Click toàn bộ <strong>Tiêu đề, Avatar, Mascot & Theme màu sắc</strong> giữa các kênh khác nhau (ví dụ: Mèo Thông Thái, Ngựa Biết Tuốt, Hổ Siberia,...). Tái sử dụng 100% codebase chung cho mọi kênh của bạn!
+                </p>
+
+                {/* Preset List Chips */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  {channelProfiles.map(p => {
+                    const isActive = p.id === activeChannelId;
+                    return (
+                      <div 
+                        key={p.id}
+                        onClick={() => handleApplyChannelProfile(p)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          padding: '0.5rem 0.85rem',
+                          borderRadius: '8px',
+                          border: isActive ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          background: isActive ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.04)',
+                          color: isActive ? '#FFFFFF' : '#CBD5E1',
+                          cursor: 'pointer',
+                          fontWeight: isActive ? 'bold' : 'normal',
+                          fontSize: '0.8rem',
+                          transition: 'all 0.15s ease',
+                          boxShadow: isActive ? '0 0 12px rgba(99, 102, 241, 0.35)' : 'none'
+                        }}
+                      >
+                        <span>{p.name}</span>
+                        {isActive && <span style={{ fontSize: '0.65rem', background: 'var(--accent-indigo)', color: '#fff', padding: '0.1rem 0.35rem', borderRadius: '4px', marginLeft: '0.2rem' }}>Đang dùng</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Channel Actions Footer */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.5rem', borderTop: '1px dashed rgba(255,255,255,0.1)', fontSize: '0.75rem' }}>
+                  <button 
+                    type="button" 
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleUpdateCurrentChannelProfile}
+                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
+                  >
+                    💾 Lưu thay đổi thiết lập vào Kênh hiện tại
+                  </button>
+
+                  {channelProfiles.length > 1 && (
+                    <button 
+                      type="button" 
+                      onClick={() => handleDeleteChannelProfile(activeChannelId)}
+                      style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.75rem', textDecoration: 'underline' }}
+                    >
+                      Xóa mẫu kênh này
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {/* General header config */}
               <div className="glass-card">
                 <h2 className="card-title">Cấu hình chung Video</h2>
