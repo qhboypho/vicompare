@@ -158,6 +158,11 @@ export default function App() {
   const [logoFileName, setLogoFileName] = useState(() => localStorage.getItem('logoFileName') || '');
   const [bgColor, setBgColor] = useState(() => localStorage.getItem('bgColor') || '#FAF6F0');
   const [headerPosition, setHeaderPosition] = useState(() => localStorage.getItem('headerPosition') || 'top-center');
+  const [headerTitleColor, setHeaderTitleColor] = useState(() => localStorage.getItem('headerTitleColor') || '#4A3E3D');
+  const [headerTitleFontSize, setHeaderTitleFontSize] = useState(() => {
+    const saved = localStorage.getItem('headerTitleFontSize');
+    return saved !== null ? parseInt(saved, 10) : 28;
+  });
 
   // Comparisons and Timeline States
   const [comparisons, setComparisons] = useState(() => {
@@ -1256,44 +1261,52 @@ export default function App() {
       setSubtitleOutlineColor('#000000');
       setSubtitleHighlightColor('#FFFF00');
       setTitleOutlineColor('#000000');
+      setHeaderTitleColor('#4A3E3D');
       localStorage.setItem('bgColor', '#FAF6F0');
       localStorage.setItem('subtitleColor', '#FFFFFF');
       localStorage.setItem('subtitleOutlineColor', '#000000');
       localStorage.setItem('subtitleHighlightColor', '#FFFF00');
       localStorage.setItem('titleOutlineColor', '#000000');
+      localStorage.setItem('headerTitleColor', '#4A3E3D');
     } else if (presetKey === 'dark-contrast') {
       setBgColor('#0B0F19');
       setSubtitleColor('#FFFFFF');
       setSubtitleOutlineColor('#000000');
       setSubtitleHighlightColor('#38BDF8');
       setTitleOutlineColor('#000000');
+      setHeaderTitleColor('#FFFFFF');
       localStorage.setItem('bgColor', '#0B0F19');
       localStorage.setItem('subtitleColor', '#FFFFFF');
       localStorage.setItem('subtitleOutlineColor', '#000000');
       localStorage.setItem('subtitleHighlightColor', '#38BDF8');
       localStorage.setItem('titleOutlineColor', '#000000');
+      localStorage.setItem('headerTitleColor', '#FFFFFF');
     } else if (presetKey === 'dark-neon') {
       setBgColor('#070614');
       setSubtitleColor('#FFFFFF');
       setSubtitleOutlineColor('#000000');
       setSubtitleHighlightColor('#00FFCC');
       setTitleOutlineColor('#000000');
+      setHeaderTitleColor('#00FFCC');
       localStorage.setItem('bgColor', '#070614');
       localStorage.setItem('subtitleColor', '#FFFFFF');
       localStorage.setItem('subtitleOutlineColor', '#000000');
       localStorage.setItem('subtitleHighlightColor', '#00FFCC');
       localStorage.setItem('titleOutlineColor', '#000000');
+      localStorage.setItem('headerTitleColor', '#00FFCC');
     } else if (presetKey === 'dark-gold') {
       setBgColor('#121212');
       setSubtitleColor('#FFFFFF');
       setSubtitleOutlineColor('#000000');
       setSubtitleHighlightColor('#FBBF24');
       setTitleOutlineColor('#000000');
+      setHeaderTitleColor('#FBBF24');
       localStorage.setItem('bgColor', '#121212');
       localStorage.setItem('subtitleColor', '#FFFFFF');
       localStorage.setItem('subtitleOutlineColor', '#000000');
       localStorage.setItem('subtitleHighlightColor', '#FBBF24');
       localStorage.setItem('titleOutlineColor', '#000000');
+      localStorage.setItem('headerTitleColor', '#FBBF24');
     } else if (presetKey === 'dark-gradient') {
       const gradStr = 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)';
       setBgColor(gradStr);
@@ -1301,11 +1314,13 @@ export default function App() {
       setSubtitleOutlineColor('#000000');
       setSubtitleHighlightColor('#F43F5E');
       setTitleOutlineColor('#000000');
+      setHeaderTitleColor('#FFFFFF');
       localStorage.setItem('bgColor', gradStr);
       localStorage.setItem('subtitleColor', '#FFFFFF');
       localStorage.setItem('subtitleOutlineColor', '#000000');
       localStorage.setItem('subtitleHighlightColor', '#F43F5E');
       localStorage.setItem('titleOutlineColor', '#000000');
+      localStorage.setItem('headerTitleColor', '#FFFFFF');
     }
   };
 
@@ -1808,6 +1823,8 @@ export default function App() {
       subtitleMaxWidth,
       subtitleMaxLines,
       headerPosition,
+      headerTitleColor,
+      headerTitleFontSize,
       mascotScale,
       mascotChromaKey,
       mascotChromaThreshold,
@@ -1830,6 +1847,8 @@ export default function App() {
     timelineBlocks, 
     comparisons, 
     headerTitle, 
+    headerTitleColor,
+    headerTitleFontSize,
     headerLogoUrl, 
     bgColor,
     showSubtitles,
@@ -2560,6 +2579,8 @@ export default function App() {
       if (config.logoFileName !== undefined) setLogoFileName(config.logoFileName);
       if (config.bgColor !== undefined) setBgColor(config.bgColor);
       if (config.headerPosition !== undefined) setHeaderPosition(config.headerPosition);
+      if (config.headerTitleColor !== undefined) setHeaderTitleColor(config.headerTitleColor);
+      if (config.headerTitleFontSize !== undefined) setHeaderTitleFontSize(config.headerTitleFontSize);
       if (config.comparisons !== undefined) setComparisons(config.comparisons);
       if (config.timelineBlocks !== undefined) {
         setTimelineBlocks(config.timelineBlocks);
@@ -2724,6 +2745,8 @@ export default function App() {
           subtitleMaxWidth,
           subtitleMaxLines,
           headerPosition,
+          headerTitleColor,
+          headerTitleFontSize,
           mascotScale,
           mascotChromaKey,
           mascotChromaThreshold,
@@ -2905,6 +2928,8 @@ export default function App() {
         logoFileName,
         bgColor,
         headerPosition,
+        headerTitleColor,
+        headerTitleFontSize,
         comparisons,
         timelineBlocks,
         scriptText,
@@ -4313,6 +4338,51 @@ export default function App() {
                       <option value="bottom-right">Góc dưới bên phải</option>
                       <option value="hide">Ẩn tiêu đề & logo</option>
                     </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Màu chữ Tiêu đề Kênh</label>
+                    <div style={{ display: 'flex', gap: '0.25rem' }}>
+                      <input 
+                        type="text" 
+                        value={headerTitleColor} 
+                        onChange={(e) => {
+                          setHeaderTitleColor(e.target.value);
+                          localStorage.setItem('headerTitleColor', e.target.value);
+                        }} 
+                        style={{ flex: 1 }}
+                      />
+                      <input 
+                        type="color" 
+                        value={headerTitleColor.startsWith('#') ? headerTitleColor : '#FFFFFF'} 
+                        onChange={(e) => {
+                          setHeaderTitleColor(e.target.value);
+                          localStorage.setItem('headerTitleColor', e.target.value);
+                        }} 
+                        style={{ width: '32px', height: '32px', padding: 0, cursor: 'pointer' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Cỡ chữ Tiêu đề Kênh (Font size)</span>
+                      <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{headerTitleFontSize}px</span>
+                    </label>
+                    <input 
+                      type="range" 
+                      min="14" 
+                      max="50" 
+                      step="1" 
+                      value={headerTitleFontSize} 
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setHeaderTitleFontSize(val);
+                        localStorage.setItem('headerTitleFontSize', val.toString());
+                      }} 
+                      style={{ cursor: 'pointer', height: '6px' }}
+                    />
+                    <span style={{ fontSize: '0.65rem', color: '#888', marginTop: '0.2rem', display: 'block' }}>Mặc định 28px. Điều chỉnh phù hợp với độ dài tên kênh của bạn.</span>
                   </div>
                 </div>
               </div>

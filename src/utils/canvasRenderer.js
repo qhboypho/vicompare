@@ -762,8 +762,9 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
       // Draw Text
       if (title) {
-        ctx.font = 'bold 28px "Montserrat", Arial, sans-serif';
-        ctx.fillStyle = '#4A3E3D';
+        const titleFontSize = state.headerTitleFontSize || 28;
+        ctx.font = 'bold ' + titleFontSize + 'px "Montserrat", Arial, sans-serif';
+        ctx.fillStyle = state.headerTitleColor || '#4A3E3D';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(title, w / 2, headerY + logoSize + 25);
@@ -814,8 +815,9 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
       // Draw Text
       if (title) {
-        ctx.font = 'bold 22px "Montserrat", Arial, sans-serif';
-        ctx.fillStyle = '#4A3E3D';
+        const titleFontSize = state.headerTitleFontSize ? Math.round(state.headerTitleFontSize * 0.8) : 22;
+        ctx.font = 'bold ' + titleFontSize + 'px "Montserrat", Arial, sans-serif';
+        ctx.fillStyle = state.headerTitleColor || '#4A3E3D';
         ctx.textAlign = textAlign;
         ctx.textBaseline = 'middle';
         ctx.fillText(title, textX, textY);
