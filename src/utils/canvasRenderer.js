@@ -55,7 +55,7 @@ function capitalizeFirstLetter(str) {
  * Automatically processes mascot image to remove white/off-white or green background
  * Caches the transparent canvas on img._transparentCanvas to avoid re-processing every frame
  */
-export function getTransparentMascotCanvas(img, mode = 'auto', threshold = 230) {
+export function getTransparentMascotCanvas(img, mode = 'green', threshold = 230) {
   if (!img || !img.width || !img.height) return img;
   if (mode === 'none') return img;
 
@@ -75,6 +75,47 @@ export function getTransparentMascotCanvas(img, mode = 'auto', threshold = 230) 
     const data = imgData.data;
     const len = data.length;
 
+    // Detect if image background is Green Screen by sampling 4 corner pixels
+    const w = canvas.width;
+    const h = canvas.height;
+    const cornerIndices = [
+      0, // top-left
+      (w - 1) * 4, // top-right
+      (h - 1) * w * 4, // bottom-left
+      (h - 1) * w * 4 + (w - 1) * 4 // bottom-right
+    ];
+
+    let greenCornerCount = 0;
+    let whiteCornerCount = 0;
+
+    for (const idx of cornerIndices) {
+      if (idx >= 0 && idx < len) {
+        const cr = data[idx];
+        const cg = data[idx + 1];
+        const cb = data[idx + 2];
+        const ca = data[idx + 3];
+        if (ca > 10) {
+          if (cg > 80 && cg > cr * 1.25 && cg > cb * 1.25) {
+            greenCornerCount++;
+          } else if (cr >= 210 && cg >= 210 && cb >= 210) {
+            whiteCornerCount++;
+          }
+        }
+      }
+    }
+
+    // Determine actual effective mode
+    let effectiveMode = mode;
+    if (mode === 'auto') {
+      if (greenCornerCount > 0) {
+        effectiveMode = 'green';
+      } else if (whiteCornerCount > 0) {
+        effectiveMode = 'white';
+      } else {
+        effectiveMode = 'green';
+      }
+    }
+
     for (let i = 0; i < len; i += 4) {
       const r = data[i];
       const g = data[i + 1];
@@ -85,26 +126,23 @@ export function getTransparentMascotCanvas(img, mode = 'auto', threshold = 230) 
 
       let isBackground = false;
 
-      // 1. Remove White / Off-White / Light Neutral Gray background
-      if (mode === 'auto' || mode === 'white' || mode === 'both') {
-        if (r >= threshold && g >= threshold && b >= threshold) {
-          isBackground = true;
-        } else if (r > 195 && g > 195 && b > 195 && Math.abs(r - g) < 22 && Math.abs(g - b) < 22 && Math.abs(r - b) < 22) {
+      if (effectiveMode === 'green') {
+        // GREEN SCREEN CHROMA KEY ONLY: Green channel MUST be dominant over Red and Blue!
+        // Pure White or Off-White (r, g, b high & balanced) will NOT be removed!
+        if ((g > 80 && g > r * 1.25 && g > b * 1.25) || (g > 140 && r < 115 && b < 115)) {
           isBackground = true;
         }
-      }
-
-      // 2. Remove Green Screen (Chroma Key Green #00FF00 / #00E600)
-      if (mode === 'auto' || mode === 'green' || mode === 'both') {
-        if (g > 100 && g > r * 1.25 && g > b * 1.25) {
+      } else if (effectiveMode === 'white') {
+        // WHITE REMOVAL ONLY
+        if (r >= threshold && g >= threshold && b >= threshold) {
           isBackground = true;
-        } else if (g > 150 && r < 120 && b < 120) {
+        } else if (r > 195 && g > 195 && b > 195 && Math.abs(r - g) < 20 && Math.abs(g - b) < 20 && Math.abs(r - b) < 20) {
           isBackground = true;
         }
       }
 
       if (isBackground) {
-        data[i + 3] = 0;
+        data[i + 3] = 0; // Transparent
       }
     }
 

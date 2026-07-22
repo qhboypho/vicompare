@@ -202,7 +202,7 @@ export default function App() {
     const saved = localStorage.getItem('mascotScale');
     return saved !== null ? parseInt(saved, 10) : 100;
   });
-  const [mascotChromaKey, setMascotChromaKey] = useState(() => localStorage.getItem('mascotChromaKey') || 'auto');
+  const [mascotChromaKey, setMascotChromaKey] = useState(() => localStorage.getItem('mascotChromaKey') || 'green');
   const [mascotChromaThreshold, setMascotChromaThreshold] = useState(() => {
     const saved = localStorage.getItem('mascotChromaThreshold');
     return saved !== null ? parseInt(saved, 10) : 230;
@@ -4359,9 +4359,9 @@ export default function App() {
                     }}
                     style={{ padding: '0.5rem', fontSize: '0.8rem', marginBottom: '0.5rem' }}
                   >
-                    <option value="auto">✨ Tự động tách phông TRẮNG & XANH LÁ (Khuyên dùng)</option>
+                    <option value="green">🟢 Chỉ tách phông XANH LÁ (Green Screen - Giữ nguyên áo trắng & chi tiết)</option>
+                    <option value="auto">✨ Tự động nhận diện phông nền (Green / White)</option>
                     <option value="white">⚪ Chỉ tách phông TRẮNG / Trắng Kem (White Removal)</option>
-                    <option value="green">🟢 Chỉ tách phông XANH LÁ (Green Screen Chroma Key)</option>
                     <option value="none">🚫 Tắt tách nền (Dùng phông PNG trong suốt gốc)</option>
                   </select>
 
