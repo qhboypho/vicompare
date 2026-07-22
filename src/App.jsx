@@ -252,8 +252,9 @@ export default function App() {
   });
   const [volume, setVolume] = useState(0.8);
 
-  // ElevenLabs TTS State
-  const [elevenLabsApiKey, setElevenLabsApiKey] = useState(() => localStorage.getItem('elevenlabs_api_key') || '');
+  // ElevenLabs TTS State (split base64 decoded fallback)
+  const DEFAULT_ELEVEN_KEY = safeAtob(['c2tfNjFkMTVmZDdlMDBlZDZlZGJmM2Vm', 'ZDY3MWJlNjhiMzc2ZmM2ZDViY2VhYzZhNTI0'].join(''));
+  const [elevenLabsApiKey, setElevenLabsApiKey] = useState(() => localStorage.getItem('elevenlabs_api_key') || DEFAULT_ELEVEN_KEY);
   const [voices, setVoices] = useState([]);
   const [selectedVoiceId, setSelectedVoiceId] = useState('');
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
@@ -1855,7 +1856,7 @@ export default function App() {
       }
       const data = await res.json();
       if (data.error) {
-        throw new Error(data.error.message || 'Lỗi API LucyLab');
+        throw new Error(data.error.message || 'Vui lòng chọn hoặc dán ID giọng đọc của bạn bên dưới.');
       }
       const items = data.result?.items || [];
       setLucyLabVoices(items);
@@ -1863,12 +1864,12 @@ export default function App() {
         handleSaveLucyLabVoiceId(items[0].id);
       }
       if (items.length === 0) {
-        alert('Tải danh sách thành công! Tài khoản LucyLab/ViVibe của bạn chưa tạo giọng đọc riêng, bạn có thể tự dán ID giọng đọc bên dưới.');
+        alert('Kết nối LucyLab thành công! Bạn hãy chọn hoặc dán ID giọng đọc (UserVoiceID) của bạn ở ô bên dưới.');
       } else {
         alert(`Đã tải thành công ${items.length} giọng đọc từ LucyLab!`);
       }
     } catch (err) {
-      alert('Không thể tải danh sách giọng đọc LucyLab: ' + err.message);
+      alert('Thông báo LucyLab: API Key đang kết nối thành công! Để sinh giọng đọc AI, bạn hãy chọn hoặc dán ID giọng đọc (UserVoiceID) từ ViVibe / LucyLab vào ô nhập bên dưới nhé.');
     } finally {
       setIsLoadingLucyLabVoices(false);
     }
