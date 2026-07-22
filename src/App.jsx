@@ -207,6 +207,10 @@ export default function App() {
     const saved = localStorage.getItem('mascotScale');
     return saved !== null ? parseInt(saved, 10) : 100;
   });
+  const [mascotY, setMascotY] = useState(() => {
+    const saved = localStorage.getItem('mascotY');
+    return saved !== null ? parseInt(saved, 10) : 1220;
+  });
   const [mascotChromaKey, setMascotChromaKey] = useState(() => localStorage.getItem('mascotChromaKey') || 'green');
   const [mascotChromaThreshold, setMascotChromaThreshold] = useState(() => {
     const saved = localStorage.getItem('mascotChromaThreshold');
@@ -1826,6 +1830,7 @@ export default function App() {
       headerTitleColor,
       headerTitleFontSize,
       mascotScale,
+      mascotY,
       mascotChromaKey,
       mascotChromaThreshold,
       mascotWhiteBacking,
@@ -1864,6 +1869,7 @@ export default function App() {
     subtitleMaxLines,
     headerPosition,
     mascotScale,
+    mascotY,
     mascotChromaKey,
     mascotChromaThreshold,
     mascotWhiteBacking,
@@ -2589,6 +2595,7 @@ export default function App() {
       }
       if (config.scriptText !== undefined) setScriptText(config.scriptText);
       if (config.mascotScale !== undefined) setMascotScale(config.mascotScale);
+      if (config.mascotY !== undefined) setMascotY(config.mascotY);
       if (config.mascotChromaKey !== undefined) setMascotChromaKey(config.mascotChromaKey);
       if (config.mascotChromaThreshold !== undefined) setMascotChromaThreshold(config.mascotChromaThreshold);
       if (config.ttsProvider !== undefined) setTtsProvider(config.ttsProvider);
@@ -2748,6 +2755,7 @@ export default function App() {
           headerTitleColor,
           headerTitleFontSize,
           mascotScale,
+          mascotY,
           mascotChromaKey,
           mascotChromaThreshold,
           mascotWhiteBacking,
@@ -2934,6 +2942,7 @@ export default function App() {
         timelineBlocks,
         scriptText,
         mascotScale,
+        mascotY,
         mascotChromaKey,
         mascotChromaThreshold,
         duration,
@@ -4422,6 +4431,27 @@ export default function App() {
                     style={{ cursor: 'pointer', height: '6px' }}
                   />
                   <span style={{ fontSize: '0.6rem', color: '#777', marginTop: '0.2rem', display: 'block' }}>Mặc định 100%. Điều chỉnh để Mascot cân đối với chiều rộng khung hình.</span>
+                </div>
+
+                <div className="form-group" style={{ marginTop: '0.75rem' }}>
+                  <label style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                    <span>Vị trí đứng lên / xuống của Mascot (Y-Position)</span>
+                    <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{mascotY}px</span>
+                  </label>
+                  <input 
+                    type="range" 
+                    min="800" 
+                    max="1280" 
+                    step="5" 
+                    value={mascotY} 
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      setMascotY(val);
+                      localStorage.setItem('mascotY', val.toString());
+                    }} 
+                    style={{ cursor: 'pointer', height: '6px' }}
+                  />
+                  <span style={{ fontSize: '0.6rem', color: '#777', marginTop: '0.2rem', display: 'block' }}>Mặc định 1220px. Giảm xuống để đẩy Mascot cao lên, tăng lên để kéo Mascot xuống sát mép đáy.</span>
                 </div>
 
                 {/* Tùy chỉnh Tách nền Mascot (Chroma Key & White Removal) */}

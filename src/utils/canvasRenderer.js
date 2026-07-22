@@ -538,8 +538,8 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     }
 
     const mascotX = w / 2;
-    // Set bottom coordinate fixed at y = 1220
-    const mascotBottomY = 1220; 
+    // Bottom Y position of mascot (configurable via state.mascotY, default 1220)
+    const mascotBottomY = state.mascotY !== undefined ? state.mascotY : 1220; 
     
     ctx.translate(mascotX, mascotBottomY);
 
