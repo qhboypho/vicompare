@@ -152,7 +152,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('content');
 
   // General Setup
-  const [headerTitle, setHeaderTitle] = useState(() => localStorage.getItem('headerTitle') || 'Ông Nam Hưu Học');
+  const [headerTitle, setHeaderTitle] = useState(() => localStorage.getItem('headerTitle') || 'Mèo Thông Thái');
   const [customFilename, setCustomFilename] = useState(() => localStorage.getItem('customFilename') || 'so_sanh_meo_thong_thai');
   const [headerLogoUrl, setHeaderLogoUrl] = useState(() => localStorage.getItem('headerLogoUrl') || '');
   const [logoFileName, setLogoFileName] = useState(() => localStorage.getItem('logoFileName') || '');
@@ -295,7 +295,13 @@ export default function App() {
         mascotWhiteBacking: true,
         logoFileName: '',
         headerLogoUrl: '',
-        spriteFileName: ''
+        spriteFileName: '',
+        mascotPoses: {
+          default: '/mascot/default.png',
+          point_left: '/mascot/point_left.png',
+          point_right: '/mascot/point_right.png',
+          shrug: '/mascot/shrug.png'
+        }
       },
       {
         id: 'ngua-biet-tuot',
@@ -312,7 +318,13 @@ export default function App() {
         mascotWhiteBacking: true,
         logoFileName: '',
         headerLogoUrl: '',
-        spriteFileName: ''
+        spriteFileName: '',
+        mascotPoses: {
+          default: '/mascot/default.png',
+          point_left: '/mascot/point_left.png',
+          point_right: '/mascot/point_right.png',
+          shrug: '/mascot/shrug.png'
+        }
       }
     ];
   });
