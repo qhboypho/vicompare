@@ -242,6 +242,13 @@ export default function App() {
   const [vclipVoiceId, setVclipVoiceId] = useState(() => localStorage.getItem('vclip_voice_id') || '');
   const [vclipSpeed, setVclipSpeed] = useState(1.0);
 
+  // Trạng thái LucyLab (LucyAI / ViVibe)
+  const [lucyLabApiKey, setLucyLabApiKey] = useState(() => localStorage.getItem('lucylab_api_key') || '');
+  const [lucyLabVoiceId, setLucyLabVoiceId] = useState(() => localStorage.getItem('lucylab_voice_id') || '');
+  const [lucyLabSpeed, setLucyLabSpeed] = useState(1.0);
+  const [lucyLabVoices, setLucyLabVoices] = useState([]);
+  const [isLoadingLucyLabVoices, setIsLoadingLucyLabVoices] = useState(false);
+
   // Cấu hình phát hiện khoảng lặng (Silence Detector)
   const [silenceThreshold, setSilenceThreshold] = useState(0.012);
   const [minSilenceDuration, setMinSilenceDuration] = useState(0.15); // Nhạy hơn với các giọng đọc nhanh
@@ -1241,6 +1248,195 @@ export default function App() {
   const handleSaveVclipVoiceId = (id) => {
     setVclipVoiceId(id);
     localStorage.setItem('vclip_voice_id', id);
+  };
+
+  // Lưu API Key LucyLab
+  const handleSaveLucyLabApiKey = (key) => {
+    setLucyLabApiKey(key);
+    localStorage.setItem('lucylab_api_key', key);
+  };
+
+  // Lưu Voice ID LucyLab
+  const handleSaveLucyLabVoiceId = (id) => {
+    setLucyLabVoiceId(id);
+    localStorage.setItem('lucylab_voice_id', id);
+  };
+
+  // Tải danh sách giọng đọc từ LucyLab
+  const fetchLucyLabVoices = async (keyToUse) => {
+    const key = keyToUse || lucyLabApiKey;
+    if (!key) {
+      alert('Vui lòng nhập API Key LucyLab.');
+      return;
+    }
+    setIsLoadingLucyLabVoices(true);
+    try {
+      const res = await fetch('https://api.lucylab.io/json-rpc', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          method: 'getUserVoices',
+          input: {
+            limit: 50,
+            page: 1
+          }
+        })
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP Error ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.error) {
+        throw new Error(data.error.message || 'Lỗi API LucyLab');
+      }
+      const items = data.result?.items || [];
+      setLucyLabVoices(items);
+      if (items.length > 0 && !lucyLabVoiceId) {
+        handleSaveLucyLabVoiceId(items[0].id);
+      }
+      if (items.length === 0) {
+        alert('Tải danh sách thành công! Tài khoản LucyLab/ViVibe của bạn chưa tạo giọng đọc riêng, bạn có thể tự dán ID giọng đọc bên dưới.');
+      } else {
+        alert(`Đã tải thành công ${items.length} giọng đọc từ LucyLab!`);
+      }
+    } catch (err) {
+      alert('Không thể tải danh sách giọng đọc LucyLab: ' + err.message);
+    } finally {
+      setIsLoadingLucyLabVoices(false);
+    }
+  };
+
+  // Gửi tạo giọng nói qua API LucyLab và chờ phản hồi hoàn tất (Polling)
+  const handleGenerateVoiceLucyLab = async () => {
+    if (!lucyLabApiKey) {
+      alert('Vui lòng nhập API Key LucyLab.');
+      return;
+    }
+    if (!lucyLabVoiceId) {
+      alert('Vui lòng chọn hoặc nhập ID Giọng nói LucyLab (userVoiceId).');
+      return;
+    }
+
+    setIsGeneratingVoice(true);
+    try {
+      const combinedText = timelineBlocks.map(b => b.text).join('\n\n');
+
+      // 1. Gọi API ttsLongText LucyLab
+      const response = await fetch('https://api.lucylab.io/json-rpc', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${lucyLabApiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          method: 'ttsLongText',
+          input: {
+            text: combinedText,
+            userVoiceId: lucyLabVoiceId,
+            speed: parseFloat(lucyLabSpeed || '1.0')
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(errText || 'Lỗi kết nối đến API LucyLab.');
+      }
+
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(data.error.message || 'Lỗi API LucyLab.');
+      }
+
+      const projectExportId = data.result?.projectExportId;
+      if (!projectExportId) {
+        throw new Error('Không nhận được ID yêu cầu xuất Audio (projectExportId) từ LucyLab.');
+      }
+
+      // 2. Vòng lặp kiểm tra trạng thái getExportStatus (Polling)
+      let audioUrlResult = null;
+      let attempts = 0;
+      const maxAttempts = 30; // 30 lần * 2 giây = 60 giây tối đa
+
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        attempts++;
+
+        const statusRes = await fetch('https://api.lucylab.io/json-rpc', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${lucyLabApiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            method: 'getExportStatus',
+            input: {
+              projectExportId: projectExportId
+            }
+          })
+        });
+
+        if (!statusRes.ok) continue;
+
+        const statusData = await statusRes.json();
+        if (statusData.error) {
+          throw new Error(statusData.error.message || 'Lỗi kiểm tra tiến trình LucyLab.');
+        }
+
+        const result = statusData.result;
+        const state = result?.state?.toLowerCase() || result?.status?.toLowerCase() || '';
+        const url = result?.url || result?.audioUrl || result?.downloadUrl;
+
+        if (state === 'completed' || url) {
+          if (url) {
+            audioUrlResult = url;
+            break;
+          }
+        }
+
+        if (state === 'failed' || state === 'error') {
+          throw new Error('Tiến trình tạo giọng nói trên LucyLab bị lỗi.');
+        }
+      }
+
+      if (!audioUrlResult) {
+        throw new Error('Hết thời gian chờ tạo Audio trên LucyLab. Vui lòng thử lại.');
+      }
+
+      setAudioUrl(audioUrlResult);
+      const filename = `lucylab_${lucyLabVoiceId}.mp3`;
+      setAudioFileName(filename);
+      setIsPlaying(false);
+      setCurrentTime(0);
+
+      // Persist LucyLab audio binary Blob to IndexedDB
+      (async () => {
+        try {
+          const isLocal = audioUrlResult.startsWith('blob:') || audioUrlResult.startsWith('data:');
+          const requestUrl = isLocal ? audioUrlResult : `/cors-proxy?url=${encodeURIComponent(audioUrlResult)}`;
+          const res = await fetch(requestUrl);
+          const blob = await res.blob();
+          await saveAudioToStorage(blob, filename);
+        } catch (cErr) {
+          console.warn('Failed to cache LucyLab audio to IndexedDB:', cErr);
+        }
+      })();
+
+      // Đọc thời lượng âm thanh và tự động căn khớp nhịp khoảng lặng
+      const tempAudio = new Audio(audioUrlResult);
+      tempAudio.onloadedmetadata = async () => {
+        await runSilenceSyncWithUrl(audioUrlResult, tempAudio.duration);
+        alert('Đã tạo giọng nói LucyLab và tự động đồng bộ nhịp phụ đề thành công!');
+      };
+
+    } catch (err) {
+      alert('Lỗi tạo Voice LucyLab: ' + err.message);
+    } finally {
+      setIsGeneratingVoice(false);
+    }
   };
 
   // Gửi tạo giọng nói qua API VClip và chờ phản hồi hoàn tất (Polling)
@@ -2296,6 +2492,8 @@ export default function App() {
       if (config.selectedVoiceId !== undefined) setSelectedVoiceId(config.selectedVoiceId);
       if (config.vclipVoiceId !== undefined) setVclipVoiceId(config.vclipVoiceId);
       if (config.vclipSpeed !== undefined) setVclipSpeed(config.vclipSpeed);
+      if (config.lucyLabVoiceId !== undefined) setLucyLabVoiceId(config.lucyLabVoiceId);
+      if (config.lucyLabSpeed !== undefined) setLucyLabSpeed(config.lucyLabSpeed);
       if (config.stability !== undefined) setStability(config.stability);
       if (config.similarityBoost !== undefined) setSimilarityBoost(config.similarityBoost);
       if (config.styleExaggeration !== undefined) setStyleExaggeration(config.styleExaggeration);
@@ -2631,6 +2829,8 @@ export default function App() {
         selectedVoiceId,
         vclipVoiceId,
         vclipSpeed,
+        lucyLabVoiceId,
+        lucyLabSpeed,
         stability,
         similarityBoost,
         styleExaggeration,
@@ -3311,6 +3511,13 @@ export default function App() {
                 >
                   VClip TTS
                 </button>
+                <button 
+                  className={`tab-btn ${ttsProvider === 'lucylab' ? 'active' : ''}`}
+                  onClick={() => setTtsProvider('lucylab')}
+                  style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'lucylab' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
+                >
+                  LucyLab TTS
+                </button>
               </div>
 
               {/* 1. ElevenLabs UI */}
@@ -3619,6 +3826,118 @@ export default function App() {
 
                     <div style={{ fontSize: '0.7rem', color: '#a0aec0', marginTop: '0.2rem', fontStyle: 'italic', textAlign: 'center', lineHeight: '1.4' }}>
                       * Khi bấm Sinh giọng, tool sẽ gửi kịch bản thoại lên API VClip, tiến hành Polling chờ xuất file hoàn tất, tự động tải xuống và căn khớp nhịp phụ đề dựa trên khoảng lặng giọng nói.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 3. LucyLab UI */}
+              {ttsProvider === 'lucylab' && (
+                <div className="glass-card" style={{ marginTop: 0 }}>
+                  <h2 className="card-title">Trình tạo giọng nói LucyLab (LucyAI / ViVibe)</h2>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <div className="form-group">
+                      <label>LucyLab API Key</label>
+                      <div className="tts-input-row">
+                        <input 
+                          type="password" 
+                          value={lucyLabApiKey} 
+                          onChange={(e) => handleSaveLucyLabApiKey(e.target.value)}
+                          placeholder="Nhập API Key LucyLab (sk_live_...)" 
+                          style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem' }}
+                        />
+                        <button className="btn btn-secondary btn-sm" onClick={() => fetchLucyLabVoices(lucyLabApiKey)} disabled={isLoadingLucyLabVoices}>
+                          {isLoadingLucyLabVoices ? 'Đang tải...' : 'Tải giọng đọc'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {lucyLabVoices.length > 0 && (
+                      <div className="form-group">
+                        <label>Chọn Giọng đọc trong Tài khoản</label>
+                        <select 
+                          value={lucyLabVoiceId} 
+                          onChange={(e) => handleSaveLucyLabVoiceId(e.target.value)}
+                          style={{ padding: '0.5rem', fontSize: '0.8rem' }}
+                        >
+                          {lucyLabVoices.map(v => (
+                            <option key={v.id} value={v.id}>{v.name || v.id} {v.isActive ? '(Active)' : ''}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div className="form-group">
+                      <label>ID Giọng nói LucyLab (userVoiceId)</label>
+                      <input 
+                        type="text" 
+                        value={lucyLabVoiceId} 
+                        onChange={(e) => handleSaveLucyLabVoiceId(e.target.value)}
+                        placeholder="Nhập ID giọng đọc từ vivibe.app / lucylab.io" 
+                        style={{ padding: '0.5rem', fontSize: '0.8rem' }}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Tốc độ đọc LucyLab ({lucyLabSpeed}x)</label>
+                      <input 
+                        type="range" 
+                        min="0.5" 
+                        max="2.0" 
+                        step="0.1" 
+                        value={lucyLabSpeed} 
+                        onChange={(e) => setLucyLabSpeed(parseFloat(e.target.value))} 
+                      />
+                      <span style={{ fontSize: '0.65rem', color: '#888' }}>Mặc định là 1.0 (Phạm vi từ 0.5 - 2.0)</span>
+                    </div>
+
+                    <div className="form-group">
+                      <label>Xem trước Kịch bản thoại gửi đi</label>
+                      <textarea 
+                        value={timelineBlocks.map(b => b.text).join('\n\n')}
+                        readOnly
+                        rows={8}
+                        style={{ background: '#0b0f19', color: '#94a3b8', fontStyle: 'italic', fontSize: '0.8rem', resize: 'none' }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <button 
+                        className="btn btn-primary" 
+                        onClick={handleGenerateVoiceLucyLab} 
+                        disabled={isGeneratingVoice || isProcessingAudio || !lucyLabApiKey || !lucyLabVoiceId}
+                        style={{ width: '100%', padding: '0.75rem' }}
+                      >
+                        {isGeneratingVoice ? (
+                          <>
+                            <span className="spinner" style={{ marginRight: '0.5rem' }}></span> Đang gọi API LucyLab tạo giọng...
+                          </>
+                        ) : isProcessingAudio ? (
+                          <>
+                            <span className="spinner" style={{ marginRight: '0.5rem' }}></span> Đang phân tích khoảng lặng khớp nhịp...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={16} /> Sinh giọng đọc LucyLab & Tự động khớp nhịp
+                          </>
+                        )}
+                      </button>
+
+                      {audioUrl && (
+                        <button 
+                          className="btn btn-secondary" 
+                          onClick={handleAutoSyncSilence}
+                          disabled={isGeneratingVoice || isProcessingAudio}
+                          style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--accent-indigo)', color: 'var(--accent-indigo)' }}
+                        >
+                          {isProcessingAudio ? 'Đang phân tích...' : 'Chạy lại Tự động khớp nhịp (Silence Sync)'}
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ fontSize: '0.7rem', color: '#a0aec0', marginTop: '0.2rem', fontStyle: 'italic', textAlign: 'center', lineHeight: '1.4' }}>
+                      * Khi bấm Sinh giọng, hệ thống gửi kịch bản thoại tới API LucyLab (json-rpc), tự động Polling chờ ghép audio hoàn tất và căn khớp nhịp phụ đề dựa trên khoảng nghỉ giọng đọc.
                     </div>
                   </div>
                 </div>
