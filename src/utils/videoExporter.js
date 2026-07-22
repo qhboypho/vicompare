@@ -91,11 +91,11 @@ export async function exportVideo({
   onError
 }) {
   let audioContext = null;
-  let bufferSourceNode = null;
+  let audioSource = null;
   let audioDestination = null;
   let recorder = null;
   let animationFrameId = null;
-  let previewAudioEl = null;
+  let audioEl = null;
 
   try {
     onProgress(1); // Start loading
@@ -312,15 +312,14 @@ export async function exportVideo({
   } catch (err) {
     console.error('Rendering failed:', err);
     if (animationFrameId) cancelAnimationFrame(animationFrameId);
-    if (bufferSourceNode) {
+    if (audioEl) {
       try {
-        bufferSourceNode.stop();
+        audioEl.pause();
       } catch (e) {}
     }
-    if (previewAudioEl) previewAudioEl.pause();
     if (recorder && recorder.state !== 'inactive') recorder.stop();
     if (audioContext) audioContext.close();
-    window.exportPreviewAudio = null;
+    window.exportMonitorGain = null;
     onError(err.message || 'Lỗi xảy ra trong quá trình xuất video');
   }
 }
