@@ -1496,30 +1496,34 @@ export default function App() {
         throw new Error('Hết thời gian chờ tạo Audio trên LucyLab. Vui lòng thử lại.');
       }
 
-      setAudioUrl(audioUrlResult);
+      // Tải trực tiếp Binary Audio Blob về trình duyệt để tạo Blob URL cục bộ
+      let audioBlob;
+      try {
+        const isLocal = audioUrlResult.startsWith('blob:') || audioUrlResult.startsWith('data:');
+        const requestUrl = isLocal ? audioUrlResult : `/cors-proxy?url=${encodeURIComponent(audioUrlResult)}`;
+        const blobRes = await fetch(requestUrl);
+        if (!blobRes.ok) throw new Error('CORS fetch proxy error');
+        audioBlob = await blobRes.blob();
+      } catch (fErr) {
+        const directRes = await fetch(audioUrlResult);
+        audioBlob = await directRes.blob();
+      }
+
+      const localBlobUrl = URL.createObjectURL(audioBlob);
+      setAudioUrl(localBlobUrl);
       const filename = `lucylab_${lucyLabVoiceId}.mp3`;
       setAudioFileName(filename);
       setIsPlaying(false);
       setCurrentTime(0);
 
       // Persist LucyLab audio binary Blob to IndexedDB
-      (async () => {
-        try {
-          const isLocal = audioUrlResult.startsWith('blob:') || audioUrlResult.startsWith('data:');
-          const requestUrl = isLocal ? audioUrlResult : `/cors-proxy?url=${encodeURIComponent(audioUrlResult)}`;
-          const res = await fetch(requestUrl);
-          const blob = await res.blob();
-          await saveAudioToStorage(blob, filename);
-        } catch (cErr) {
-          console.warn('Failed to cache LucyLab audio to IndexedDB:', cErr);
-        }
-      })();
+      await saveAudioToStorage(audioBlob, filename);
 
-      // Đọc thời lượng âm thanh và tự động căn khớp nhịp khoảng lặng
-      const tempAudio = new Audio(audioUrlResult);
+      // Đọc thời lượng âm thanh và tự động căn khớp nhịp khoảng lặng từ localBlobUrl
+      const tempAudio = new Audio(localBlobUrl);
       tempAudio.onloadedmetadata = async () => {
-        await runSilenceSyncWithUrl(audioUrlResult, tempAudio.duration);
-        alert('Đã tạo giọng nói LucyLab và tự động đồng bộ nhịp phụ đề thành công!');
+        await runSilenceSyncWithUrl(localBlobUrl, tempAudio.duration);
+        alert('Đã tạo giọng nói LucyLab và tự động đồng bộ nhịp phụ đề chuẩn xác thành công!');
       };
 
     } catch (err) {
@@ -1625,30 +1629,34 @@ export default function App() {
         throw new Error('Hết thời gian chờ tạo Audio trên VClip. Vui lòng thử lại.');
       }
 
-      setAudioUrl(audioUrlResult);
+      // Tải trực tiếp Binary Audio Blob về trình duyệt để tạo Blob URL cục bộ
+      let audioBlob;
+      try {
+        const isLocal = audioUrlResult.startsWith('blob:') || audioUrlResult.startsWith('data:');
+        const requestUrl = isLocal ? audioUrlResult : `/cors-proxy?url=${encodeURIComponent(audioUrlResult)}`;
+        const blobRes = await fetch(requestUrl);
+        if (!blobRes.ok) throw new Error('CORS fetch proxy error');
+        audioBlob = await blobRes.blob();
+      } catch (fErr) {
+        const directRes = await fetch(audioUrlResult);
+        audioBlob = await directRes.blob();
+      }
+
+      const localBlobUrl = URL.createObjectURL(audioBlob);
+      setAudioUrl(localBlobUrl);
       const filename = `vclip_${vclipVoiceId}.mp3`;
       setAudioFileName(filename);
       setIsPlaying(false);
       setCurrentTime(0);
 
       // Persist VClip audio binary Blob to IndexedDB
-      (async () => {
-        try {
-          const isLocal = audioUrlResult.startsWith('blob:') || audioUrlResult.startsWith('data:');
-          const requestUrl = isLocal ? audioUrlResult : `/cors-proxy?url=${encodeURIComponent(audioUrlResult)}`;
-          const res = await fetch(requestUrl);
-          const blob = await res.blob();
-          await saveAudioToStorage(blob, filename);
-        } catch (cErr) {
-          console.warn('Failed to cache VClip audio to IndexedDB:', cErr);
-        }
-      })();
+      await saveAudioToStorage(audioBlob, filename);
 
-      // Đọc thời lượng âm thanh và tự động căn khớp nhịp khoảng lặng
-      const tempAudio = new Audio(audioUrlResult);
+      // Đọc thời lượng âm thanh và tự động căn khớp nhịp khoảng lặng từ localBlobUrl
+      const tempAudio = new Audio(localBlobUrl);
       tempAudio.onloadedmetadata = async () => {
-        await runSilenceSyncWithUrl(audioUrlResult, tempAudio.duration);
-        alert('Đã tạo giọng nói VClip và tự động đồng bộ nhịp phụ đề thành công!');
+        await runSilenceSyncWithUrl(localBlobUrl, tempAudio.duration);
+        alert('Đã tạo giọng nói VClip và tự động đồng bộ nhịp phụ đề chuẩn xác thành công!');
       };
 
     } catch (err) {
