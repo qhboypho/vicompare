@@ -657,72 +657,102 @@ export default function App() {
     return saved !== null ? parseInt(saved, 10) : 100;
   });
 
+  // Live sync active channel properties into channelProfiles array & localStorage
+  const updateActiveChannelProps = (propUpdates) => {
+    setChannelProfiles(prevProfiles => {
+      const updated = prevProfiles.map(p => {
+        if (p.id === activeChannelId) {
+          return { ...p, ...propUpdates };
+        }
+        return p;
+      });
+      safeSaveChannelProfiles(updated);
+      return updated;
+    });
+  };
+
   // Persistence State Setters for sliders and font sizes
   const updateSubtitleFontSize = (val) => {
     setSubtitleFontSize(val);
     try { localStorage.setItem('subtitleFontSize', val.toString()); } catch {}
+    updateActiveChannelProps({ subtitleFontSize: val });
   };
   const updateSubtitleY = (val) => {
     setSubtitleY(val);
     try { localStorage.setItem('subtitleY', val.toString()); } catch {}
+    updateActiveChannelProps({ subtitleY: val });
   };
   const updateSubtitleColor = (val) => {
     setSubtitleColor(val);
     try { localStorage.setItem('subtitleColor', val); } catch {}
+    updateActiveChannelProps({ subtitleColor: val });
   };
   const updateSubtitleOutlineColor = (val) => {
     setSubtitleOutlineColor(val);
     try { localStorage.setItem('subtitleOutlineColor', val); } catch {}
+    updateActiveChannelProps({ subtitleOutlineColor: val });
   };
   const updateSubtitleOutlineWidth = (val) => {
     setSubtitleOutlineWidth(val);
     try { localStorage.setItem('subtitleOutlineWidth', val.toString()); } catch {}
+    updateActiveChannelProps({ subtitleOutlineWidth: val });
   };
   const updateSubtitleFontFamily = (val) => {
     setSubtitleFontFamily(val);
     try { localStorage.setItem('subtitleFontFamily', val); } catch {}
+    updateActiveChannelProps({ subtitleFontFamily: val });
   };
   const updateSubtitleHighlightColor = (val) => {
     setSubtitleHighlightColor(val);
     try { localStorage.setItem('subtitleHighlightColor', val); } catch {}
+    updateActiveChannelProps({ subtitleHighlightColor: val });
   };
   const updateSubtitleHighlightStyle = (val) => {
     setSubtitleHighlightStyle(val);
     try { localStorage.setItem('subtitleHighlightStyle', val); } catch {}
+    updateActiveChannelProps({ subtitleHighlightStyle: val });
   };
   const updateSubtitleMaxWidth = (val) => {
     setSubtitleMaxWidth(val);
     try { localStorage.setItem('subtitleMaxWidth', val.toString()); } catch {}
+    updateActiveChannelProps({ subtitleMaxWidth: val });
   };
   const updateSubtitleMaxLines = (val) => {
     setSubtitleMaxLines(val);
     try { localStorage.setItem('subtitleMaxLines', val.toString()); } catch {}
+    updateActiveChannelProps({ subtitleMaxLines: val });
   };
 
   const updateTitleFontSize = (val) => {
     setTitleFontSize(val);
     try { localStorage.setItem('titleFontSize', val.toString()); } catch {}
+    updateActiveChannelProps({ titleFontSize: val });
   };
   const updateTitleOutlineColor = (val) => {
     setTitleOutlineColor(val);
     try { localStorage.setItem('titleOutlineColor', val); } catch {}
+    updateActiveChannelProps({ titleOutlineColor: val });
   };
   const updateTitleOutlineWidth = (val) => {
     setTitleOutlineWidth(val);
     try { localStorage.setItem('titleOutlineWidth', val.toString()); } catch {}
+    updateActiveChannelProps({ titleOutlineWidth: val });
   };
 
   const updateMascotScale = (val) => {
     setMascotScale(val);
     try { localStorage.setItem('mascotScale', val.toString()); } catch {}
+    updateActiveChannelProps({ mascotScale: val });
   };
   const updateMascotY = (val) => {
     setMascotY(val);
     try { localStorage.setItem('mascotY', val.toString()); } catch {}
+    updateActiveChannelProps({ mascotY: val });
   };
   const updateHeaderTitleFontSize = (val) => {
     setHeaderTitleFontSize(val);
     try { localStorage.setItem('headerTitleFontSize', val.toString()); } catch {}
+    updateActiveChannelProps({ headerTitleFontSize: val });
   };
 
   // UI rendering & Export State
