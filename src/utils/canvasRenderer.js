@@ -508,17 +508,6 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   if (mascotImg) {
     ctx.save();
     
-    // Breathing animation
-    const breathScale = 1.0 + 0.012 * Math.sin(currentTime * Math.PI * 1.5);
-    const scaleFactor = (state.mascotScale !== undefined ? state.mascotScale : 100) / 100;
-    const targetW = 280 * breathScale * scaleFactor;
-    const targetH = 340 * breathScale * scaleFactor;
-    const mascotX = w / 2;
-    // Set bottom coordinate fixed at y = 1200
-    const mascotBottomY = 1220; 
-    
-    ctx.translate(mascotX, mascotBottomY);
-
     let renderMascotDrawable = getTransparentMascotCanvas(
       mascotImg, 
       state.mascotChromaKey || 'green', 
@@ -528,6 +517,31 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     if (state.mascotWhiteBacking !== false) {
       renderMascotDrawable = getMascotWithWhiteBacking(renderMascotDrawable);
     }
+
+    // Breathing animation & scaling preserving natural aspect ratio
+    const breathScale = 1.0 + 0.012 * Math.sin(currentTime * Math.PI * 1.5);
+    const scaleFactor = (state.mascotScale !== undefined ? state.mascotScale : 100) / 100;
+    const baseHeight = 340 * scaleFactor * breathScale;
+
+    // Intrinsic mascot dimensions
+    const nativeW = (renderMascotDrawable && renderMascotDrawable.width) || mascotImg.width || 280;
+    const nativeH = (renderMascotDrawable && renderMascotDrawable.height) || mascotImg.height || 340;
+    const aspect = nativeW / nativeH;
+
+    let targetH = baseHeight;
+    let targetW = targetH * aspect;
+
+    // Safety cap for exceptionally wide assets
+    if (targetW > 480 * scaleFactor) {
+      targetW = 480 * scaleFactor;
+      targetH = targetW / aspect;
+    }
+
+    const mascotX = w / 2;
+    // Set bottom coordinate fixed at y = 1220
+    const mascotBottomY = 1220; 
+    
+    ctx.translate(mascotX, mascotBottomY);
 
     ctx.drawImage(
       renderMascotDrawable, 
