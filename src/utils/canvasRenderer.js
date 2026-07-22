@@ -52,6 +52,72 @@ function capitalizeFirstLetter(str) {
 }
 
 /**
+ * Automatically processes mascot image to remove white/off-white or green background
+ * Caches the transparent canvas on img._transparentCanvas to avoid re-processing every frame
+ */
+export function getTransparentMascotCanvas(img, mode = 'auto', threshold = 230) {
+  if (!img || !img.width || !img.height) return img;
+  if (mode === 'none') return img;
+
+  const cacheKey = `_transparent_${mode}_${threshold}`;
+  if (img[cacheKey]) {
+    return img[cacheKey];
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d');
+
+  try {
+    ctx.drawImage(img, 0, 0);
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imgData.data;
+    const len = data.length;
+
+    for (let i = 0; i < len; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const a = data[i + 3];
+
+      if (a < 10) continue;
+
+      let isBackground = false;
+
+      // 1. Remove White / Off-White / Light Neutral Gray background
+      if (mode === 'auto' || mode === 'white' || mode === 'both') {
+        if (r >= threshold && g >= threshold && b >= threshold) {
+          isBackground = true;
+        } else if (r > 195 && g > 195 && b > 195 && Math.abs(r - g) < 22 && Math.abs(g - b) < 22 && Math.abs(r - b) < 22) {
+          isBackground = true;
+        }
+      }
+
+      // 2. Remove Green Screen (Chroma Key Green #00FF00 / #00E600)
+      if (mode === 'auto' || mode === 'green' || mode === 'both') {
+        if (g > 100 && g > r * 1.25 && g > b * 1.25) {
+          isBackground = true;
+        } else if (g > 150 && r < 120 && b < 120) {
+          isBackground = true;
+        }
+      }
+
+      if (isBackground) {
+        data[i + 3] = 0;
+      }
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    img[cacheKey] = canvas;
+    return canvas;
+  } catch (e) {
+    console.warn('Mascot transparency processing failed:', e);
+    return img;
+  }
+}
+
+/**
  * Main draw frame function
  * @param {HTMLCanvasElement} canvas 
  * @param {Object} state - Current configuration & state
@@ -356,8 +422,15 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     const mascotBottomY = 1220; 
     
     ctx.translate(mascotX, mascotBottomY);
-    ctx.drawImage(
+
+    const renderMascotDrawable = getTransparentMascotCanvas(
       mascotImg, 
+      state.mascotChromaKey || 'auto', 
+      state.mascotChromaThreshold !== undefined ? state.mascotChromaThreshold : 230
+    );
+
+    ctx.drawImage(
+      renderMascotDrawable, 
       -targetW / 2, 
       -targetH, 
       targetW, 

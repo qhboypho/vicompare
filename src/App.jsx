@@ -202,6 +202,11 @@ export default function App() {
     const saved = localStorage.getItem('mascotScale');
     return saved !== null ? parseInt(saved, 10) : 100;
   });
+  const [mascotChromaKey, setMascotChromaKey] = useState(() => localStorage.getItem('mascotChromaKey') || 'auto');
+  const [mascotChromaThreshold, setMascotChromaThreshold] = useState(() => {
+    const saved = localStorage.getItem('mascotChromaThreshold');
+    return saved !== null ? parseInt(saved, 10) : 230;
+  });
 
   // Audio Playback
   const [audioUrl, setAudioUrl] = useState('');
@@ -1755,6 +1760,8 @@ export default function App() {
     subtitleMaxLines,
     mascotPoses,
     mascotScale,
+    mascotChromaKey,
+    mascotChromaThreshold,
     headerLogoUrl,
     logoFileName,
     titleFontSize,
@@ -1797,6 +1804,8 @@ export default function App() {
       subtitleMaxLines,
       headerPosition,
       mascotScale,
+      mascotChromaKey,
+      mascotChromaThreshold,
       titleFontSize,
       titleOutlineColor,
       titleOutlineWidth,
@@ -1830,6 +1839,8 @@ export default function App() {
     subtitleMaxLines,
     headerPosition,
     mascotScale,
+    mascotChromaKey,
+    mascotChromaThreshold,
     titleFontSize,
     titleOutlineColor,
     titleOutlineWidth,
@@ -2550,6 +2561,8 @@ export default function App() {
       }
       if (config.scriptText !== undefined) setScriptText(config.scriptText);
       if (config.mascotScale !== undefined) setMascotScale(config.mascotScale);
+      if (config.mascotChromaKey !== undefined) setMascotChromaKey(config.mascotChromaKey);
+      if (config.mascotChromaThreshold !== undefined) setMascotChromaThreshold(config.mascotChromaThreshold);
       if (config.ttsProvider !== undefined) setTtsProvider(config.ttsProvider);
       if (config.selectedVoiceId !== undefined) setSelectedVoiceId(config.selectedVoiceId);
       if (config.vclipVoiceId !== undefined) setVclipVoiceId(config.vclipVoiceId);
@@ -2705,6 +2718,8 @@ export default function App() {
           subtitleMaxLines,
           headerPosition,
           mascotScale,
+          mascotChromaKey,
+          mascotChromaThreshold,
           titleFontSize,
           titleOutlineColor,
           titleOutlineWidth,
@@ -2886,6 +2901,8 @@ export default function App() {
         timelineBlocks,
         scriptText,
         mascotScale,
+        mascotChromaKey,
+        mascotChromaThreshold,
         duration,
         ttsProvider,
         selectedVoiceId,
@@ -4327,6 +4344,51 @@ export default function App() {
                     style={{ cursor: 'pointer', height: '6px' }}
                   />
                   <span style={{ fontSize: '0.6rem', color: '#777', marginTop: '0.2rem', display: 'block' }}>Mặc định 100%. Điều chỉnh để Mascot cân đối với chiều rộng khung hình.</span>
+                </div>
+
+                {/* Tùy chỉnh Tách nền Mascot (Chroma Key & White Removal) */}
+                <div className="form-group" style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px dashed rgba(255, 255, 255, 0.1)' }}>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--accent-indigo)', display: 'flex', alignItems: 'center', gap: '0.3rem', marginBottom: '0.4rem' }}>
+                    <Sparkles size={14} /> Chế độ Tách phông nền Mascot (Background Removal & Chroma Key)
+                  </label>
+                  <select 
+                    value={mascotChromaKey} 
+                    onChange={(e) => {
+                      setMascotChromaKey(e.target.value);
+                      localStorage.setItem('mascotChromaKey', e.target.value);
+                    }}
+                    style={{ padding: '0.5rem', fontSize: '0.8rem', marginBottom: '0.5rem' }}
+                  >
+                    <option value="auto">✨ Tự động tách phông TRẮNG & XANH LÁ (Khuyên dùng)</option>
+                    <option value="white">⚪ Chỉ tách phông TRẮNG / Trắng Kem (White Removal)</option>
+                    <option value="green">🟢 Chỉ tách phông XANH LÁ (Green Screen Chroma Key)</option>
+                    <option value="none">🚫 Tắt tách nền (Dùng phông PNG trong suốt gốc)</option>
+                  </select>
+
+                  {mascotChromaKey !== 'none' && (
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#ccc' }}>
+                        <span>Độ nhạy tách nền Trắng (Threshold)</span>
+                        <span style={{ color: 'var(--accent-indigo)', fontWeight: 'bold' }}>{mascotChromaThreshold}</span>
+                      </label>
+                      <input 
+                        type="range" 
+                        min="180" 
+                        max="255" 
+                        step="1" 
+                        value={mascotChromaThreshold} 
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setMascotChromaThreshold(val);
+                          localStorage.setItem('mascotChromaThreshold', val.toString());
+                        }} 
+                        style={{ cursor: 'pointer', height: '6px', width: '100%' }}
+                      />
+                      <span style={{ fontSize: '0.65rem', color: '#888', display: 'block', marginTop: '0.2rem', lineHeight: '1.3' }}>
+                        * Tách sạch 100% hình vuông quanh Mascot trên nền tối. Bạn có thể sử dụng ảnh nền Trắng hoặc Xanh lá (Green Screen) đều được tự động tách sạch sẽ không bị lẹm.
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
