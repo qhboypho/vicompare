@@ -209,7 +209,7 @@ export default function App() {
   });
   const [mascotY, setMascotY] = useState(() => {
     const saved = localStorage.getItem('mascotY');
-    return saved !== null ? parseInt(saved, 10) : 1220;
+    return saved !== null ? parseInt(saved, 10) : 1280;
   });
   const [mascotChromaKey, setMascotChromaKey] = useState(() => localStorage.getItem('mascotChromaKey') || 'green');
   const [mascotChromaThreshold, setMascotChromaThreshold] = useState(() => {
@@ -289,7 +289,7 @@ export default function App() {
         headerTitleFontSize: 28,
         headerPosition: 'top-center',
         mascotScale: 100,
-        mascotY: 1220,
+        mascotY: 1280,
         mascotChromaKey: 'green',
         mascotChromaThreshold: 230,
         mascotWhiteBacking: true,
@@ -306,7 +306,7 @@ export default function App() {
         headerTitleFontSize: 28,
         headerPosition: 'top-center',
         mascotScale: 105,
-        mascotY: 1220,
+        mascotY: 1280,
         mascotChromaKey: 'green',
         mascotChromaThreshold: 230,
         mascotWhiteBacking: true,
@@ -5128,14 +5128,14 @@ export default function App() {
                   </label>
                   <input 
                     type="range" 
-                    min="800" 
-                    max="1280" 
+                    min="600" 
+                    max="1480" 
                     step="5" 
                     value={mascotY} 
                     onChange={(e) => updateMascotY(parseInt(e.target.value, 10))} 
                     style={{ cursor: 'pointer', height: '6px' }}
                   />
-                  <span style={{ fontSize: '0.6rem', color: '#777', marginTop: '0.2rem', display: 'block' }}>Mặc định 1220px. Giảm xuống để đẩy Mascot cao lên, tăng lên để kéo Mascot xuống sát mép đáy.</span>
+                  <span style={{ fontSize: '0.6rem', color: '#777', marginTop: '0.2rem', display: 'block' }}>Mặc định 1280px. Tăng lên (tối đa 1480px) để kéo chân Mascot chạm sát mép đáy dưới cùng video.</span>
                 </div>
 
                 {/* Tùy chỉnh Tách nền Mascot (Chroma Key & White Removal) */}
