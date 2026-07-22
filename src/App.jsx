@@ -440,24 +440,39 @@ export default function App() {
     } else {
       setSpriteFileName('');
     }
-    if (profile.mascotPoses) {
-      setMascotPoses(profile.mascotPoses);
-      
-      Object.entries(profile.mascotPoses).forEach(([k, v]) => {
-        if (v && v.startsWith('idb:')) {
-          const dbKey = v.replace('idb:', '');
-          getImageFromStorage(dbKey).then(blob => {
-            if (blob) {
-              const localUrl = URL.createObjectURL(blob);
-              setMascotPoses(prev => ({ ...prev, [k]: localUrl }));
-              cacheImage(k, localUrl);
-            }
-          }).catch(e => console.warn(e));
-        } else if (v) {
-          cacheImage(k, v);
-        }
-      });
-    }
+    const DEFAULT_MASCOT_POSES = {
+      default: '/mascot/default.png',
+      point_left: '/mascot/point_left.png',
+      point_right: '/mascot/point_right.png',
+      shrug: '/mascot/shrug.png'
+    };
+
+    const posesToApply = profile.mascotPoses && Object.keys(profile.mascotPoses).length > 0 
+      ? profile.mascotPoses 
+      : DEFAULT_MASCOT_POSES;
+
+    setMascotPoses(posesToApply);
+    
+    Object.entries(posesToApply).forEach(([k, v]) => {
+      if (v && v.startsWith('idb:')) {
+        const dbKey = v.replace('idb:', '');
+        getImageFromStorage(dbKey).then(blob => {
+          if (blob) {
+            const localUrl = URL.createObjectURL(blob);
+            setMascotPoses(prev => ({ ...prev, [k]: localUrl }));
+            cacheImage(k, localUrl);
+          } else {
+            cacheImage(k, DEFAULT_MASCOT_POSES[k] || '/mascot/default.png');
+          }
+        }).catch(() => {
+          cacheImage(k, DEFAULT_MASCOT_POSES[k] || '/mascot/default.png');
+        });
+      } else if (v) {
+        cacheImage(k, v);
+      } else {
+        cacheImage(k, DEFAULT_MASCOT_POSES[k] || '/mascot/default.png');
+      }
+    });
   };
 
   // Save current setup as a new channel profile
