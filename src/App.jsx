@@ -349,6 +349,27 @@ export default function App() {
     }
   };
 
+  // Helper to safely serialize current mascot poses for localStorage
+  const safeSaveMascotPoses = (poses) => {
+    try {
+      const cleanPoses = {};
+      Object.entries(poses).forEach(([k, v]) => {
+        if (v && v.length > 500 && v.startsWith('data:')) {
+          const dbKey = `current_mascot_${k}`;
+          try {
+            fetch(v).then(r => r.blob()).then(b => saveImageToStorage(dbKey, b)).catch(() => {});
+          } catch {}
+          cleanPoses[k] = `idb:${dbKey}`;
+        } else {
+          cleanPoses[k] = v;
+        }
+      });
+      localStorage.setItem('mascotPoses', JSON.stringify(cleanPoses));
+    } catch (e) {
+      console.warn('localStorage quota handled safely on mascotPoses:', e);
+    }
+  };
+
   // Swapping / applying a Channel Profile
   const handleApplyChannelProfile = (profile) => {
     if (!profile) return;
@@ -2664,7 +2685,7 @@ export default function App() {
       const url = URL.createObjectURL(file);
       setMascotPoses(prev => {
         const updatedPoses = { ...prev, [poseKey]: url };
-        localStorage.setItem('mascotPoses', JSON.stringify(updatedPoses));
+        safeSaveMascotPoses(updatedPoses);
         
         // Auto update active channel profile in channelProfiles array
         setChannelProfiles(prevProfiles => {
@@ -2674,7 +2695,7 @@ export default function App() {
             }
             return p;
           });
-          localStorage.setItem('channel_profiles', JSON.stringify(updated));
+          safeSaveChannelProfiles(updated);
           return updated;
         });
 
@@ -2739,7 +2760,7 @@ export default function App() {
         }
 
         setMascotPoses(newPoses);
-        localStorage.setItem('mascotPoses', JSON.stringify(newPoses));
+        safeSaveMascotPoses(newPoses);
 
         // Auto update active channel profile in channelProfiles array
         setChannelProfiles(prevProfiles => {
@@ -2749,7 +2770,7 @@ export default function App() {
             }
             return p;
           });
-          localStorage.setItem('channel_profiles', JSON.stringify(updated));
+          safeSaveChannelProfiles(updated);
           return updated;
         });
 
