@@ -2368,6 +2368,9 @@ export default function App() {
     const newMuted = !isExportMuted;
     setIsExportMuted(newMuted);
     window.isExportMuted = newMuted;
+    if (window.exportMonitorGain && window.exportMonitorGain.gain) {
+      window.exportMonitorGain.gain.value = newMuted ? 0 : 0.4;
+    }
     if (window.exportPreviewAudio) {
       window.exportPreviewAudio.muted = newMuted;
     }

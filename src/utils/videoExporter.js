@@ -114,76 +114,68 @@ export async function exportVideo({
     const canvasStream = canvas.captureStream(30);
     const outputTracks = [...canvasStream.getVideoTracks()];
 
-    // 3. Set up Audio if available (Pure AudioBuffer for silent record, Element for controllable preview)
+    // 3. Set up Audio if available
     const hasAudio = !!audioUrl;
     if (hasAudio) {
-      previewAudioEl = new Audio(audioUrl);
-      previewAudioEl.onerror = (e) => {
-        console.warn('Preview audio element loading error (export will continue):', e);
-      };
+      audioEl = new Audio(audioUrl);
       if (audioUrl.startsWith('http://') || audioUrl.startsWith('https://')) {
-        previewAudioEl.crossOrigin = 'anonymous';
-      }
-
-      // Khởi tạo AudioContext sớm để giải mã dữ liệu âm thanh
-      let useAudioContext = false;
-      try {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        if (typeof audioContext.createMediaStreamAudioDestination === 'function') {
-          useAudioContext = true;
-        }
-      } catch (e) {
-        console.warn('AudioContext initialization failed, will use fallback:', e);
+        audioEl.crossOrigin = 'anonymous';
       }
       
-      // Tải và giải mã âm thanh thành AudioBuffer để loại bỏ hoàn toàn lỗi rò rỉ âm thanh loa ngoài
-      let audioBuffer = null;
-      if (useAudioContext) {
-        try {
-          const isLocal = audioUrl.startsWith('blob:') || audioUrl.startsWith('data:');
-          const requestUrl = isLocal ? audioUrl : `/cors-proxy?url=${encodeURIComponent(audioUrl)}`;
-          const res = await fetch(requestUrl);
-          if (res.ok) {
-            const arrayBuffer = await res.arrayBuffer();
-            audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-            if (audioBuffer && audioBuffer.duration) {
-              duration = audioBuffer.duration;
-            }
-          } else {
-            console.warn(`Fetch audio failed with status ${res.status}`);
-            useAudioContext = false;
+      // Wait for audio metadata to load to get precise duration
+      await new Promise((resolve) => {
+        audioEl.onloadedmetadata = () => {
+          if (audioEl.duration && !isNaN(audioEl.duration)) {
+            duration = audioEl.duration;
           }
-        } catch (decodeErr) {
-          console.warn('Không thể giải mã tệp tin âm thanh để ghi, sẽ dùng fallback captureStream:', decodeErr);
-          useAudioContext = false;
+          resolve();
+        };
+        audioEl.onerror = (err) => {
+          console.warn('audioEl loading error:', err);
+          resolve();
+        };
+        setTimeout(resolve, 3000);
+      });
+
+      // Prepare Audio Context and Routing
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioContext.state === 'suspended') {
+          try {
+            await audioContext.resume();
+          } catch (resErr) {}
         }
-      }
 
-      // Thiết lập trạng thái tắt tiếng loa ngoài ban đầu từ giao diện người dùng
-      previewAudioEl.muted = !!window.isExportMuted;
-      window.exportPreviewAudio = previewAudioEl;
+        if (typeof audioContext.createMediaStreamAudioDestination === 'function') {
+          audioSource = audioContext.createMediaElementSource(audioEl);
+          audioDestination = audioContext.createMediaStreamAudioDestination();
+          
+          // 1. Route audio directly to recording stream (Guarantees recorded video HAS audio)
+          audioSource.connect(audioDestination);
 
-      if (useAudioContext && audioBuffer) {
-        // Tạo bộ phát AudioBufferSourceNode chạy ngầm (chỉ truyền tín hiệu ghi hình, hoàn toàn im lặng với loa ngoài)
-        bufferSourceNode = audioContext.createBufferSource();
-        bufferSourceNode.buffer = audioBuffer;
-        
-        audioDestination = audioContext.createMediaStreamAudioDestination();
-        bufferSourceNode.connect(audioDestination);
-        
-        // Đưa luồng âm thanh ghi âm vào MediaRecorder
-        audioDestination.stream.getAudioTracks().forEach(track => {
-          outputTracks.push(track);
-        });
-      } else {
-        // FALLBACK: captureStream from previewAudioEl if AudioContext is unsupported/failed
-        console.warn('Web Audio API AudioContext routing failed or unsupported, falling back to captureStream');
+          // 2. Route audio to speaker monitor gain for live Mute/Unmute control
+          const monitorGain = audioContext.createGain();
+          const isMuted = !!window.isExportMuted;
+          monitorGain.gain.value = isMuted ? 0 : 0.4;
+          audioSource.connect(monitorGain);
+          monitorGain.connect(audioContext.destination);
+          window.exportMonitorGain = monitorGain;
+
+          // Add audio track to output tracks for MediaRecorder
+          audioDestination.stream.getAudioTracks().forEach(track => {
+            outputTracks.push(track);
+          });
+        } else {
+          throw new Error('createMediaStreamAudioDestination is not supported');
+        }
+      } catch (ctxErr) {
+        console.warn('Web Audio API routing fallback to captureStream:', ctxErr);
         try {
           let fallbackStream = null;
-          if (typeof previewAudioEl.captureStream === 'function') {
-            fallbackStream = previewAudioEl.captureStream();
-          } else if (typeof previewAudioEl.mozCaptureStream === 'function') {
-            fallbackStream = previewAudioEl.mozCaptureStream();
+          if (typeof audioEl.captureStream === 'function') {
+            fallbackStream = audioEl.captureStream();
+          } else if (typeof audioEl.mozCaptureStream === 'function') {
+            fallbackStream = audioEl.mozCaptureStream();
           }
           
           if (fallbackStream) {
@@ -192,7 +184,7 @@ export async function exportVideo({
             });
           }
         } catch (streamErr) {
-          console.warn('Failed to capture stream from previewAudioEl:', streamErr);
+          console.warn('Failed to capture stream from audioEl:', streamErr);
         }
       }
     }
@@ -235,15 +227,10 @@ export async function exportVideo({
         cancelAnimationFrame(animationFrameId);
       }
       
-      // Dừng phát âm thanh
-      if (bufferSourceNode) {
+      // Clean up audio playback
+      if (audioEl) {
         try {
-          bufferSourceNode.stop();
-        } catch (e) {}
-      }
-      if (previewAudioEl) {
-        try {
-          previewAudioEl.pause();
+          audioEl.pause();
         } catch (e) {}
       }
       if (audioContext) {
@@ -251,7 +238,7 @@ export async function exportVideo({
           audioContext.close();
         } catch (e) {}
       }
-      window.exportPreviewAudio = null;
+      window.exportMonitorGain = null;
 
       const fileExtension = selectedMimeType.includes('mp4') ? 'mp4' : 'webm';
       const blob = new Blob(chunks, { type: selectedMimeType || 'video/webm' });
@@ -260,7 +247,7 @@ export async function exportVideo({
     };
 
     // 5. Start Rendering & Recording Loop
-    if (hasAudio) {
+    if (hasAudio && audioEl) {
       if (audioContext && audioContext.state === 'suspended') {
         try {
           await audioContext.resume();
@@ -269,22 +256,10 @@ export async function exportVideo({
         }
       }
       
-      // Chạy luồng ghi ngầm (không phát tiếng ra loa)
-      if (bufferSourceNode) {
-        try {
-          bufferSourceNode.start(0);
-        } catch (bufErr) {
-          console.warn('Failed to start bufferSourceNode:', bufErr);
-        }
-      }
-
-      // Chạy luồng loa ngoài (kiểm soát tắt/bật, được bọc try/catch an toàn để lỗi nguồn phát không làm sập render)
-      if (previewAudioEl) {
-        try {
-          await previewAudioEl.play();
-        } catch (previewErr) {
-          console.warn('Preview speaker audio playback skipped or source invalid:', previewErr);
-        }
+      try {
+        await audioEl.play();
+      } catch (playErr) {
+        console.warn('audioEl play warning (rendering will continue):', playErr);
       }
     }
 
