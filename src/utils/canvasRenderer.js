@@ -64,7 +64,25 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   const h = canvas.height; // 1280
 
   // 1. Draw Background
-  ctx.fillStyle = state.bgColor || '#FAF6F0';
+  const bgColorStr = state.bgColor || '#FAF6F0';
+  if (bgColorStr.startsWith('linear-gradient')) {
+    try {
+      const colors = bgColorStr.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/g);
+      if (colors && colors.length >= 2) {
+        const grad = ctx.createLinearGradient(0, 0, w, h);
+        colors.forEach((col, idx) => {
+          grad.addColorStop(idx / (colors.length - 1), col);
+        });
+        ctx.fillStyle = grad;
+      } else {
+        ctx.fillStyle = '#FAF6F0';
+      }
+    } catch (e) {
+      ctx.fillStyle = '#FAF6F0';
+    }
+  } else {
+    ctx.fillStyle = bgColorStr;
+  }
   ctx.fillRect(0, 0, w, h);
 
   // 2. Draw Top Header & Channel Watermark moved to the end of the drawing cycle to avoid overlaps

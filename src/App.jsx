@@ -23,7 +23,8 @@ import {
   Clock,
   Video,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Palette
 } from 'lucide-react';
 import { drawFrame } from './utils/canvasRenderer';
 import { exportVideo } from './utils/videoExporter';
@@ -1235,6 +1236,67 @@ export default function App() {
       alert('Lỗi khi clone giọng nói: ' + err.message + '\n(Lưu ý: Tài khoản của bạn cần có gói trả phí Starter trở lên để sử dụng tính năng Clone giọng nói).');
     } finally {
       setIsCloningVoice(false);
+    }
+  };
+
+  // Áp dụng Theme Nhanh cho Video (Quick Theme Presets)
+  const applyThemePreset = (presetKey) => {
+    if (presetKey === 'light') {
+      setBgColor('#FAF6F0');
+      setSubtitleColor('#FFFFFF');
+      setSubtitleOutlineColor('#000000');
+      setSubtitleHighlightColor('#FFFF00');
+      setTitleOutlineColor('#000000');
+      localStorage.setItem('bgColor', '#FAF6F0');
+      localStorage.setItem('subtitleColor', '#FFFFFF');
+      localStorage.setItem('subtitleOutlineColor', '#000000');
+      localStorage.setItem('subtitleHighlightColor', '#FFFF00');
+      localStorage.setItem('titleOutlineColor', '#000000');
+    } else if (presetKey === 'dark-contrast') {
+      setBgColor('#0B0F19');
+      setSubtitleColor('#FFFFFF');
+      setSubtitleOutlineColor('#000000');
+      setSubtitleHighlightColor('#38BDF8');
+      setTitleOutlineColor('#000000');
+      localStorage.setItem('bgColor', '#0B0F19');
+      localStorage.setItem('subtitleColor', '#FFFFFF');
+      localStorage.setItem('subtitleOutlineColor', '#000000');
+      localStorage.setItem('subtitleHighlightColor', '#38BDF8');
+      localStorage.setItem('titleOutlineColor', '#000000');
+    } else if (presetKey === 'dark-neon') {
+      setBgColor('#070614');
+      setSubtitleColor('#FFFFFF');
+      setSubtitleOutlineColor('#000000');
+      setSubtitleHighlightColor('#00FFCC');
+      setTitleOutlineColor('#000000');
+      localStorage.setItem('bgColor', '#070614');
+      localStorage.setItem('subtitleColor', '#FFFFFF');
+      localStorage.setItem('subtitleOutlineColor', '#000000');
+      localStorage.setItem('subtitleHighlightColor', '#00FFCC');
+      localStorage.setItem('titleOutlineColor', '#000000');
+    } else if (presetKey === 'dark-gold') {
+      setBgColor('#121212');
+      setSubtitleColor('#FFFFFF');
+      setSubtitleOutlineColor('#000000');
+      setSubtitleHighlightColor('#FBBF24');
+      setTitleOutlineColor('#000000');
+      localStorage.setItem('bgColor', '#121212');
+      localStorage.setItem('subtitleColor', '#FFFFFF');
+      localStorage.setItem('subtitleOutlineColor', '#000000');
+      localStorage.setItem('subtitleHighlightColor', '#FBBF24');
+      localStorage.setItem('titleOutlineColor', '#000000');
+    } else if (presetKey === 'dark-gradient') {
+      const gradStr = 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)';
+      setBgColor(gradStr);
+      setSubtitleColor('#FFFFFF');
+      setSubtitleOutlineColor('#000000');
+      setSubtitleHighlightColor('#F43F5E');
+      setTitleOutlineColor('#000000');
+      localStorage.setItem('bgColor', gradStr);
+      localStorage.setItem('subtitleColor', '#FFFFFF');
+      localStorage.setItem('subtitleOutlineColor', '#000000');
+      localStorage.setItem('subtitleHighlightColor', '#F43F5E');
+      localStorage.setItem('titleOutlineColor', '#000000');
     }
   };
 
@@ -4069,6 +4131,130 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Bộ chọn Theme Nhanh cho Video (Quick Theme Presets) */}
+                  <div className="form-group" style={{ padding: '0.75rem', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.1)', marginTop: '0.5rem', marginBottom: '0.5rem' }}>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--accent-indigo)', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.6rem' }}>
+                      <Palette size={16} /> Chọn Theme Nhanh cho Video (Quick Theme Presets)
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
+                      <button 
+                        type="button"
+                        className="btn"
+                        onClick={() => applyThemePreset('light')}
+                        style={{
+                          padding: '0.5rem 0.6rem',
+                          borderRadius: '8px',
+                          border: bgColor === '#FAF6F0' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          background: '#FAF6F0',
+                          color: '#1e293b',
+                          fontWeight: 'bold',
+                          fontSize: '0.75rem',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          boxShadow: bgColor === '#FAF6F0' ? '0 0 10px rgba(99, 102, 241, 0.4)' : 'none'
+                        }}
+                      >
+                        <span style={{ fontSize: '0.9rem' }}>☀️</span> Theme Sáng Trắng Kem
+                      </button>
+
+                      <button 
+                        type="button"
+                        className="btn"
+                        onClick={() => applyThemePreset('dark-contrast')}
+                        style={{
+                          padding: '0.5rem 0.6rem',
+                          borderRadius: '8px',
+                          border: bgColor === '#0B0F19' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          background: '#0B0F19',
+                          color: '#38BDF8',
+                          fontWeight: 'bold',
+                          fontSize: '0.75rem',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          boxShadow: bgColor === '#0B0F19' ? '0 0 10px rgba(56, 189, 248, 0.4)' : 'none'
+                        }}
+                      >
+                        <span style={{ fontSize: '0.9rem' }}>🌙</span> Theme Tối High-Contrast
+                      </button>
+
+                      <button 
+                        type="button"
+                        className="btn"
+                        onClick={() => applyThemePreset('dark-neon')}
+                        style={{
+                          padding: '0.5rem 0.6rem',
+                          borderRadius: '8px',
+                          border: bgColor === '#070614' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          background: '#070614',
+                          color: '#00FFCC',
+                          fontWeight: 'bold',
+                          fontSize: '0.75rem',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          boxShadow: bgColor === '#070614' ? '0 0 10px rgba(0, 255, 204, 0.4)' : 'none'
+                        }}
+                      >
+                        <span style={{ fontSize: '0.9rem' }}>⚡</span> Theme Tối Neon Cyber
+                      </button>
+
+                      <button 
+                        type="button"
+                        className="btn"
+                        onClick={() => applyThemePreset('dark-gold')}
+                        style={{
+                          padding: '0.5rem 0.6rem',
+                          borderRadius: '8px',
+                          border: bgColor === '#121212' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          background: '#121212',
+                          color: '#FBBF24',
+                          fontWeight: 'bold',
+                          fontSize: '0.75rem',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          boxShadow: bgColor === '#121212' ? '0 0 10px rgba(251, 191, 36, 0.4)' : 'none'
+                        }}
+                      >
+                        <span style={{ fontSize: '0.9rem' }}>👑</span> Theme Tối Hoàng Gia Gold
+                      </button>
+
+                      <button 
+                        type="button"
+                        className="btn"
+                        onClick={() => applyThemePreset('dark-gradient')}
+                        style={{
+                          gridColumn: 'span 2',
+                          padding: '0.5rem 0.6rem',
+                          borderRadius: '8px',
+                          border: bgColor.startsWith('linear-gradient') ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)',
+                          color: '#F43F5E',
+                          fontWeight: 'bold',
+                          fontSize: '0.75rem',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          boxShadow: bgColor.startsWith('linear-gradient') ? '0 0 10px rgba(244, 63, 94, 0.4)' : 'none'
+                        }}
+                      >
+                        <span style={{ fontSize: '0.9rem' }}>🌌</span> Theme Gradient Biển Đêm Sang Trọng
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="form-group">
                     <label>Logo kênh (Upload)</label>
                     <FileUploadDropzone accept="image/*" onChange={handleLogoUpload}>
@@ -4146,8 +4332,131 @@ export default function App() {
 
               {/* Subtitles Custom UI Settings */}
               <div className="glass-card">
-                <h2 className="card-title">Tùy biến Giao diện Phụ đề</h2>
+                <h2 className="card-title">Tùy biến Giao diện Phụ đề & Theme Video</h2>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {/* Bộ chọn Theme Nhanh cho Video (Quick Theme Presets) */}
+                  <div className="form-group" style={{ padding: '0.75rem', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.1)', margin: 0 }}>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--accent-indigo)', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.6rem' }}>
+                      <Palette size={16} /> Chọn Theme Nhanh cho Video (Quick Presets)
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
+                      <button 
+                        type="button"
+                        className="btn"
+                        onClick={() => applyThemePreset('light')}
+                        style={{
+                          padding: '0.5rem 0.6rem',
+                          borderRadius: '8px',
+                          border: bgColor === '#FAF6F0' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          background: '#FAF6F0',
+                          color: '#1e293b',
+                          fontWeight: 'bold',
+                          fontSize: '0.75rem',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          boxShadow: bgColor === '#FAF6F0' ? '0 0 10px rgba(99, 102, 241, 0.4)' : 'none'
+                        }}
+                      >
+                        <span style={{ fontSize: '0.9rem' }}>☀️</span> Theme Sáng Trắng Kem
+                      </button>
+
+                      <button 
+                        type="button"
+                        className="btn"
+                        onClick={() => applyThemePreset('dark-contrast')}
+                        style={{
+                          padding: '0.5rem 0.6rem',
+                          borderRadius: '8px',
+                          border: bgColor === '#0B0F19' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          background: '#0B0F19',
+                          color: '#38BDF8',
+                          fontWeight: 'bold',
+                          fontSize: '0.75rem',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          boxShadow: bgColor === '#0B0F19' ? '0 0 10px rgba(56, 189, 248, 0.4)' : 'none'
+                        }}
+                      >
+                        <span style={{ fontSize: '0.9rem' }}>🌙</span> Theme Tối High-Contrast
+                      </button>
+
+                      <button 
+                        type="button"
+                        className="btn"
+                        onClick={() => applyThemePreset('dark-neon')}
+                        style={{
+                          padding: '0.5rem 0.6rem',
+                          borderRadius: '8px',
+                          border: bgColor === '#070614' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          background: '#070614',
+                          color: '#00FFCC',
+                          fontWeight: 'bold',
+                          fontSize: '0.75rem',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          boxShadow: bgColor === '#070614' ? '0 0 10px rgba(0, 255, 204, 0.4)' : 'none'
+                        }}
+                      >
+                        <span style={{ fontSize: '0.9rem' }}>⚡</span> Theme Tối Neon Cyber
+                      </button>
+
+                      <button 
+                        type="button"
+                        className="btn"
+                        onClick={() => applyThemePreset('dark-gold')}
+                        style={{
+                          padding: '0.5rem 0.6rem',
+                          borderRadius: '8px',
+                          border: bgColor === '#121212' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          background: '#121212',
+                          color: '#FBBF24',
+                          fontWeight: 'bold',
+                          fontSize: '0.75rem',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          boxShadow: bgColor === '#121212' ? '0 0 10px rgba(251, 191, 36, 0.4)' : 'none'
+                        }}
+                      >
+                        <span style={{ fontSize: '0.9rem' }}>👑</span> Theme Tối Hoàng Gia Gold
+                      </button>
+
+                      <button 
+                        type="button"
+                        className="btn"
+                        onClick={() => applyThemePreset('dark-gradient')}
+                        style={{
+                          gridColumn: 'span 2',
+                          padding: '0.5rem 0.6rem',
+                          borderRadius: '8px',
+                          border: bgColor.startsWith('linear-gradient') ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)',
+                          color: '#F43F5E',
+                          fontWeight: 'bold',
+                          fontSize: '0.75rem',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          boxShadow: bgColor.startsWith('linear-gradient') ? '0 0 10px rgba(244, 63, 94, 0.4)' : 'none'
+                        }}
+                      >
+                        <span style={{ fontSize: '0.9rem' }}>🌌</span> Theme Gradient Biển Đêm Sang Trọng
+                      </button>
+                    </div>
+                  </div>
                   {/* Toggle display */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0b0f19', padding: '0.6rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-light)' }}>
                     <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Hiển thị phụ đề trên Video</span>
