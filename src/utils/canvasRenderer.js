@@ -165,7 +165,7 @@ export function getTransparentMascotCanvas(img, mode = 'green', threshold = 230)
 export function getMascotWithWhiteBacking(mascotCanvas) {
   if (!mascotCanvas || !mascotCanvas.width || !mascotCanvas.height) return mascotCanvas;
 
-  const cacheKey = '_white_backed';
+  const cacheKey = '_white_backed_v3';
   if (mascotCanvas[cacheKey]) {
     return mascotCanvas[cacheKey];
   }
@@ -179,7 +179,6 @@ export function getMascotWithWhiteBacking(mascotCanvas) {
   const ctx = resultCanvas.getContext('2d');
 
   try {
-    // 1. Create a solid white silhouette mask of the mascot's body
     const maskCanvas = document.createElement('canvas');
     maskCanvas.width = w;
     maskCanvas.height = h;
@@ -189,26 +188,98 @@ export function getMascotWithWhiteBacking(mascotCanvas) {
     const imgData = maskCtx.getImageData(0, 0, w, h);
     const data = imgData.data;
 
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] > 15) { // If pixel belongs to mascot (non-transparent)
-        data[i] = 255;     // R
-        data[i + 1] = 255; // G
-        data[i + 2] = 255; // B
-        data[i + 3] = 255; // Solid Opaque Alpha
+    // 1. BFS Flood Fill from all border pixels to identify the true outer background
+    const visited = new Uint8Array(w * h);
+    const queue = [];
+
+    // Top and Bottom borders
+    for (let x = 0; x < w; x++) {
+      let idx = x * 4;
+      if (data[idx + 3] < 50) {
+        visited[x] = 1;
+        queue.push(x, 0);
+      }
+      idx = ((h - 1) * w + x) * 4;
+      if (data[idx + 3] < 50) {
+        visited[(h - 1) * w + x] = 1;
+        queue.push(x, h - 1);
+      }
+    }
+    // Left and Right borders
+    for (let y = 0; y < h; y++) {
+      let idx = (y * w) * 4;
+      if (data[idx + 3] < 50) {
+        if (!visited[y * w]) {
+          visited[y * w] = 1;
+          queue.push(0, y);
+        }
+      }
+      idx = (y * w + (w - 1)) * 4;
+      if (data[idx + 3] < 50) {
+        if (!visited[y * w + (w - 1)]) {
+          visited[y * w + (w - 1)] = 1;
+          queue.push(w - 1, y);
+        }
+      }
+    }
+
+    // Perform BFS Flood Fill for outer background
+    let qHead = 0;
+    while (qHead < queue.length) {
+      const cx = queue[qHead++];
+      const cy = queue[qHead++];
+
+      const neighbors = [
+        [cx - 1, cy],
+        [cx + 1, cy],
+        [cx, cy - 1],
+        [cx, cy + 1]
+      ];
+
+      for (let i = 0; i < 4; i++) {
+        const nx = neighbors[i][0];
+        const ny = neighbors[i][1];
+
+        if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+          const nPos = ny * w + nx;
+          if (!visited[nPos]) {
+            const nIdx = nPos * 4;
+            if (data[nIdx + 3] < 50) {
+              visited[nPos] = 1;
+              queue.push(nx, ny);
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Fill all non-background interior pixels (body + holes) with solid white
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const pos = y * w + x;
+        const idx = pos * 4;
+        if (!visited[pos]) {
+          data[idx] = 255;     // R
+          data[idx + 1] = 255; // G
+          data[idx + 2] = 255; // B
+          data[idx + 3] = 255; // Opaque Alpha
+        } else {
+          data[idx + 3] = 0;   // Outer background is 100% transparent
+        }
       }
     }
     maskCtx.putImageData(imgData, 0, 0);
 
-    // 2. Draw solid white silhouette base first
+    // 3. Render solid white body backing first
     ctx.drawImage(maskCanvas, 0, 0);
 
-    // 3. Draw original mascot image on top
+    // 4. Render original mascot image on top
     ctx.drawImage(mascotCanvas, 0, 0);
 
     mascotCanvas[cacheKey] = resultCanvas;
     return resultCanvas;
   } catch (e) {
-    console.warn('Mascot white backing failed:', e);
+    console.warn('Mascot flood-fill white backing failed:', e);
     return mascotCanvas;
   }
 }
