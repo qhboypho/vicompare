@@ -804,6 +804,17 @@ export default function App() {
   const [minSilenceDuration, setMinSilenceDuration] = useState(0.15); // Nhạy hơn với các giọng đọc nhanh
   const [detectedSilencesCount, setDetectedSilencesCount] = useState(null);
   const [silenceSyncError, setSilenceSyncError] = useState('');
+  const [silenceSyncMode, setSilenceSyncMode] = useState(() => {
+    return localStorage.getItem('silenceSyncMode') || 'simple';
+  });
+
+  const handleSelectTtsProvider = (provider) => {
+    setTtsProvider(provider);
+    localStorage.setItem('tts_provider', provider);
+    const defaultMode = (provider === 'lucylab') ? 'dp' : 'simple';
+    setSilenceSyncMode(defaultMode);
+    localStorage.setItem('silenceSyncMode', defaultMode);
+  };
 
   // Cấu hình định dạng phụ đề (Subtitle Layout & Styling)
   const [showSubtitles, setShowSubtitles] = useState(() => {
@@ -2729,7 +2740,7 @@ export default function App() {
             isSilent = false;
             const endSilence = time;
             const silenceDuration = endSilence - startSilence;
-            if (silenceDuration >= 0.10) { // Giảm xuống 100ms để bắt được mọi khoảng ngắt nghỉ ngắn
+            if (silenceDuration >= minSilenceDuration) {
               silences.push({ start: startSilence, end: endSilence, mid: (startSilence + endSilence) / 2 });
             }
           }
@@ -2772,75 +2783,8 @@ export default function App() {
 
         const matchedTimes = [];
 
-        // 2. Thuật toán Dynamic Programming (Quy hoạch động) tìm chuỗi khoảng nghỉ tối ưu:
-        // Đánh trọng số cao cho các khoảng nghỉ câu dài (kết thúc câu) hơn là các khoảng phẩy/ngắt nghỉ ngắn.
-        if (cleanSilences.length >= neededCount) {
-          const dp = Array.from({ length: neededCount + 1 }, () => Array(cleanSilences.length).fill(Infinity));
-          const parent = Array.from({ length: neededCount + 1 }, () => Array(cleanSilences.length).fill(-1));
-
-          for (let j = 0; j < cleanSilences.length; j++) {
-            dp[0][j] = 0;
-          }
-
-          for (let i = 1; i <= neededCount; i++) {
-            const targetTime = propTransitions[i - 1];
-            for (let j = i - 1; j < cleanSilences.length; j++) {
-              const s = cleanSilences[j];
-              const sDur = s.end - s.start;
-              // Khoảng cách tới mốc thời gian kỳ vọng trừ đi ưu tiên độ dài khoảng nghỉ dài (ngắt câu chính)
-              const dist = Math.abs(s.mid - targetTime);
-              const pauseBonus = Math.min(1.8, sDur * 2.2);
-              const stepCost = dist - pauseBonus;
-
-              let minPrevCost = Infinity;
-              let bestPrevK = -1;
-
-              for (let k = i - 2; k < j; k++) {
-                const prevCost = k >= 0 ? dp[i - 1][k] : 0;
-                if (prevCost < minPrevCost) {
-                  minPrevCost = prevCost;
-                  bestPrevK = k;
-                }
-              }
-
-              dp[i][j] = minPrevCost + stepCost;
-              parent[i][j] = bestPrevK;
-            }
-          }
-
-          let bestLastJ = -1;
-          let minFinalCost = Infinity;
-          for (let j = neededCount - 1; j < cleanSilences.length; j++) {
-            if (dp[neededCount][j] < minFinalCost) {
-              minFinalCost = dp[neededCount][j];
-              bestLastJ = j;
-            }
-          }
-
-          if (bestLastJ !== -1) {
-            const chosenIndices = [];
-            let currI = neededCount;
-            let currJ = bestLastJ;
-            while (currI > 0 && currJ !== -1) {
-              chosenIndices.unshift(currJ);
-              currJ = parent[currI][currJ];
-              currI--;
-            }
-
-            for (let i = 0; i < chosenIndices.length; i++) {
-              const s = cleanSilences[chosenIndices[i]];
-              // Mốc chuyển câu đặt ở khoảnh khắc vừa kết thúc đọc câu cũ + 20% thời gian nghỉ
-              const transitionTime = s.start + Math.min(0.12, (s.end - s.start) * 0.25);
-              matchedTimes.push(transitionTime);
-            }
-          }
-        }
-
-        // Dự phòng nếu số khoảng nghỉ ít hơn hoặc DP bị vướng
-        if (matchedTimes.length < neededCount) {
-          matchedTimes.length = 0;
+        if (silenceSyncMode === 'simple') {
           let lastMatchIdx = -1;
-
           for (let i = 0; i < neededCount; i++) {
             const targetTime = propTransitions[i];
             let closest = null;
@@ -2849,9 +2793,7 @@ export default function App() {
 
             for (let sIdx = lastMatchIdx + 1; sIdx < cleanSilences.length; sIdx++) {
               const silence = cleanSilences[sIdx];
-              const sDur = silence.end - silence.start;
-              // Trừ ưu tiên khoảng nghỉ dài
-              const dist = Math.abs(silence.mid - targetTime) - Math.min(1.2, sDur * 1.5);
+              const dist = Math.abs(silence.mid - targetTime);
               if (dist < closestDist) {
                 closestDist = dist;
                 closest = silence;
@@ -2859,13 +2801,110 @@ export default function App() {
               }
             }
 
-            if (closest && Math.abs(closest.mid - targetTime) < 5.5) {
+            if (closest && closestDist < 5.0) {
               const transitionTime = closest.start + Math.min(0.12, (closest.end - closest.start) * 0.25);
               matchedTimes.push(transitionTime);
               lastMatchIdx = closestIdx;
             } else {
               matchedTimes.push(targetTime);
               lastMatchIdx = lastMatchIdx + 1;
+            }
+          }
+        } else {
+          // Dynamic Programming (mode 'dp')
+          if (cleanSilences.length >= neededCount) {
+            const dp = Array.from({ length: neededCount + 1 }, () => Array(cleanSilences.length).fill(Infinity));
+            const parent = Array.from({ length: neededCount + 1 }, () => Array(cleanSilences.length).fill(-1));
+
+            for (let j = 0; j < cleanSilences.length; j++) {
+              dp[0][j] = 0;
+            }
+
+            for (let i = 1; i <= neededCount; i++) {
+              const targetTime = propTransitions[i - 1];
+              for (let j = i - 1; j < cleanSilences.length; j++) {
+                const s = cleanSilences[j];
+                const sDur = s.end - s.start;
+                // Khoảng cách tới mốc thời gian kỳ vọng trừ đi ưu tiên độ dài khoảng nghỉ dài (ngắt câu chính)
+                const dist = Math.abs(s.mid - targetTime);
+                const pauseBonus = Math.min(1.8, sDur * 2.2);
+                const stepCost = dist - pauseBonus;
+
+                let minPrevCost = Infinity;
+                let bestPrevK = -1;
+
+                for (let k = i - 2; k < j; k++) {
+                  const prevCost = k >= 0 ? dp[i - 1][k] : 0;
+                  if (prevCost < minPrevCost) {
+                    minPrevCost = prevCost;
+                    bestPrevK = k;
+                  }
+                }
+
+                dp[i][j] = minPrevCost + stepCost;
+                parent[i][j] = bestPrevK;
+              }
+            }
+
+            let bestLastJ = -1;
+            let minFinalCost = Infinity;
+            for (let j = neededCount - 1; j < cleanSilences.length; j++) {
+              if (dp[neededCount][j] < minFinalCost) {
+                minFinalCost = dp[neededCount][j];
+                bestLastJ = j;
+              }
+            }
+
+            if (bestLastJ !== -1) {
+              const chosenIndices = [];
+              let currI = neededCount;
+              let currJ = bestLastJ;
+              while (currI > 0 && currJ !== -1) {
+                chosenIndices.unshift(currJ);
+                currJ = parent[currI][currJ];
+                currI--;
+              }
+
+              for (let i = 0; i < chosenIndices.length; i++) {
+                const s = cleanSilences[chosenIndices[i]];
+                // Mốc chuyển câu đặt ở khoảnh khắc vừa kết thúc đọc câu cũ + 20% thời gian nghỉ
+                const transitionTime = s.start + Math.min(0.12, (s.end - s.start) * 0.25);
+                matchedTimes.push(transitionTime);
+              }
+            }
+          }
+
+          // Dự phòng nếu số khoảng nghỉ ít hơn hoặc DP bị vướng
+          if (matchedTimes.length < neededCount) {
+            matchedTimes.length = 0;
+            let lastMatchIdx = -1;
+
+            for (let i = 0; i < neededCount; i++) {
+              const targetTime = propTransitions[i];
+              let closest = null;
+              let closestDist = Infinity;
+              let closestIdx = -1;
+
+              for (let sIdx = lastMatchIdx + 1; sIdx < cleanSilences.length; sIdx++) {
+                const silence = cleanSilences[sIdx];
+                const sDur = silence.end - silence.start;
+                // Trừ ưu tiên khoảng nghỉ dài
+                const dist = Math.abs(silence.mid - targetTime) - Math.min(1.2, sDur * 1.5);
+                if (dist < closestDist) {
+                  closestDist = dist;
+                  closest = silence;
+                  closestIdx = sIdx;
+                }
+              }
+
+              if (closest && Math.abs(closest.mid - targetTime) < 5.5) {
+                const transitionTime = closest.start + Math.min(0.12, (closest.end - closest.start) * 0.25);
+                matchedTimes.push(transitionTime);
+                lastMatchIdx = closestIdx;
+              } else {
+                matchedTimes.push(targetTime);
+                lastMatchIdx = lastMatchIdx + 1;
+              }
             }
           }
         }
@@ -4527,21 +4566,21 @@ export default function App() {
               <div style={{ display: 'flex', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.05)', padding: '0.25rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
                 <button 
                   className={`tab-btn ${ttsProvider === 'elevenlabs' ? 'active' : ''}`}
-                  onClick={() => setTtsProvider('elevenlabs')}
+                  onClick={() => handleSelectTtsProvider('elevenlabs')}
                   style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'elevenlabs' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
                 >
                   ElevenLabs
                 </button>
                 <button 
                   className={`tab-btn ${ttsProvider === 'vclip' ? 'active' : ''}`}
-                  onClick={() => setTtsProvider('vclip')}
+                  onClick={() => handleSelectTtsProvider('vclip')}
                   style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'vclip' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
                 >
                   VClip TTS
                 </button>
                 <button 
                   className={`tab-btn ${ttsProvider === 'lucylab' ? 'active' : ''}`}
-                  onClick={() => setTtsProvider('lucylab')}
+                  onClick={() => handleSelectTtsProvider('lucylab')}
                   style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'lucylab' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
                 >
                   LucyLab TTS
@@ -5047,7 +5086,27 @@ export default function App() {
                     </div>
                   </div>
 
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: '#cbd5e1', background: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.15)', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginBottom: '0.75rem' }}>
+                    <label style={{ fontSize: '0.75rem', color: '#ccc' }}>Thuật toán căn khớp phụ đề</label>
+                    <div style={{ display: 'flex', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.2rem', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                      <button 
+                        type="button"
+                        onClick={() => { setSilenceSyncMode('simple'); localStorage.setItem('silenceSyncMode', 'simple'); }}
+                        style={{ flex: 1, padding: '0.35rem', fontSize: '0.7rem', borderRadius: '4px', cursor: 'pointer', border: 'none', background: silenceSyncMode === 'simple' ? 'var(--accent-indigo)' : 'none', color: '#fff', fontWeight: 'bold' }}
+                      >
+                        Tuần tự đơn giản (Khuyên dùng VClip/ElevenLabs)
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => { setSilenceSyncMode('dp'); localStorage.setItem('silenceSyncMode', 'dp'); }}
+                        style={{ flex: 1, padding: '0.35rem', fontSize: '0.7rem', borderRadius: '4px', cursor: 'pointer', border: 'none', background: silenceSyncMode === 'dp' ? 'var(--accent-indigo)' : 'none', color: '#fff', fontWeight: 'bold' }}
+                      >
+                        Quy hoạch động DP (Khuyên dùng LucyLab)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: '#cbd5e1', background: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.15)', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
                     <span>
                       Trạng thái phát hiện: <strong style={{ color: 'var(--accent-green)' }}>{detectedSilencesCount !== null ? `${detectedSilencesCount} khoảng nghỉ` : 'Chưa phân tích'}</strong>
                     </span>
