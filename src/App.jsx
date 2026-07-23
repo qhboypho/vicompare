@@ -395,29 +395,7 @@ export default function App() {
 
   // Bộ Quản Lý Mẫu Kênh (Channel Profiles / Presets)
   const [channelProfiles, setChannelProfiles] = useState(() => {
-    try {
-      const saved = localStorage.getItem('channel_profiles');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return parsed.map(p => {
-          if (p.id === 'cat-thong-thai' && (!p.mascotPoses || p.mascotPoses.default === '/mascot/default.png')) {
-            return {
-              ...p,
-              mascotPoses: {
-                default: '/mascot/cat/default.png',
-                point_left: '/mascot/cat/point_left.png',
-                point_right: '/mascot/cat/point_right.png',
-                shrug: '/mascot/cat/shrug.png'
-              }
-            };
-          }
-          return p;
-        });
-      }
-    } catch (e) {
-      console.warn('Failed to parse channel_profiles:', e);
-    }
-    return [
+    const defaultProfiles = [
       {
         id: 'cat-thong-thai',
         name: '🐱 Mèo Thông Thái',
@@ -439,7 +417,23 @@ export default function App() {
           point_left: '/mascot/cat/point_left.png',
           point_right: '/mascot/cat/point_right.png',
           shrug: '/mascot/cat/shrug.png'
-        }
+        },
+        subtitleFontSize: 38,
+        titleFontSize: 36,
+        subtitleY: 770,
+        subtitleColor: '#FFFFFF',
+        subtitleOutlineColor: '#000000',
+        subtitleOutlineWidth: 8,
+        subtitleFontFamily: '"Montserrat", Arial, sans-serif',
+        subtitleHighlightColor: '#FFFF00',
+        subtitleHighlightStyle: 'word-color',
+        subtitleMaxWidth: 450,
+        subtitleMaxLines: 2,
+        titleOutlineColor: '#000000',
+        titleOutlineWidth: 6,
+        imageFrameWidth: 290,
+        imageFrameHeight: 390,
+        globalImageZoom: 100
       },
       {
         id: 'ngua-biet-tuot',
@@ -462,9 +456,71 @@ export default function App() {
           point_left: '/mascot/point_left.png',
           point_right: '/mascot/point_right.png',
           shrug: '/mascot/shrug.png'
-        }
+        },
+        subtitleFontSize: 38,
+        titleFontSize: 36,
+        subtitleY: 770,
+        subtitleColor: '#FFFFFF',
+        subtitleOutlineColor: '#000000',
+        subtitleOutlineWidth: 8,
+        subtitleFontFamily: '"Montserrat", Arial, sans-serif',
+        subtitleHighlightColor: '#38BDF8',
+        subtitleHighlightStyle: 'word-color',
+        subtitleMaxWidth: 450,
+        subtitleMaxLines: 2,
+        titleOutlineColor: '#000000',
+        titleOutlineWidth: 6,
+        imageFrameWidth: 290,
+        imageFrameHeight: 390,
+        globalImageZoom: 100
       }
     ];
+
+    try {
+      const saved = localStorage.getItem('channel_profiles');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.map(p => {
+          const defaultRef = defaultProfiles.find(d => d.id === p.id) || {
+            subtitleFontSize: 38,
+            titleFontSize: 36,
+            subtitleY: 770,
+            subtitleColor: '#FFFFFF',
+            subtitleOutlineColor: '#000000',
+            subtitleOutlineWidth: 8,
+            subtitleFontFamily: '"Montserrat", Arial, sans-serif',
+            subtitleHighlightColor: '#FFFF00',
+            subtitleHighlightStyle: 'word-color',
+            subtitleMaxWidth: 450,
+            subtitleMaxLines: 2,
+            titleOutlineColor: '#000000',
+            titleOutlineWidth: 6,
+            imageFrameWidth: 290,
+            imageFrameHeight: 390,
+            globalImageZoom: 100
+          };
+
+          let poses = p.mascotPoses;
+          if (p.id === 'cat-thong-thai' && (!poses || poses.default === '/mascot/default.png')) {
+            poses = {
+              default: '/mascot/cat/default.png',
+              point_left: '/mascot/cat/point_left.png',
+              point_right: '/mascot/cat/point_right.png',
+              shrug: '/mascot/cat/shrug.png'
+            };
+          }
+
+          return {
+            ...defaultRef,
+            ...p,
+            mascotPoses: poses || defaultRef.mascotPoses
+          };
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to parse channel_profiles:', e);
+    }
+    return defaultProfiles;
   });
 
   const [activeChannelId, setActiveChannelId] = useState(() => localStorage.getItem('active_channel_id') || 'cat-thong-thai');
@@ -543,34 +599,27 @@ export default function App() {
       setHeaderTitleColor(profile.headerTitleColor);
       try { localStorage.setItem('headerTitleColor', profile.headerTitleColor); } catch {}
     }
-    if (profile.headerTitleFontSize !== undefined) {
-      setHeaderTitleFontSize(profile.headerTitleFontSize);
-      try { localStorage.setItem('headerTitleFontSize', profile.headerTitleFontSize.toString()); } catch {}
-    }
-    if (profile.headerPosition !== undefined) {
-      setHeaderPosition(profile.headerPosition);
-      try { localStorage.setItem('headerPosition', profile.headerPosition); } catch {}
-    }
-    if (profile.mascotScale !== undefined) {
-      setMascotScale(profile.mascotScale);
-      try { localStorage.setItem('mascotScale', profile.mascotScale.toString()); } catch {}
-    }
-    if (profile.mascotY !== undefined) {
-      setMascotY(profile.mascotY);
-      try { localStorage.setItem('mascotY', profile.mascotY.toString()); } catch {}
-    }
-    if (profile.mascotChromaKey !== undefined) {
-      setMascotChromaKey(profile.mascotChromaKey);
-      try { localStorage.setItem('mascotChromaKey', profile.mascotChromaKey); } catch {}
-    }
-    if (profile.mascotChromaThreshold !== undefined) {
-      setMascotChromaThreshold(profile.mascotChromaThreshold);
-      try { localStorage.setItem('mascotChromaThreshold', profile.mascotChromaThreshold.toString()); } catch {}
-    }
-    if (profile.mascotWhiteBacking !== undefined) {
-      setMascotWhiteBacking(profile.mascotWhiteBacking);
-      try { localStorage.setItem('mascotWhiteBacking', profile.mascotWhiteBacking.toString()); } catch {}
-    }
+    setHeaderTitleFontSize(profile.headerTitleFontSize !== undefined ? profile.headerTitleFontSize : 28);
+    try { localStorage.setItem('headerTitleFontSize', (profile.headerTitleFontSize !== undefined ? profile.headerTitleFontSize : 28).toString()); } catch {}
+
+    setHeaderPosition(profile.headerPosition !== undefined ? profile.headerPosition : 'top-center');
+    try { localStorage.setItem('headerPosition', profile.headerPosition !== undefined ? profile.headerPosition : 'top-center'); } catch {}
+
+    setMascotScale(profile.mascotScale !== undefined ? profile.mascotScale : 100);
+    try { localStorage.setItem('mascotScale', (profile.mascotScale !== undefined ? profile.mascotScale : 100).toString()); } catch {}
+
+    setMascotY(profile.mascotY !== undefined ? profile.mascotY : 1280);
+    try { localStorage.setItem('mascotY', (profile.mascotY !== undefined ? profile.mascotY : 1280).toString()); } catch {}
+
+    setMascotChromaKey(profile.mascotChromaKey !== undefined ? profile.mascotChromaKey : 'green');
+    try { localStorage.setItem('mascotChromaKey', profile.mascotChromaKey !== undefined ? profile.mascotChromaKey : 'green'); } catch {}
+
+    setMascotChromaThreshold(profile.mascotChromaThreshold !== undefined ? profile.mascotChromaThreshold : 230);
+    try { localStorage.setItem('mascotChromaThreshold', (profile.mascotChromaThreshold !== undefined ? profile.mascotChromaThreshold : 230).toString()); } catch {}
+
+    setMascotWhiteBacking(profile.mascotWhiteBacking !== undefined ? profile.mascotWhiteBacking : true);
+    try { localStorage.setItem('mascotWhiteBacking', (profile.mascotWhiteBacking !== undefined ? profile.mascotWhiteBacking : true).toString()); } catch {}
+
     if (profile.headerLogoUrl !== undefined) {
       setHeaderLogoUrl(profile.headerLogoUrl);
       try { localStorage.setItem('headerLogoUrl', profile.headerLogoUrl); } catch {}
@@ -585,19 +634,23 @@ export default function App() {
       setLogoFileName('');
       try { localStorage.setItem('logoFileName', ''); } catch {}
     }
-    if (profile.subtitleFontSize !== undefined) updateSubtitleFontSize(profile.subtitleFontSize);
-    if (profile.titleFontSize !== undefined) updateTitleFontSize(profile.titleFontSize);
-    if (profile.subtitleY !== undefined) updateSubtitleY(profile.subtitleY);
-    if (profile.subtitleColor !== undefined) updateSubtitleColor(profile.subtitleColor);
-    if (profile.subtitleOutlineColor !== undefined) updateSubtitleOutlineColor(profile.subtitleOutlineColor);
-    if (profile.subtitleOutlineWidth !== undefined) updateSubtitleOutlineWidth(profile.subtitleOutlineWidth);
-    if (profile.subtitleFontFamily !== undefined) updateSubtitleFontFamily(profile.subtitleFontFamily);
-    if (profile.subtitleHighlightColor !== undefined) updateSubtitleHighlightColor(profile.subtitleHighlightColor);
-    if (profile.subtitleHighlightStyle !== undefined) updateSubtitleHighlightStyle(profile.subtitleHighlightStyle);
-    if (profile.subtitleMaxWidth !== undefined) updateSubtitleMaxWidth(profile.subtitleMaxWidth);
-    if (profile.subtitleMaxLines !== undefined) updateSubtitleMaxLines(profile.subtitleMaxLines);
-    if (profile.titleOutlineColor !== undefined) updateTitleOutlineColor(profile.titleOutlineColor);
-    if (profile.titleOutlineWidth !== undefined) updateTitleOutlineWidth(profile.titleOutlineWidth);
+
+    updateSubtitleFontSize(profile.subtitleFontSize !== undefined ? profile.subtitleFontSize : 38);
+    updateTitleFontSize(profile.titleFontSize !== undefined ? profile.titleFontSize : 36);
+    updateSubtitleY(profile.subtitleY !== undefined ? profile.subtitleY : 770);
+    updateSubtitleColor(profile.subtitleColor !== undefined ? profile.subtitleColor : '#FFFFFF');
+    updateSubtitleOutlineColor(profile.subtitleOutlineColor !== undefined ? profile.subtitleOutlineColor : '#000000');
+    updateSubtitleOutlineWidth(profile.subtitleOutlineWidth !== undefined ? profile.subtitleOutlineWidth : 8);
+    updateSubtitleFontFamily(profile.subtitleFontFamily !== undefined ? profile.subtitleFontFamily : '"Montserrat", Arial, sans-serif');
+    updateSubtitleHighlightColor(profile.subtitleHighlightColor !== undefined ? profile.subtitleHighlightColor : (profile.id === 'ngua-biet-tuot' ? '#38BDF8' : '#FFFF00'));
+    updateSubtitleHighlightStyle(profile.subtitleHighlightStyle !== undefined ? profile.subtitleHighlightStyle : 'word-color');
+    updateSubtitleMaxWidth(profile.subtitleMaxWidth !== undefined ? profile.subtitleMaxWidth : 450);
+    updateSubtitleMaxLines(profile.subtitleMaxLines !== undefined ? profile.subtitleMaxLines : 2);
+    updateTitleOutlineColor(profile.titleOutlineColor !== undefined ? profile.titleOutlineColor : '#000000');
+    updateTitleOutlineWidth(profile.titleOutlineWidth !== undefined ? profile.titleOutlineWidth : 6);
+    updateImageFrameWidth(profile.imageFrameWidth !== undefined ? profile.imageFrameWidth : 290);
+    updateImageFrameHeight(profile.imageFrameHeight !== undefined ? profile.imageFrameHeight : 390);
+    updateGlobalImageZoom(profile.globalImageZoom !== undefined ? profile.globalImageZoom : 100);
 
     const isCat = profile.id === 'cat-thong-thai';
     const DEFAULT_MASCOT_POSES = {
