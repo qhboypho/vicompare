@@ -2,12 +2,4 @@ name = "vicompare-telegram-bot"
 main = "index.js"
 compatibility_date = "2024-03-01"
 
-[vars]
-# Mặc định sử dụng các khóa API có sẵn nếu người dùng không thiết lập khóa riêng biệt
-DEFAULT_GEMINI_KEY = ""
-DEFAULT_LUCY_KEY = ""
-DEFAULT_VCLIP_KEY = ""
-DEFAULT_ELEVEN_KEY = ""
 
-# Điền Telegram Bot Token vào đây hoặc cấu hình qua Dashboard của Cloudflare
-TELEGRAM_BOT_TOKEN = ""

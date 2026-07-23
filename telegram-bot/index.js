@@ -97,7 +97,7 @@ async function handleMessage(message, token, env) {
       const base64Image = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
 
       // Gửi đa phương tiện lên Gemini API
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
       const geminiRes = await fetch(geminiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -118,11 +118,19 @@ async function handleMessage(message, token, env) {
         })
       });
 
+      if (!geminiRes.ok) {
+        const errText = await geminiRes.text();
+        throw new Error(`Gemini API error (Multimodal) ${geminiRes.status}: ${errText}`);
+      }
+
       const geminiData = await geminiRes.json();
-      scriptResult = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "Không tạo được kịch bản.";
+      scriptResult = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      if (!scriptResult) {
+        throw new Error("Không nhận được nội dung kịch bản từ phản hồi của Gemini.");
+      }
     } else {
       // Gửi yêu cầu text thông thường lên Gemini API
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
       const geminiRes = await fetch(geminiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -137,8 +145,16 @@ async function handleMessage(message, token, env) {
         })
       });
 
+      if (!geminiRes.ok) {
+        const errText = await geminiRes.text();
+        throw new Error(`Gemini API error (Text) ${geminiRes.status}: ${errText}`);
+      }
+
       const geminiData = await geminiRes.json();
-      scriptResult = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "Không tạo được kịch bản.";
+      scriptResult = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      if (!scriptResult) {
+        throw new Error("Không nhận được nội dung kịch bản từ phản hồi của Gemini.");
+      }
     }
 
     // Gửi kịch bản hoàn chỉnh kèm theo nút bấm tạo giọng đọc
