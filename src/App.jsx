@@ -24,7 +24,11 @@ import {
   Video,
   CheckCircle,
   AlertCircle,
-  Palette
+  Palette,
+  Eye,
+  EyeOff,
+  Copy,
+  Check
 } from 'lucide-react';
 import { drawFrame } from './utils/canvasRenderer';
 import { exportVideo } from './utils/videoExporter';
@@ -57,6 +61,88 @@ const safeAtob = (str) => {
     console.warn('safeAtob decode skipped:', e);
     return '';
   }
+};
+
+// A reusable component to render password-type input fields with view eye toggle and copy button
+const ApiKeyInput = ({ value, onChange, placeholder = "Nhập API Key...", className = "", style = {}, ...props }) => {
+  const [show, setShow] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%', position: 'relative' }}>
+      <input
+        type={show ? "text" : "password"}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className={className}
+        style={{
+          flex: 1,
+          paddingRight: '65px',
+          width: '100%',
+          ...style
+        }}
+        {...props}
+      />
+      <div style={{
+        position: 'absolute',
+        right: '8px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px'
+      }}>
+        <button
+          type="button"
+          onClick={() => setShow(!show)}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--text-muted, #94a3b8)',
+            cursor: 'pointer',
+            padding: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'color 0.2s'
+          }}
+          title={show ? "Ẩn Key" : "Hiện Key"}
+        >
+          {show ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
+        <button
+          type="button"
+          onClick={handleCopy}
+          disabled={!value}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: copied ? 'var(--accent-emerald, #10b981)' : 'var(--text-muted, #94a3b8)',
+            cursor: value ? 'pointer' : 'not-allowed',
+            padding: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'color 0.2s',
+            opacity: value ? 1 : 0.5
+          }}
+          title={copied ? "Đã sao chép!" : "Sao chép"}
+        >
+          {copied ? <Check size={16} /> : <Copy size={16} />}
+        </button>
+      </div>
+    </div>
+  );
 };
 
 const DEFAULT_ELEVEN_VOICES = [
@@ -4369,12 +4455,10 @@ export default function App() {
                     <div className="form-group">
                       <label>ElevenLabs API Key</label>
                       <div className="tts-input-row">
-                        <input 
-                          type="password" 
+                        <ApiKeyInput 
                           value={elevenLabsApiKey} 
                           onChange={(e) => handleSaveApiKey(e.target.value)}
                           placeholder="Nhập xi-api-key từ Website Reset hoặc elevenlabs.io" 
-                          style={{ flex: 1 }}
                         />
                         <button className="btn btn-secondary btn-sm" onClick={() => fetchVoices(elevenLabsApiKey)}>
                           Tải giọng đọc
@@ -4587,12 +4671,10 @@ export default function App() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     <div className="form-group">
                       <label>VClip API Key</label>
-                      <input 
-                        type="password" 
+                      <ApiKeyInput 
                         value={vclipApiKey} 
                         onChange={(e) => handleSaveVclipApiKey(e.target.value)}
                         placeholder="Nhập API Key VClip (sk_live_...)" 
-                        style={{ padding: '0.5rem', fontSize: '0.8rem' }}
                       />
                     </div>
 
@@ -4680,12 +4762,10 @@ export default function App() {
                     <div className="form-group">
                       <label>LucyLab API Key</label>
                       <div className="tts-input-row">
-                        <input 
-                          type="password" 
+                        <ApiKeyInput 
                           value={lucyLabApiKey} 
                           onChange={(e) => handleSaveLucyLabApiKey(e.target.value)}
                           placeholder="Nhập API Key LucyLab (sk_live_...)" 
-                          style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem' }}
                         />
                         <button className="btn btn-secondary btn-sm" onClick={() => fetchLucyLabVoices(lucyLabApiKey)} disabled={isLoadingLucyLabVoices}>
                           {isLoadingLucyLabVoices ? 'Đang tải...' : 'Tải giọng đọc'}
@@ -6223,13 +6303,11 @@ export default function App() {
                           <option value="openrouter">OpenRouter (Free Llama)</option>
                           <option value="openai">OpenAI GPT</option>
                         </select>
-                        <input 
-                          type="password" 
+                        <ApiKeyInput 
                           placeholder={`Nhập API Key ${commentAiProvider === 'gemini' ? 'Gemini' : 'OpenAI'}...`}
                           value={commentAiApiKey}
                           onChange={(e) => setCommentAiApiKey(e.target.value)}
                           style={{ 
-                            flex: 1, 
                             padding: '0.4rem', 
                             fontSize: '0.8rem', 
                             background: '#0b0f19', 
@@ -6457,8 +6535,7 @@ export default function App() {
                   </div>
                   <div className="form-group">
                     <label>Page Access Token</label>
-                    <input 
-                      type="password" 
+                    <ApiKeyInput 
                       placeholder="EAAW..." 
                       value={fbAccessToken} 
                       onChange={(e) => setFbAccessToken(e.target.value)} 
@@ -6485,8 +6562,7 @@ export default function App() {
                   
                   <div className="form-group">
                     <label>API Key / OAuth Access Token (1 giờ)</label>
-                    <input 
-                      type="password" 
+                    <ApiKeyInput 
                       placeholder="ya29... (Bỏ trống nếu dùng tự động làm mới ở dưới)" 
                       value={ytAccessToken} 
                       onChange={(e) => setYtAccessToken(e.target.value)} 
@@ -6513,8 +6589,7 @@ export default function App() {
 
                     <div className="form-group">
                       <label>OAuth Client Secret</label>
-                      <input 
-                        type="password" 
+                      <ApiKeyInput 
                         placeholder="Nhập Client Secret..." 
                         value={ytClientSecret} 
                         onChange={(e) => setYtClientSecret(e.target.value)} 
@@ -6524,8 +6599,7 @@ export default function App() {
 
                     <div className="form-group">
                       <label>OAuth Refresh Token</label>
-                      <input 
-                        type="password" 
+                      <ApiKeyInput 
                         placeholder="Mã 1//... lấy từ Google Playground" 
                         value={ytRefreshToken} 
                         onChange={(e) => setYtRefreshToken(e.target.value)} 
@@ -6551,8 +6625,7 @@ export default function App() {
                   </div>
                   <div className="form-group">
                     <label>Developer Access Token</label>
-                    <input 
-                      type="password" 
+                    <ApiKeyInput 
                       placeholder="act.tkt..." 
                       value={ttAccessToken} 
                       onChange={(e) => setTtAccessToken(e.target.value)} 
