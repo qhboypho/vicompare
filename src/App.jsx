@@ -214,13 +214,19 @@ export default function App() {
   const [mascotPoses, setMascotPoses] = useState(() => {
     try {
       const saved = localStorage.getItem('mascotPoses');
-      return saved ? JSON.parse(saved) : {
-        default: '/mascot/default.png',
-        point_left: '/mascot/point_left.png',
-        point_right: '/mascot/point_right.png',
-        shrug: '/mascot/shrug.png',
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn(e);
+    }
+    const activeId = localStorage.getItem('active_channel_id') || 'cat-thong-thai';
+    if (activeId === 'cat-thong-thai') {
+      return {
+        default: '/mascot/cat/default.png',
+        point_left: '/mascot/cat/point_left.png',
+        point_right: '/mascot/cat/point_right.png',
+        shrug: '/mascot/cat/shrug.png',
       };
-    } catch {
+    } else {
       return {
         default: '/mascot/default.png',
         point_left: '/mascot/point_left.png',
@@ -305,7 +311,23 @@ export default function App() {
   const [channelProfiles, setChannelProfiles] = useState(() => {
     try {
       const saved = localStorage.getItem('channel_profiles');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.map(p => {
+          if (p.id === 'cat-thong-thai' && (!p.mascotPoses || p.mascotPoses.default === '/mascot/default.png')) {
+            return {
+              ...p,
+              mascotPoses: {
+                default: '/mascot/cat/default.png',
+                point_left: '/mascot/cat/point_left.png',
+                point_right: '/mascot/cat/point_right.png',
+                shrug: '/mascot/cat/shrug.png'
+              }
+            };
+          }
+          return p;
+        });
+      }
     } catch (e) {
       console.warn('Failed to parse channel_profiles:', e);
     }
@@ -327,10 +349,10 @@ export default function App() {
         headerLogoUrl: '',
         spriteFileName: '',
         mascotPoses: {
-          default: '/mascot/default.png',
-          point_left: '/mascot/point_left.png',
-          point_right: '/mascot/point_right.png',
-          shrug: '/mascot/shrug.png'
+          default: '/mascot/cat/default.png',
+          point_left: '/mascot/cat/point_left.png',
+          point_right: '/mascot/cat/point_right.png',
+          shrug: '/mascot/cat/shrug.png'
         }
       },
       {
@@ -491,11 +513,12 @@ export default function App() {
     if (profile.titleOutlineColor !== undefined) updateTitleOutlineColor(profile.titleOutlineColor);
     if (profile.titleOutlineWidth !== undefined) updateTitleOutlineWidth(profile.titleOutlineWidth);
 
+    const isCat = profile.id === 'cat-thong-thai';
     const DEFAULT_MASCOT_POSES = {
-      default: '/mascot/default.png',
-      point_left: '/mascot/point_left.png',
-      point_right: '/mascot/point_right.png',
-      shrug: '/mascot/shrug.png'
+      default: isCat ? '/mascot/cat/default.png' : '/mascot/default.png',
+      point_left: isCat ? '/mascot/cat/point_left.png' : '/mascot/point_left.png',
+      point_right: isCat ? '/mascot/cat/point_right.png' : '/mascot/point_right.png',
+      shrug: isCat ? '/mascot/cat/shrug.png' : '/mascot/shrug.png'
     };
 
     const posesToApply = profile.mascotPoses && Object.keys(profile.mascotPoses).length > 0 
@@ -1585,6 +1608,36 @@ export default function App() {
       }
     };
     restoreAssets();
+  }, []);
+
+  // 1-time Migration: Ensure cat-thong-thai mascot default doesn't point to /mascot/default.png
+  useEffect(() => {
+    try {
+      const activeId = localStorage.getItem('active_channel_id') || 'cat-thong-thai';
+      if (activeId === 'cat-thong-thai') {
+        const savedPoses = localStorage.getItem('mascotPoses');
+        if (savedPoses) {
+          const parsed = JSON.parse(savedPoses);
+          if (parsed.default === '/mascot/default.png') {
+            const newWiseCatPoses = {
+              default: '/mascot/cat/default.png',
+              point_left: '/mascot/cat/point_left.png',
+              point_right: '/mascot/cat/point_right.png',
+              shrug: '/mascot/cat/shrug.png'
+            };
+            localStorage.setItem('mascotPoses', JSON.stringify(newWiseCatPoses));
+            setMascotPoses(newWiseCatPoses);
+            
+            // Clear loaded cache to force refresh
+            ['default', 'point_left', 'point_right', 'shrug'].forEach(k => {
+              delete loadedImagesRef.current[k];
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(e);
+    }
   }, []);
 
   // Load voices from ElevenLabs if API key is stored
