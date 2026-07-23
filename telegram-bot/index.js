@@ -170,7 +170,7 @@ async function handleMessage(message, token, env) {
       ]
     };
 
-    await sendTelegramMessage(chatId, `📝 **Kịch bản đề xuất:**\n\n${scriptResult}`, token, replyMarkup);
+    await sendTelegramMessage(chatId, `📝 **Kịch bản đề xuất:**\n\n${scriptResult}`, token, replyMarkup, "Markdown");
   } catch (err) {
     console.error("Gemini Error:", err);
     await sendTelegramMessage(chatId, `❌ Lỗi khi soạn kịch bản: ${err.message}`, token);
@@ -351,21 +351,36 @@ async function handleCallbackQuery(callbackQuery, token, env) {
 }
 
 // Helper gửi tin nhắn văn bản thông thường lên Telegram
-async function sendTelegramMessage(chatId, text, token, replyMarkup = null) {
+async function sendTelegramMessage(chatId, text, token, replyMarkup = null, parseMode = null) {
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
   const body = {
     chat_id: chatId,
-    text: text,
-    parse_mode: "Markdown"
+    text: text
   };
+  if (parseMode) {
+    body.parse_mode = parseMode;
+  }
   if (replyMarkup) {
     body.reply_markup = replyMarkup;
   }
-  await fetch(url, {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
+  
+  if (!res.ok) {
+    console.error("sendTelegramMessage failed:", await res.text());
+    // Fallback: nếu gửi có parseMode bị lỗi cú pháp markdown, hãy thử gửi lại không có parse_mode (chữ thuần)
+    if (parseMode) {
+      delete body.parse_mode;
+      await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+    }
+  }
 }
 
 // Helper gửi file nhị phân Audio lên Telegram sử dụng FormData
