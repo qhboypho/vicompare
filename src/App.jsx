@@ -579,6 +579,7 @@ export default function App() {
   // Swapping / applying a Channel Profile
   const handleApplyChannelProfile = (profile) => {
     if (!profile) return;
+    isApplyingProfileRef.current = true;
     setActiveChannelId(profile.id);
     try { localStorage.setItem('active_channel_id', profile.id); } catch {}
 
@@ -666,6 +667,14 @@ export default function App() {
 
     setMascotPoses(posesToApply);
     
+    let pendingPosesCount = Object.keys(posesToApply).length;
+    const checkDone = () => {
+      pendingPosesCount--;
+      if (pendingPosesCount <= 0) {
+        isApplyingProfileRef.current = false;
+      }
+    };
+
     Object.entries(posesToApply).forEach(([k, v]) => {
       if (v && v.startsWith('idb:')) {
         const dbKey = v.replace('idb:', '');
@@ -677,13 +686,18 @@ export default function App() {
           } else {
             cacheImage(k, DEFAULT_MASCOT_POSES[k] || '/mascot/default.png');
           }
+          checkDone();
         }).catch(() => {
           cacheImage(k, DEFAULT_MASCOT_POSES[k] || '/mascot/default.png');
+          checkDone();
         });
-      } else if (v) {
-        cacheImage(k, v);
       } else {
-        cacheImage(k, DEFAULT_MASCOT_POSES[k] || '/mascot/default.png');
+        if (v) {
+          cacheImage(k, v);
+        } else {
+          cacheImage(k, DEFAULT_MASCOT_POSES[k] || '/mascot/default.png');
+        }
+        checkDone();
       }
     });
   };
@@ -874,6 +888,7 @@ export default function App() {
 
   // Live sync active channel properties into channelProfiles array & localStorage
   const updateActiveChannelProps = (propUpdates) => {
+    if (isApplyingProfileRef.current) return;
     setChannelProfiles(prevProfiles => {
       const updated = prevProfiles.map(p => {
         if (p.id === activeChannelId) {
@@ -1713,6 +1728,53 @@ export default function App() {
   const audioRef = useRef(null);
   const loadedImagesRef = useRef({});
   const animationFrameRef = useRef(null);
+  const isApplyingProfileRef = useRef(false);
+
+  // Tự động sửa lỗi/khôi phục cấu hình mẫu kênh nếu bị ghi đè chéo do lỗi bất đồng bộ trước đó
+  useEffect(() => {
+    setChannelProfiles(prev => {
+      let changed = false;
+      const updated = prev.map(p => {
+        if (p.id === 'cat-thong-thai' && (p.bgColor === '#0B0F19' || p.headerTitle === 'Ngựa Biết Tuốt')) {
+          changed = true;
+          return {
+            ...p,
+            name: '🐱 Mèo Thông Thái',
+            headerTitle: 'Mèo Thông Thái',
+            bgColor: '#FAF6F0',
+            headerTitleColor: '#4A3E3D',
+            subtitleColor: '#FFFFFF',
+            subtitleOutlineColor: '#000000',
+            subtitleHighlightColor: '#FFFF00',
+            subtitleY: 770
+          };
+        }
+        if (p.id === 'ngua-biet-tuot' && (p.bgColor === '#FAF6F0' || p.headerTitle === 'Mèo Thông Thái')) {
+          changed = true;
+          return {
+            ...p,
+            name: '🐴 Ngựa Biết Tuốt',
+            headerTitle: 'Ngựa Biết Tuốt',
+            bgColor: '#0B0F19',
+            headerTitleColor: '#38BDF8',
+            subtitleColor: '#FFFFFF',
+            subtitleOutlineColor: '#000000',
+            subtitleHighlightColor: '#38BDF8',
+            subtitleY: 770
+          };
+        }
+        return p;
+      });
+      if (changed) {
+        safeSaveChannelProfiles(updated);
+        const current = updated.find(p => p.id === activeChannelId);
+        if (current) {
+          setTimeout(() => handleApplyChannelProfile(current), 50);
+        }
+      }
+      return updated;
+    });
+  }, []);
 
   // Khôi phục âm thanh và hình ảnh từ IndexedDB khi tải trang
   useEffect(() => {
