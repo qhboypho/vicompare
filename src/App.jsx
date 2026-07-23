@@ -906,6 +906,57 @@ export default function App() {
     updateActiveChannelProps({ headerTitleFontSize: val });
   };
 
+  const updateHeaderTitle = (val) => {
+    setHeaderTitle(val);
+    try { localStorage.setItem('headerTitle', val); } catch {}
+    updateActiveChannelProps({ headerTitle: val });
+  };
+  const updateBgColor = (val) => {
+    setBgColor(val);
+    try { localStorage.setItem('bgColor', val); } catch {}
+    updateActiveChannelProps({ bgColor: val });
+  };
+  const updateHeaderPosition = (val) => {
+    setHeaderPosition(val);
+    try { localStorage.setItem('headerPosition', val); } catch {}
+    updateActiveChannelProps({ headerPosition: val });
+  };
+  const updateHeaderTitleColor = (val) => {
+    setHeaderTitleColor(val);
+    try { localStorage.setItem('headerTitleColor', val); } catch {}
+    updateActiveChannelProps({ headerTitleColor: val });
+  };
+  const updateMascotChromaKey = (val) => {
+    setMascotChromaKey(val);
+    try { localStorage.setItem('mascotChromaKey', val); } catch {}
+    updateActiveChannelProps({ mascotChromaKey: val });
+  };
+  const updateMascotChromaThreshold = (val) => {
+    setMascotChromaThreshold(val);
+    try { localStorage.setItem('mascotChromaThreshold', val.toString()); } catch {}
+    updateActiveChannelProps({ mascotChromaThreshold: val });
+  };
+  const updateMascotWhiteBacking = (val) => {
+    setMascotWhiteBacking(val);
+    try { localStorage.setItem('mascotWhiteBacking', val.toString()); } catch {}
+    updateActiveChannelProps({ mascotWhiteBacking: val });
+  };
+  const updateImageFrameWidth = (val) => {
+    setImageFrameWidth(val);
+    try { localStorage.setItem('imageFrameWidth', val.toString()); } catch {}
+    updateActiveChannelProps({ imageFrameWidth: val });
+  };
+  const updateImageFrameHeight = (val) => {
+    setImageFrameHeight(val);
+    try { localStorage.setItem('imageFrameHeight', val.toString()); } catch {}
+    updateActiveChannelProps({ imageFrameHeight: val });
+  };
+  const updateGlobalImageZoom = (val) => {
+    setGlobalImageZoom(val);
+    try { localStorage.setItem('globalImageZoom', val.toString()); } catch {}
+    updateActiveChannelProps({ globalImageZoom: val });
+  };
+
   // UI rendering & Export State
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
@@ -1912,73 +1963,71 @@ export default function App() {
 
   // Áp dụng Theme Nhanh cho Video (Quick Theme Presets)
   const applyThemePreset = (presetKey) => {
+    let updates = {};
     if (presetKey === 'light') {
-      setBgColor('#FAF6F0');
-      setSubtitleColor('#FFFFFF');
-      setSubtitleOutlineColor('#000000');
-      setSubtitleHighlightColor('#FFFF00');
-      setTitleOutlineColor('#000000');
-      setHeaderTitleColor('#4A3E3D');
-      localStorage.setItem('bgColor', '#FAF6F0');
-      localStorage.setItem('subtitleColor', '#FFFFFF');
-      localStorage.setItem('subtitleOutlineColor', '#000000');
-      localStorage.setItem('subtitleHighlightColor', '#FFFF00');
-      localStorage.setItem('titleOutlineColor', '#000000');
-      localStorage.setItem('headerTitleColor', '#4A3E3D');
+      updates = {
+        bgColor: '#FAF6F0',
+        subtitleColor: '#FFFFFF',
+        subtitleOutlineColor: '#000000',
+        subtitleHighlightColor: '#FFFF00',
+        titleOutlineColor: '#000000',
+        headerTitleColor: '#4A3E3D'
+      };
     } else if (presetKey === 'dark-contrast') {
-      setBgColor('#0B0F19');
-      setSubtitleColor('#FFFFFF');
-      setSubtitleOutlineColor('#000000');
-      setSubtitleHighlightColor('#38BDF8');
-      setTitleOutlineColor('#000000');
-      setHeaderTitleColor('#FFFFFF');
-      localStorage.setItem('bgColor', '#0B0F19');
-      localStorage.setItem('subtitleColor', '#FFFFFF');
-      localStorage.setItem('subtitleOutlineColor', '#000000');
-      localStorage.setItem('subtitleHighlightColor', '#38BDF8');
-      localStorage.setItem('titleOutlineColor', '#000000');
-      localStorage.setItem('headerTitleColor', '#FFFFFF');
+      updates = {
+        bgColor: '#0B0F19',
+        subtitleColor: '#FFFFFF',
+        subtitleOutlineColor: '#000000',
+        subtitleHighlightColor: '#38BDF8',
+        titleOutlineColor: '#000000',
+        headerTitleColor: '#FFFFFF'
+      };
     } else if (presetKey === 'dark-neon') {
-      setBgColor('#070614');
-      setSubtitleColor('#FFFFFF');
-      setSubtitleOutlineColor('#000000');
-      setSubtitleHighlightColor('#00FFCC');
-      setTitleOutlineColor('#000000');
-      setHeaderTitleColor('#00FFCC');
-      localStorage.setItem('bgColor', '#070614');
-      localStorage.setItem('subtitleColor', '#FFFFFF');
-      localStorage.setItem('subtitleOutlineColor', '#000000');
-      localStorage.setItem('subtitleHighlightColor', '#00FFCC');
-      localStorage.setItem('titleOutlineColor', '#000000');
-      localStorage.setItem('headerTitleColor', '#00FFCC');
+      updates = {
+        bgColor: '#070614',
+        subtitleColor: '#FFFFFF',
+        subtitleOutlineColor: '#000000',
+        subtitleHighlightColor: '#00FFCC',
+        titleOutlineColor: '#000000',
+        headerTitleColor: '#00FFCC'
+      };
     } else if (presetKey === 'dark-gold') {
-      setBgColor('#121212');
-      setSubtitleColor('#FFFFFF');
-      setSubtitleOutlineColor('#000000');
-      setSubtitleHighlightColor('#FBBF24');
-      setTitleOutlineColor('#000000');
-      setHeaderTitleColor('#FBBF24');
-      localStorage.setItem('bgColor', '#121212');
-      localStorage.setItem('subtitleColor', '#FFFFFF');
-      localStorage.setItem('subtitleOutlineColor', '#000000');
-      localStorage.setItem('subtitleHighlightColor', '#FBBF24');
-      localStorage.setItem('titleOutlineColor', '#000000');
-      localStorage.setItem('headerTitleColor', '#FBBF24');
+      updates = {
+        bgColor: '#121212',
+        subtitleColor: '#FFFFFF',
+        subtitleOutlineColor: '#000000',
+        subtitleHighlightColor: '#FBBF24',
+        titleOutlineColor: '#000000',
+        headerTitleColor: '#FBBF24'
+      };
     } else if (presetKey === 'dark-gradient') {
-      const gradStr = 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)';
-      setBgColor(gradStr);
-      setSubtitleColor('#FFFFFF');
-      setSubtitleOutlineColor('#000000');
-      setSubtitleHighlightColor('#F43F5E');
-      setTitleOutlineColor('#000000');
-      setHeaderTitleColor('#FFFFFF');
-      localStorage.setItem('bgColor', gradStr);
-      localStorage.setItem('subtitleColor', '#FFFFFF');
-      localStorage.setItem('subtitleOutlineColor', '#000000');
-      localStorage.setItem('subtitleHighlightColor', '#F43F5E');
-      localStorage.setItem('titleOutlineColor', '#000000');
-      localStorage.setItem('headerTitleColor', '#FFFFFF');
+      updates = {
+        bgColor: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)',
+        subtitleColor: '#FFFFFF',
+        subtitleOutlineColor: '#000000',
+        subtitleHighlightColor: '#F43F5E',
+        titleOutlineColor: '#000000',
+        headerTitleColor: '#FFFFFF'
+      };
     }
+
+    setBgColor(updates.bgColor);
+    setSubtitleColor(updates.subtitleColor);
+    setSubtitleOutlineColor(updates.subtitleOutlineColor);
+    setSubtitleHighlightColor(updates.subtitleHighlightColor);
+    setTitleOutlineColor(updates.titleOutlineColor);
+    setHeaderTitleColor(updates.headerTitleColor);
+
+    try {
+      localStorage.setItem('bgColor', updates.bgColor);
+      localStorage.setItem('subtitleColor', updates.subtitleColor);
+      localStorage.setItem('subtitleOutlineColor', updates.subtitleOutlineColor);
+      localStorage.setItem('subtitleHighlightColor', updates.subtitleHighlightColor);
+      localStorage.setItem('titleOutlineColor', updates.titleOutlineColor);
+      localStorage.setItem('headerTitleColor', updates.headerTitleColor);
+    } catch {}
+
+    updateActiveChannelProps(updates);
   };
 
   // Lưu API Key VClip
@@ -5066,7 +5115,7 @@ export default function App() {
                     <input 
                       type="text" 
                       value={headerTitle} 
-                      onChange={(e) => setHeaderTitle(e.target.value)} 
+                      onChange={(e) => updateHeaderTitle(e.target.value)} 
                     />
                   </div>
 
@@ -5086,13 +5135,13 @@ export default function App() {
                       <input 
                         type="text" 
                         value={bgColor} 
-                        onChange={(e) => setBgColor(e.target.value)} 
+                        onChange={(e) => updateBgColor(e.target.value)} 
                         style={{ flex: 1 }}
                       />
                       <input 
                         type="color" 
                         value={bgColor.startsWith('#') ? bgColor : '#FAF6F0'} 
-                        onChange={(e) => setBgColor(e.target.value)} 
+                        onChange={(e) => updateBgColor(e.target.value)} 
                         style={{ width: '32px', height: '32px', padding: 0, cursor: 'pointer' }}
                       />
                     </div>
@@ -5246,7 +5295,7 @@ export default function App() {
                     <label>Vị trí Logo & Tiêu đề kênh</label>
                     <select 
                       value={headerPosition} 
-                      onChange={(e) => setHeaderPosition(e.target.value)}
+                      onChange={(e) => updateHeaderPosition(e.target.value)}
                     >
                       <option value="top-center">Giữa trên cùng (Mặc định)</option>
                       <option value="top-left">Góc trên bên trái</option>
@@ -5263,19 +5312,13 @@ export default function App() {
                       <input 
                         type="text" 
                         value={headerTitleColor} 
-                        onChange={(e) => {
-                          setHeaderTitleColor(e.target.value);
-                          localStorage.setItem('headerTitleColor', e.target.value);
-                        }} 
+                        onChange={(e) => updateHeaderTitleColor(e.target.value)} 
                         style={{ flex: 1 }}
                       />
                       <input 
                         type="color" 
                         value={headerTitleColor.startsWith('#') ? headerTitleColor : '#FFFFFF'} 
-                        onChange={(e) => {
-                          setHeaderTitleColor(e.target.value);
-                          localStorage.setItem('headerTitleColor', e.target.value);
-                        }} 
+                        onChange={(e) => updateHeaderTitleColor(e.target.value)} 
                         style={{ width: '32px', height: '32px', padding: 0, cursor: 'pointer' }}
                       />
                     </div>
@@ -5361,10 +5404,7 @@ export default function App() {
                   </label>
                   <select 
                     value={mascotChromaKey} 
-                    onChange={(e) => {
-                      setMascotChromaKey(e.target.value);
-                      localStorage.setItem('mascotChromaKey', e.target.value);
-                    }}
+                    onChange={(e) => updateMascotChromaKey(e.target.value)}
                     style={{ padding: '0.5rem', fontSize: '0.8rem', marginBottom: '0.5rem' }}
                   >
                     <option value="green">🟢 Chỉ tách phông XANH LÁ (Green Screen - Giữ nguyên áo trắng & chi tiết)</option>
@@ -5378,10 +5418,7 @@ export default function App() {
                       type="checkbox" 
                       id="mascot_white_backing_chk"
                       checked={mascotWhiteBacking}
-                      onChange={(e) => {
-                        setMascotWhiteBacking(e.target.checked);
-                        localStorage.setItem('mascotWhiteBacking', e.target.checked.toString());
-                      }}
+                      onChange={(e) => updateMascotWhiteBacking(e.target.checked)}
                       style={{ width: '16px', height: '16px', cursor: 'pointer', margin: 0 }}
                     />
                     <label htmlFor="mascot_white_backing_chk" style={{ fontSize: '0.75rem', color: '#fff', cursor: 'pointer', userSelect: 'none', margin: 0, fontWeight: 'bold' }}>
@@ -5404,11 +5441,7 @@ export default function App() {
                         max="255" 
                         step="1" 
                         value={mascotChromaThreshold} 
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value, 10);
-                          setMascotChromaThreshold(val);
-                          localStorage.setItem('mascotChromaThreshold', val.toString());
-                        }} 
+                        onChange={(e) => updateMascotChromaThreshold(parseInt(e.target.value, 10))} 
                         style={{ cursor: 'pointer', height: '6px', width: '100%' }}
                       />
                       <span style={{ fontSize: '0.65rem', color: '#888', display: 'block', marginTop: '0.2rem', lineHeight: '1.3' }}>
@@ -5764,7 +5797,7 @@ export default function App() {
                           <input 
                             type="text" 
                             value={titleOutlineColor} 
-                            onChange={(e) => setTitleOutlineColor(e.target.value)} 
+                            onChange={(e) => updateTitleOutlineColor(e.target.value)} 
                             style={{ flex: 1, border: 'none', background: 'none', padding: 0, fontSize: '0.75rem', color: '#fff', outline: 'none' }}
                           />
                         </div>
@@ -5795,7 +5828,7 @@ export default function App() {
                         max="350" 
                         step="5" 
                         value={imageFrameWidth} 
-                        onChange={(e) => setImageFrameWidth(parseInt(e.target.value))} 
+                        onChange={(e) => updateImageFrameWidth(parseInt(e.target.value, 10))} 
                         style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                       />
                       <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mặc định 290px. Cả hai khung sẽ tự căn giữa 2 bên nửa màn hình.</span>
@@ -5813,7 +5846,7 @@ export default function App() {
                         max="500" 
                         step="5" 
                         value={imageFrameHeight} 
-                        onChange={(e) => setImageFrameHeight(parseInt(e.target.value))} 
+                        onChange={(e) => updateImageFrameHeight(parseInt(e.target.value, 10))} 
                         style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                       />
                       <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mặc định 390px.</span>
@@ -5831,7 +5864,7 @@ export default function App() {
                         max="250" 
                         step="5" 
                         value={globalImageZoom} 
-                        onChange={(e) => setGlobalImageZoom(parseInt(e.target.value))} 
+                        onChange={(e) => updateGlobalImageZoom(parseInt(e.target.value, 10))} 
                         style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                       />
                       <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mặc định 100%. Áp dụng cho tất cả hình so sánh.</span>
