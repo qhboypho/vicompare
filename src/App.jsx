@@ -2689,7 +2689,7 @@ export default function App() {
       
       const rawData = audioBuffer.getChannelData(0); // Lấy kênh trái
       const sampleRate = audioBuffer.sampleRate;
-      const audioDuration = targetDuration || audioBuffer.duration;
+      const audioDuration = (targetDuration && targetDuration !== Infinity && !isNaN(targetDuration)) ? targetDuration : audioBuffer.duration;
       
       // 1. Chia khung 30ms, step 15ms để đo năng lượng RMS năng động
       const windowSize = Math.floor(sampleRate * 0.03); // 30ms
