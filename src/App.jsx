@@ -2702,9 +2702,10 @@ export default function App() {
       const sampleRate = audioBuffer.sampleRate;
       const audioDuration = (targetDuration && targetDuration !== Infinity && !isNaN(targetDuration)) ? targetDuration : audioBuffer.duration;
       
-      // 1. Chia khung 30ms, step 15ms để đo năng lượng RMS năng động
-      const windowSize = Math.floor(sampleRate * 0.03); // 30ms
-      const stepSize = Math.floor(sampleRate * 0.015);  // 15ms
+      // 1. Chia khung đo năng lượng RMS
+      const isSimple = silenceSyncMode === 'simple';
+      const windowSize = Math.floor(sampleRate * (isSimple ? 0.05 : 0.03)); // Simple: 50ms, DP: 30ms
+      const stepSize = Math.floor(sampleRate * (isSimple ? 0.025 : 0.015));  // Simple: 25ms, DP: 15ms
       
       const rmsValues = [];
       let minRms = Infinity;
@@ -2721,8 +2722,10 @@ export default function App() {
         if (rms > maxRms) maxRms = rms;
       }
 
-      // Ngưỡng phát hiện khoảng lặng linh hoạt (tự động điều chỉnh theo mức dither / nhiễu nền của LucyLab & VClip)
-      const dynamicThreshold = Math.max(silenceThreshold, minRms + (maxRms - minRms) * 0.06);
+      // Ngưỡng phát hiện khoảng lặng (Simple dùng trực tiếp silenceThreshold, DP tự điều chỉnh linh hoạt)
+      const dynamicThreshold = isSimple 
+        ? silenceThreshold 
+        : Math.max(silenceThreshold, minRms + (maxRms - minRms) * 0.06);
 
       const silences = [];
       let isSilent = false;
@@ -2751,14 +2754,15 @@ export default function App() {
         silences.push({ start: startSilence, end: audioDuration, mid: (startSilence + audioDuration) / 2 });
       }
 
-      // Chỉ gộp các khoảng lặng quá sát nhau (dưới 0.15s)
+      // Gộp các khoảng lặng (Simple: gộp các khoảng nghỉ câu dưới 1.2 giây, DP: gộp dưới 0.15 giây)
       const cleanSilences = [];
       silences.forEach(s => {
         if (cleanSilences.length === 0) {
           cleanSilences.push(s);
         } else {
           const last = cleanSilences[cleanSilences.length - 1];
-          if (s.start - last.end < 0.15) {
+          const shouldMerge = isSimple ? (s.mid - last.mid < 1.2) : (s.start - last.end < 0.15);
+          if (shouldMerge) {
             last.end = s.end;
             last.mid = (last.start + s.end) / 2;
           } else {
@@ -2783,7 +2787,8 @@ export default function App() {
 
         const matchedTimes = [];
 
-        if (silenceSyncMode === 'simple') {
+        if (isSimple) {
+          // Khôi phục thuật toán tuần tự đơn giản gốc (khớp cực chuẩn cho VClip & ElevenLabs)
           let lastMatchIdx = -1;
           for (let i = 0; i < neededCount; i++) {
             const targetTime = propTransitions[i];
@@ -2801,9 +2806,8 @@ export default function App() {
               }
             }
 
-            if (closest && closestDist < 5.0) {
-              const transitionTime = closest.start + Math.min(0.12, (closest.end - closest.start) * 0.25);
-              matchedTimes.push(transitionTime);
+            if (closest && closestDist < 4.5) {
+              matchedTimes.push(closest.mid); // Đặt tại mốc chính giữa khoảng lặng để khớp nhịp tự nhiên nhất
               lastMatchIdx = closestIdx;
             } else {
               matchedTimes.push(targetTime);
@@ -2811,7 +2815,7 @@ export default function App() {
             }
           }
         } else {
-          // Dynamic Programming (mode 'dp')
+          // Dynamic Programming (mode 'dp' tối ưu cho LucyLab)
           if (cleanSilences.length >= neededCount) {
             const dp = Array.from({ length: neededCount + 1 }, () => Array(cleanSilences.length).fill(Infinity));
             const parent = Array.from({ length: neededCount + 1 }, () => Array(cleanSilences.length).fill(-1));
@@ -2825,7 +2829,6 @@ export default function App() {
               for (let j = i - 1; j < cleanSilences.length; j++) {
                 const s = cleanSilences[j];
                 const sDur = s.end - s.start;
-                // Khoảng cách tới mốc thời gian kỳ vọng trừ đi ưu tiên độ dài khoảng nghỉ dài (ngắt câu chính)
                 const dist = Math.abs(s.mid - targetTime);
                 const pauseBonus = Math.min(1.8, sDur * 2.2);
                 const stepCost = dist - pauseBonus;
@@ -2867,14 +2870,12 @@ export default function App() {
 
               for (let i = 0; i < chosenIndices.length; i++) {
                 const s = cleanSilences[chosenIndices[i]];
-                // Mốc chuyển câu đặt ở khoảnh khắc vừa kết thúc đọc câu cũ + 20% thời gian nghỉ
                 const transitionTime = s.start + Math.min(0.12, (s.end - s.start) * 0.25);
                 matchedTimes.push(transitionTime);
               }
             }
           }
 
-          // Dự phòng nếu số khoảng nghỉ ít hơn hoặc DP bị vướng
           if (matchedTimes.length < neededCount) {
             matchedTimes.length = 0;
             let lastMatchIdx = -1;
@@ -2888,7 +2889,6 @@ export default function App() {
               for (let sIdx = lastMatchIdx + 1; sIdx < cleanSilences.length; sIdx++) {
                 const silence = cleanSilences[sIdx];
                 const sDur = silence.end - silence.start;
-                // Trừ ưu tiên khoảng nghỉ dài
                 const dist = Math.abs(silence.mid - targetTime) - Math.min(1.2, sDur * 1.5);
                 if (dist < closestDist) {
                   closestDist = dist;
