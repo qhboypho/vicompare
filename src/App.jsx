@@ -1643,14 +1643,14 @@ export default function App() {
   // Load voices from ElevenLabs if API key is stored
   useEffect(() => {
     if (elevenLabsApiKey) {
-      fetchVoices(elevenLabsApiKey);
+      fetchVoices(elevenLabsApiKey, true);
     }
   }, [elevenLabsApiKey]);
 
   // Fetch ElevenLabs Voices List
-  const fetchVoices = async (key) => {
+  const fetchVoices = async (key, silent = false) => {
     if (!key) {
-      alert('Vui lòng nhập API Key ElevenLabs.');
+      if (!silent) alert('Vui lòng nhập API Key ElevenLabs.');
       return;
     }
     try {
@@ -1664,21 +1664,31 @@ export default function App() {
           if (!selectedVoiceId) {
             setSelectedVoiceId(data.voices[0].voice_id);
           }
-          alert(`Đã tải thành công ${data.voices.length} giọng đọc từ ElevenLabs!`);
+          if (!silent) {
+            alert(`Đã tải thành công ${data.voices.length} giọng đọc từ ElevenLabs!`);
+          }
         } else {
           setVoices(DEFAULT_ELEVEN_VOICES);
-          alert('Tải thành công! Đã kích hoạt danh sách giọng đọc chuẩn của ElevenLabs.');
+          if (!silent) {
+            alert('Tải thành công! Đã kích hoạt danh sách giọng đọc chuẩn của ElevenLabs.');
+          }
         }
       } else {
         const errData = await res.json().catch(() => ({}));
         const msg = errData.detail?.message || errData.message || 'API Key đã hết hạn hoặc không hợp lệ';
         setVoices(DEFAULT_ELEVEN_VOICES);
-        alert(`Thông báo ElevenLabs: ${msg}. Đã kích hoạt danh sách giọng đọc mặc định. Bạn có thể tự dán API Key mới lấy từ elevenlabs.io vào ô bên dưới.`);
+        if (!silent) {
+          alert(`Thông báo ElevenLabs: ${msg}. Đã kích hoạt danh sách giọng đọc mặc định. Bạn có thể tự dán API Key mới lấy từ elevenlabs.io vào ô bên dưới.`);
+        } else {
+          console.warn(`ElevenLabs auto-fetch warning: ${msg}`);
+        }
       }
     } catch (err) {
       console.error('Failed to load ElevenLabs voices:', err);
       setVoices(DEFAULT_ELEVEN_VOICES);
-      alert('Thông báo ElevenLabs: Đã sử dụng danh sách giọng đọc mặc định.');
+      if (!silent) {
+        alert('Thông báo ElevenLabs: Đã sử dụng danh sách giọng đọc mặc định.');
+      }
     }
   };
 
