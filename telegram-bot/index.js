@@ -179,17 +179,19 @@ async function handleMessage(message, token, env) {
   let scriptResult = "";
   const promptInstruction = 
     "Bạn là một biên kịch chuyên nghiệp sáng tạo nội dung cho video ngắn so sánh (TikTok/Shorts).\n" +
-    "Dựa trên hình ảnh hoặc chủ đề được cung cấp, hãy viết một kịch bản so sánh ngắn gọn, xúc tích bằng tiếng Việt theo đúng định dạng 5 dòng sau, không thêm bất kỳ số dòng, tiêu đề hay từ ngữ dẫn giải nào khác:\n\n" +
+    "Dựa trên hình ảnh hoặc chủ đề được cung cấp, hãy viết kịch bản so sánh ngắn gọn, súc tích bằng tiếng Việt.\n" +
+    "Nếu chủ đề có 1 cặp so sánh, hãy viết đúng 1 khối 5 dòng. Nếu chủ đề có NHIỀU cặp so sánh (ví dụ 2 hoặc 3 cặp trong cùng 1 video), hãy viết lần lượt từng khối 5 dòng nối tiếp nhau, tuyệt đối không thêm số thứ tự, tiêu đề hay từ ngữ dẫn giải nào ngoài nội dung kịch bản.\n\n" +
+    "Cấu trúc của MỖI KHỐI 5 DÒNG như sau:\n" +
     "Dòng 1: Đây là [Tên đối tượng A].\n" +
     "Dòng 2: Đây là [Tên đối tượng B].\n" +
     "Dòng 3: Sự khác nhau là gì?\n" +
     "Dòng 4: [Mô tả ngắn gọn, súc tích về đối tượng A, nêu bật 2-3 điểm đặc trưng cốt lõi].\n" +
     "Dòng 5: [Mô tả ngắn gọn, súc tích về đối tượng B, nêu bật 2-3 điểm đặc trưng cốt lõi].\n\n" +
-    "Ví dụ thực tế khi chủ đề là 'Bắc cực và nam cực':\n" +
+    "Ví dụ mẫu khi so sánh 1 cặp:\n" +
     "Đây là Bắc Cực.\n" +
     "Đây là Nam Cực.\n" +
     "Sự khác nhau là gì?\n" +
-    "Bắc Cực là vùng biển đóng băng nằm ở phía bắc Trái Đất, được bao quanh bởi các lục địa. Nơi đây có gấu Bắc Cực sinh sống và lớp băng thường thay đổi theo mùa.\n" +
+    "Bắc Cực là vùng biển đóng băng nằm ở phía bắc Trái Đất, được bao quanh bởi các lục địa. Nơi đây có gấu Bắc Cực sinh sống và lớp băng thay đổi theo mùa.\n" +
     "Nam Cực là một lục địa phủ băng nằm ở phía nam Trái Đất, được bao quanh bởi đại dương. Nơi đây lạnh hơn, có chim cánh cụt sinh sống và không có gấu Bắc Cực.";
 
   const geminiKey = env.DEFAULT_GEMINI_KEY;
