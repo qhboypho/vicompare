@@ -411,7 +411,19 @@ async function handleCallbackQuery(callbackQuery, token, env) {
       } else if (engineType === "tts_lucy") {
         const apiKey = env.DEFAULT_LUCY_KEY;
         if (!apiKey) throw new Error("Chưa cấu hình DEFAULT_LUCY_KEY!");
-        const voiceId = "67e37e5c5ffbc46fa2e75e11";
+        
+        let voiceId = "67e37e5c5ffbc46fa2e75e11";
+        try {
+          const vRes = await fetch("https://api.lucylab.io/json-rpc", {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ method: "getUserVoices", input: { limit: 10, page: 1 } })
+          });
+          const vData = await vRes.json();
+          if (vData.result?.items?.[0]?.id) {
+            voiceId = vData.result.items[0].id;
+          }
+        } catch (e) {}
         
         const startRes = await fetch("https://api.lucylab.io/json-rpc", {
           method: "POST",
@@ -459,7 +471,19 @@ async function handleCallbackQuery(callbackQuery, token, env) {
       } else if (engineType === "tts_vclip") {
         const apiKey = env.DEFAULT_VCLIP_KEY;
         if (!apiKey) throw new Error("Chưa cấu hình DEFAULT_VCLIP_KEY!");
-        const voiceId = "67e37e5c5ffbc46fa2e75e11";
+        
+        let voiceId = "67e37e5c5ffbc46fa2e75e11";
+        try {
+          const vRes = await fetch("https://api-tts.vclip.io/json-rpc", {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ method: "getUserVoices", input: { limit: 10, page: 1 } })
+          });
+          const vData = await vRes.json();
+          if (vData.result?.items?.[0]?.id) {
+            voiceId = vData.result.items[0].id;
+          }
+        } catch (e) {}
         
         const startRes = await fetch("https://api-tts.vclip.io/json-rpc", {
           method: "POST",
