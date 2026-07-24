@@ -28,7 +28,8 @@ import {
   Eye,
   EyeOff,
   Copy,
-  Check
+  Check,
+  Key
 } from 'lucide-react';
 import { drawFrame } from './utils/canvasRenderer';
 import { exportVideo } from './utils/videoExporter';
@@ -143,6 +144,67 @@ const ApiKeyInput = ({ value, onChange, placeholder = "Nhập API Key...", class
       </div>
     </div>
   );
+};
+
+// Helper phân tích danh sách key VClip từ chuỗi dạng: key | YYYY-MM-DD | status
+const parseVclipKeyText = (rawText) => {
+  if (!rawText) return [];
+  const lines = rawText.split('\n');
+  const nowStr = new Date().toISOString().split('T')[0];
+  const items = [];
+  
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return;
+    const parts = trimmed.split('|').map(p => p.trim());
+    const key = parts[0];
+    if (!key) return;
+
+    let dateStr = parts[1] || nowStr;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      dateStr = nowStr;
+    }
+
+    let status = (parts[2] || 'active').toLowerCase();
+    if (status !== 'exhausted') status = 'active';
+
+    items.push({
+      key,
+      createdDate: dateStr,
+      status
+    });
+  });
+
+  return items;
+};
+
+// Helper xuất ngược danh sách VClip Key ra dạng chuỗi text
+const formatVclipKeyItems = (items) => {
+  if (!items || items.length === 0) return '';
+  return items.map(item => {
+    if (item.status === 'exhausted') {
+      return `${item.key} | ${item.createdDate || new Date().toISOString().split('T')[0]} | exhausted`;
+    }
+    return `${item.key} | ${item.createdDate || new Date().toISOString().split('T')[0]}`;
+  }).join('\n');
+};
+
+// Helper tính toán số ngày còn lại đến chu kỳ reset 30 ngày (1 tháng)
+const getVclipKeyStatusInfo = (item) => {
+  if (!item || !item.key) return { isUsable: false, daysLeft: 30, resetDateStr: '' };
+  const now = new Date();
+  const created = new Date(item.createdDate || now);
+  const resetDate = new Date(created.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const daysLeft = Math.ceil((resetDate - now) / (1000 * 60 * 60 * 24));
+  
+  const isExpiredPeriodDone = daysLeft <= 0;
+  const isUsable = item.status !== 'exhausted' || isExpiredPeriodDone;
+
+  return {
+    isUsable,
+    daysLeft: Math.max(0, daysLeft),
+    resetDateStr: resetDate.toISOString().split('T')[0]
+  };
 };
 
 const DEFAULT_ELEVEN_VOICES = [
