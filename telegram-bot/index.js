@@ -528,7 +528,7 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         const finishMarkup = {
           inline_keyboard: [
             [
-              { text: "⚡ Render & Tải Video Tự Động (0-Click)", url: webAppAutoUrl }
+              { text: "⚡ Render Video Tự Động (0-Click)", url: webAppAutoUrl }
             ],
             [
               { text: "👁️ Mở Web Tool Xem Trước (Preview)", url: webAppPreviewUrl }
@@ -545,7 +545,7 @@ async function handleCallbackQuery(callbackQuery, token, env) {
           `📺 **Kênh:** ${activeProfile.name}\n` +
           `🎙️ **Engine Giọng:** ${engineType.replace("tts_", "").toUpperCase()}\n\n` +
           `👉 **Vui lòng chọn tùy chọn dưới đây:**\n` +
-          `- **⚡ Render & Tải Video Tự Động:** Tự chạy xuất video & tải về máy 100% không cần ấn thêm nút nào.\n` +
+          `- **⚡ Render Video Tự Động:** Tự động chạy render xuất video 100% không cần thao tác thủ công.\n` +
           `- **👁️ Mở Web Tool Xem Trước:** Mở Web Tool để kiểm tra canvas trước khi xuất.`, 
           token, 
           finishMarkup, 
