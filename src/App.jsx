@@ -1968,14 +1968,8 @@ export default function App() {
 
     setIsGeneratingVoice(true);
     try {
-      // Use text from timeline blocks, ensuring punctuation at end of each block for natural pauses
-      const combinedText = timelineBlocks.map(b => {
-        let text = (b.text || '').trim();
-        if (text && !/[.!?:]$/.test(text)) {
-          text += '.';
-        }
-        return text;
-      }).join('\n\n');
+      // Use text from timeline blocks without forced periods (restores original 100% natural speech rhythm for ElevenLabs)
+      const combinedText = timelineBlocks.map(b => b.text).join('\n\n');
 
       const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
         method: 'POST',
@@ -2380,13 +2374,8 @@ export default function App() {
 
     setIsGeneratingVoice(true);
     try {
-      const combinedText = timelineBlocks.map(b => {
-        let text = (b.text || '').trim();
-        if (text && !/[.!?:]$/.test(text)) {
-          text += '.';
-        }
-        return text;
-      }).join('\n\n');
+      // Use text from timeline blocks without forced periods (restores original 100% natural speech rhythm for VClip)
+      const combinedText = timelineBlocks.map(b => b.text).join('\n\n');
 
       // 1. Gọi API tạo audio ttsLongText
       const response = await fetch('https://api-tts.vclip.io/json-rpc', {
