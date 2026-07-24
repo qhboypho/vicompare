@@ -521,13 +521,17 @@ async function handleCallbackQuery(callbackQuery, token, env) {
           await env.VICOMPARE_KV.put(`session:${sessionId}`, JSON.stringify(sessionPayload), { expirationTtl: 86400 });
         }
 
-        // Tạo link chuyển hướng 1-Click sang Web App
-        const webAppUrl = `https://vicompare.pages.dev/?session=${sessionId}&chatId=${chatId}`;
+        // Tạo link chuyển hướng 1-Click sang Web App (Auto Render 0-Click hoặc Preview xem trước)
+        const webAppAutoUrl = `https://vicompare.pages.dev/?session=${sessionId}&chatId=${chatId}&auto=true`;
+        const webAppPreviewUrl = `https://vicompare.pages.dev/?session=${sessionId}&chatId=${chatId}`;
 
         const finishMarkup = {
           inline_keyboard: [
             [
-              { text: "🎬 Mở Web Tool Render Video ngay", url: webAppUrl }
+              { text: "⚡ Render & Tải Video Tự Động (0-Click)", url: webAppAutoUrl }
+            ],
+            [
+              { text: "👁️ Mở Web Tool Xem Trước (Preview)", url: webAppPreviewUrl }
             ]
           ]
         };
@@ -540,7 +544,9 @@ async function handleCallbackQuery(callbackQuery, token, env) {
           `✅ **Đã tạo Giọng đọc & Khớp nhịp hoàn tất!**\n\n` +
           `📺 **Kênh:** ${activeProfile.name}\n` +
           `🎙️ **Engine Giọng:** ${engineType.replace("tts_", "").toUpperCase()}\n\n` +
-          `👉 **Bấm nút dưới đây để mở Web Tool và tự động nạp Kịch bản + Voice chuẩn bị xuất Video:**`, 
+          `👉 **Vui lòng chọn tùy chọn dưới đây:**\n` +
+          `- **⚡ Render & Tải Video Tự Động:** Tự chạy xuất video & tải về máy 100% không cần ấn thêm nút nào.\n` +
+          `- **👁️ Mở Web Tool Xem Trước:** Mở Web Tool để kiểm tra canvas trước khi xuất.`, 
           token, 
           finishMarkup, 
           "Markdown"

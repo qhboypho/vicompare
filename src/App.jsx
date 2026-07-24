@@ -1426,7 +1426,14 @@ export default function App() {
           };
         }
 
-        alert('⚡ Tự động nạp Kịch bản, Voice & Mẫu Kênh từ Telegram thành công! Sẵn sàng xuất video.');
+        const isAutoRender = urlParams.get('auto') === 'true' || urlParams.get('autoRender') === 'true';
+        if (isAutoRender) {
+          setTimeout(() => {
+            handleExportVideo();
+          }, 1500);
+        } else {
+          alert('⚡ Tự động nạp Kịch bản, Voice & Mẫu Kênh từ Telegram thành công! Sẵn sàng xuất video.');
+        }
       }
     } catch (err) {
       console.error('Lỗi khi nạp phiên làm việc từ Telegram:', err);
@@ -4068,6 +4075,7 @@ export default function App() {
           setExportedVideoUrl(url);
           setExportedExt(extension);
           setIsExporting(false);
+          notifyTelegramPublish(headerTitle || 'Video so sánh');
         },
         onError: (err) => {
           alert('Lỗi xuất video: ' + err);
