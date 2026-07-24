@@ -2718,14 +2718,35 @@ export default function App() {
     globalImageZoom
   ]);
 
+  // Helper tính trọng số âm tiết thực tế cho từ tiếng Anh, con số và từ tiếng Việt
+  const getSpokenWeight = (text) => {
+    if (!text) return 1;
+    let weight = 0;
+    const words = text.trim().split(/\s+/);
+    for (const word of words) {
+      // Nếu là chuỗi số (e.g. 365, 2026, 100%) -> mỗi chữ số tính bằng 3.5 ký tự tiếng Việt
+      if (/^\d+[%]?$/.test(word)) {
+        weight += word.length * 3.5;
+      } 
+      // Nếu chứa chữ cái tiếng Anh / từ kỹ thuật (e.g. Windows, Microsoft, Azure, API) -> tính 1.8x
+      else if (/[A-Za-z0-9]/.test(word) && (!/[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(word))) {
+        weight += Math.ceil(word.length * 1.8);
+      } 
+      else {
+        weight += word.length;
+      }
+    }
+    return Math.max(weight, 1);
+  };
+
   // Proportional timings redistribution
   const redistributeTimings = (totalDuration) => {
-    const totalChars = timelineBlocks.reduce((sum, block) => sum + block.text.length, 0);
-    if (totalChars === 0) return;
+    const totalWeight = timelineBlocks.reduce((sum, block) => sum + getSpokenWeight(block.text), 0);
+    if (totalWeight === 0) return;
 
     let accumulated = 0;
     const updated = timelineBlocks.map(block => {
-      const ratio = block.text.length / totalChars;
+      const ratio = getSpokenWeight(block.text) / totalWeight;
       const blockDuration = totalDuration * ratio;
       const start = parseFloat(accumulated.toFixed(2));
       const end = parseFloat((accumulated + blockDuration).toFixed(2));
@@ -2825,21 +2846,21 @@ export default function App() {
       setDetectedSilencesCount(cleanSilences.length);
 
       const updated = [...timelineBlocks];
-      const totalChars = timelineBlocks.reduce((sum, b) => sum + b.text.length, 0);
+      const totalWeight = timelineBlocks.reduce((sum, b) => sum + getSpokenWeight(b.text), 0);
       const neededCount = timelineBlocks.length - 1;
 
-      if (neededCount > 0 && totalChars > 0) {
+      if (neededCount > 0 && totalWeight > 0) {
         const propTransitions = [];
         let acc = 0;
         for (let i = 0; i < neededCount; i++) {
-          acc += (timelineBlocks[i].text.length / totalChars) * audioDuration;
+          acc += (getSpokenWeight(timelineBlocks[i].text) / totalWeight) * audioDuration;
           propTransitions.push(acc);
         }
 
         const matchedTimes = [];
 
         if (isSimple) {
-          // Khôi phục thuật toán tuần tự đơn giản gốc (khớp cực chuẩn cho VClip & ElevenLabs)
+          // Thuật toán tuần tự kết hợp ưu tiên điểm độ dài khoảng nghỉ ngắt câu
           let lastMatchIdx = -1;
           for (let i = 0; i < neededCount; i++) {
             const targetTime = propTransitions[i];
@@ -2849,7 +2870,9 @@ export default function App() {
 
             for (let sIdx = lastMatchIdx + 1; sIdx < cleanSilences.length; sIdx++) {
               const silence = cleanSilences[sIdx];
-              const dist = Math.abs(silence.mid - targetTime);
+              const sDur = silence.end - silence.start;
+              // Khấu trừ điểm ưu tiên khoảng nghỉ ngắt câu dài để không nhảy nhầm vào dấu phẩy ngắt nhỏ trong câu
+              const dist = Math.abs(silence.mid - targetTime) - Math.min(1.2, sDur * 1.5);
               if (dist < closestDist) {
                 closestDist = dist;
                 closest = silence;
@@ -2857,7 +2880,7 @@ export default function App() {
               }
             }
 
-            if (closest && closestDist < 4.5) {
+            if (closest && Math.abs(closest.mid - targetTime) < 4.5) {
               matchedTimes.push(closest.mid); // Đặt tại mốc chính giữa khoảng lặng để khớp nhịp tự nhiên nhất
               lastMatchIdx = closestIdx;
             } else {
@@ -2979,11 +3002,11 @@ export default function App() {
       setDetectedSilencesCount(0);
       
       // Dự phòng
-      const totalChars = timelineBlocks.reduce((sum, b) => sum + b.text.length, 0);
-      if (totalChars > 0) {
+      const totalWeight = timelineBlocks.reduce((sum, b) => sum + getSpokenWeight(b.text), 0);
+      if (totalWeight > 0) {
         let acc = 0;
         const fallbackBlocks = timelineBlocks.map(block => {
-          const ratio = block.text.length / totalChars;
+          const ratio = getSpokenWeight(block.text) / totalWeight;
           const blockDuration = targetDuration * ratio;
           const start = parseFloat(acc.toFixed(2));
           const end = parseFloat((acc + blockDuration).toFixed(2));
