@@ -382,6 +382,17 @@ export default function App() {
   const [vclipVoiceId, setVclipVoiceId] = useState(() => localStorage.getItem('vclip_voice_id') || '67e37e5c5ffbc46fa2e75e11');
   const [vclipSpeed, setVclipSpeed] = useState(1.0);
 
+  // Quản lý Danh sách Key VClip & Auto-Switch
+  const [showVclipKeyModal, setShowVclipKeyModal] = useState(false);
+  const [vclipRawKeyText, setVclipRawKeyText] = useState(() => {
+    const saved = localStorage.getItem('vclip_key_list');
+    if (saved) return saved;
+    const defaultKey = localStorage.getItem('vclip_api_key') || DEFAULT_VCLIP_KEY;
+    const todayStr = new Date().toISOString().split('T')[0];
+    return `${defaultKey} | ${todayStr}`;
+  });
+  const [vclipKeyItems, setVclipKeyItems] = useState(() => parseVclipKeyText(vclipRawKeyText));
+
   // Trạng thái LucyLab (LucyAI / ViVibe)
   const DEFAULT_LUCY_KEY = safeAtob('c2tfbGl2ZV9DYTNOWkRkOGt6anFUT0g4ZzJyenBWakw4ZXU2WmU1Qw==');
   const [lucyLabApiKey, setLucyLabApiKey] = useState(() => localStorage.getItem('lucylab_api_key') || DEFAULT_LUCY_KEY);
@@ -2156,6 +2167,94 @@ export default function App() {
     localStorage.setItem('vclip_api_key', key);
   };
 
+  // Đếm số lượng Key khả dụng trong danh sách VClip Keys
+  const activeUsableKeyCount = vclipKeyItems.filter(item => getVclipKeyStatusInfo(item).isUsable).length;
+
+  const handleSaveVclipKeyModal = () => {
+    const parsed = parseVclipKeyText(vclipRawKeyText);
+    setVclipKeyItems(parsed);
+    const formatted = formatVclipKeyItems(parsed);
+    setVclipRawKeyText(formatted);
+    try { localStorage.setItem('vclip_key_list', formatted); } catch {}
+
+    const currentItem = parsed.find(i => i.key === vclipApiKey);
+    if (!currentItem || !getVclipKeyStatusInfo(currentItem).isUsable) {
+      const firstUsable = parsed.find(i => getVclipKeyStatusInfo(i).isUsable);
+      if (firstUsable) {
+        setVclipApiKey(firstUsable.key);
+        try { localStorage.setItem('vclip_api_key', firstUsable.key); } catch {}
+      }
+    }
+    setShowVclipKeyModal(false);
+  };
+
+  const handleSelectActiveVclipKey = (key) => {
+    setVclipApiKey(key);
+    try { localStorage.setItem('vclip_api_key', key); } catch {}
+  };
+
+  const handleToggleVclipKeyStatus = (key) => {
+    const updated = vclipKeyItems.map(item => {
+      if (item.key === key) {
+        const newStatus = item.status === 'exhausted' ? 'active' : 'exhausted';
+        return { ...item, status: newStatus };
+      }
+      return item;
+    });
+    setVclipKeyItems(updated);
+    const formatted = formatVclipKeyItems(updated);
+    setVclipRawKeyText(formatted);
+    try { localStorage.setItem('vclip_key_list', formatted); } catch {}
+  };
+
+  const isCreditError = (msg) => {
+    if (!msg) return false;
+    const lower = msg.toString().toLowerCase();
+    return lower.includes('credit') || 
+           lower.includes('số dư') || 
+           lower.includes('balance') || 
+           lower.includes('gói') || 
+           lower.includes('hết hạn') || 
+           lower.includes('chưa mua') || 
+           lower.includes('insufficient') || 
+           lower.includes('402');
+  };
+
+  const handleVclipCreditExhausted = async (failedKey) => {
+    const nowStr = new Date().toISOString().split('T')[0];
+    
+    // Đánh dấu Key bị hỏng/hết credit
+    const updatedItems = vclipKeyItems.map(item => {
+      if (item.key === failedKey) {
+        return { ...item, status: 'exhausted', createdDate: item.createdDate || nowStr };
+      }
+      return item;
+    });
+
+    const newRawText = formatVclipKeyItems(updatedItems);
+    setVclipKeyItems(updatedItems);
+    setVclipRawKeyText(newRawText);
+    try { localStorage.setItem('vclip_key_list', newRawText); } catch {}
+
+    // Tìm Key khả dụng tiếp theo
+    const nextUsable = updatedItems.find(item => {
+      const info = getVclipKeyStatusInfo(item);
+      return info.isUsable && item.key !== failedKey;
+    });
+
+    if (nextUsable) {
+      setVclipApiKey(nextUsable.key);
+      try { localStorage.setItem('vclip_api_key', nextUsable.key); } catch {}
+
+      alert(`⚠️ API Key VClip (${failedKey.substring(0, 10)}...) vừa HẾT CREDIT!\n\n⚡ Hệ thống tự động chuyển sang Key khả dụng tiếp theo: ${nextUsable.key.substring(0, 12)}... và khởi động lại quá trình sinh giọng.`);
+
+      return handleGenerateVoiceVClipWithKey(nextUsable.key);
+    } else {
+      alert(`❌ API Key VClip (${failedKey.substring(0, 10)}...) đã hết Credit và TẤT CẢ các Key còn lại trong danh sách cũng đã hết Credit!\n\nVui lòng nhấn nút "Danh sách Key" để thêm Key mới hoặc chờ đủ 30 ngày để các Key cũ được tự động reset Credit.`);
+      setIsGeneratingVoice(false);
+    }
+  };
+
   // Lưu Voice ID VClip
   const handleSaveVclipVoiceId = (id) => {
     setVclipVoiceId(id);
@@ -2361,9 +2460,13 @@ export default function App() {
     }
   };
 
-  // Gửi tạo giọng nói qua API VClip và chờ phản hồi hoàn tất (Polling)
+  // Gửi tạo giọng nói qua API VClip và chờ phản hồi hoàn tất (Polling & Auto-Switch Key)
   const handleGenerateVoiceVClip = async () => {
-    if (!vclipApiKey) {
+    return handleGenerateVoiceVClipWithKey(vclipApiKey);
+  };
+
+  const handleGenerateVoiceVClipWithKey = async (targetKey) => {
+    if (!targetKey) {
       alert('Vui lòng nhập API Key VClip.');
       return;
     }
@@ -2381,7 +2484,7 @@ export default function App() {
       const response = await fetch('https://api-tts.vclip.io/json-rpc', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${vclipApiKey}`,
+          'Authorization': `Bearer ${targetKey}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -2396,12 +2499,19 @@ export default function App() {
 
       if (!response.ok) {
         const errText = await response.text();
+        if (isCreditError(errText) || response.status === 402 || response.status === 400) {
+          return await handleVclipCreditExhausted(targetKey);
+        }
         throw new Error(errText || 'Lỗi kết nối đến API VClip.');
       }
 
       const data = await response.json();
       if (data.error) {
-        throw new Error(data.error.message || 'Lỗi API VClip.');
+        const errMsg = data.error.message || '';
+        if (isCreditError(errMsg) || data.error.code === 402 || data.error.code === -32000) {
+          return await handleVclipCreditExhausted(targetKey);
+        }
+        throw new Error(errMsg || 'Lỗi API VClip.');
       }
 
       const projectExportId = data.result?.projectExportId;
@@ -2422,7 +2532,7 @@ export default function App() {
         const statusRes = await fetch('https://api-tts.vclip.io/json-rpc', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${vclipApiKey}`,
+            'Authorization': `Bearer ${targetKey}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
@@ -2437,7 +2547,11 @@ export default function App() {
 
         const statusData = await statusRes.json();
         if (statusData.error) {
-          throw new Error(statusData.error.message || 'Lỗi kiểm tra tiến trình VClip.');
+          const statusErrMsg = statusData.error.message || '';
+          if (isCreditError(statusErrMsg)) {
+            return await handleVclipCreditExhausted(targetKey);
+          }
+          throw new Error(statusErrMsg || 'Lỗi kiểm tra tiến trình VClip.');
         }
 
         const result = statusData.result;
@@ -2450,6 +2564,10 @@ export default function App() {
         }
 
         if (status === 'FAILED' || status === 'ERROR') {
+          const detail = result?.errorMessage || result?.message || '';
+          if (isCreditError(detail)) {
+            return await handleVclipCreditExhausted(targetKey);
+          }
           throw new Error('Tiến trình tạo giọng nói trên VClip bị lỗi.');
         }
       }
@@ -4889,12 +5007,30 @@ export default function App() {
                   
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     <div className="form-group">
-                      <label>VClip API Key</label>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+                        <label style={{ margin: 0 }}>VClip API Key</label>
+                        <button 
+                          type="button" 
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => setShowVclipKeyModal(true)}
+                          style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', padding: '0.25rem 0.55rem', background: 'rgba(99, 102, 241, 0.15)', border: '1px solid var(--accent-indigo)', color: '#818cf8', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                        >
+                          <Key size={13} /> Danh sách Key ({activeUsableKeyCount}/{vclipKeyItems.length})
+                        </button>
+                      </div>
                       <ApiKeyInput 
                         value={vclipApiKey} 
                         onChange={(e) => handleSaveVclipApiKey(e.target.value)}
                         placeholder="Nhập API Key VClip (sk_live_...)" 
                       />
+                      {vclipKeyItems.length > 0 && (
+                        <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginTop: '0.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>🔑 Đang dùng: <code style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{vclipApiKey ? `${vclipApiKey.substring(0, 10)}...${vclipApiKey.slice(-4)}` : 'Chưa chọn'}</code></span>
+                          <span style={{ color: activeUsableKeyCount > 0 ? '#10b981' : '#f43f5e', fontWeight: 'bold' }}>
+                            {activeUsableKeyCount > 0 ? `🟢 Còn ${activeUsableKeyCount} Key khả dụng` : '⚠️ Hết Key khả dụng'}
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="form-group">
@@ -6907,6 +7043,145 @@ export default function App() {
             <p style={{ fontSize: '0.65rem', color: '#64748b', lineHeight: '1.4' }}>
               Hệ thống đang tải video nhị phân và gửi yêu cầu API xuất bản. Vui lòng giữ tab này mở...
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* VClip Key Manager Modal */}
+      {showVclipKeyModal && (
+        <div className="render-overlay" style={{ zIndex: 1100 }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: '620px', padding: '1.5rem', maxHeight: '90vh', overflowY: 'auto', background: '#0f172a', border: '1px solid var(--accent-indigo)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.75rem' }}>
+              <h2 className="card-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem', color: '#818cf8' }}>
+                <Key size={18} color="var(--primary)" /> Quản lý Danh sách Key VClip (Auto-Switch 1 Tháng)
+              </h2>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowVclipKeyModal(false)} style={{ padding: '0.2rem 0.5rem' }}>✕</button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ fontSize: '0.75rem', color: '#cbd5e1', lineHeight: '1.5', background: 'rgba(99, 102, 241, 0.1)', padding: '0.75rem', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
+                <strong>💡 Hướng dẫn định dạng:</strong> Nhập danh sách Key VClip (mỗi key 1 dòng theo cú pháp: <code>API_KEY | YYYY-MM-DD</code>).<br />
+                - Khi tạo voice bị hết Credit (2.5k gói free), hệ thống <b>tự động chuyển sang Key dự phòng tiếp theo</b>.<br />
+                - Key bị đánh dấu hết Credit sẽ <b>mờ tối đi</b> và đếm ngược <b>30 ngày</b>. Sau 1 tháng, Credit sẽ được VClip nạp lại và Key tự động khôi phục khả dụng!
+              </div>
+
+              <div className="form-group">
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Nhập / Sửa Danh sách Key (Textarea):</label>
+                <textarea
+                  rows={6}
+                  value={vclipRawKeyText}
+                  onChange={(e) => {
+                    setVclipRawKeyText(e.target.value);
+                    setVclipKeyItems(parseVclipKeyText(e.target.value));
+                  }}
+                  placeholder={`sk_live_KeyExample1 | 2026-07-24\nsk_live_KeyExample2 | 2026-07-10 | exhausted`}
+                  style={{ fontFamily: 'monospace', fontSize: '0.75rem', background: '#0b0f19', color: '#38bdf8', padding: '0.6rem', border: '1px solid #334155', borderRadius: '6px' }}
+                />
+              </div>
+
+              <div className="form-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 'bold', margin: 0 }}>Danh sách Trạng thái Keys ({vclipKeyItems.length})</label>
+                  <span style={{ fontSize: '0.7rem', color: activeUsableKeyCount > 0 ? '#34d399' : '#f43f5e', fontWeight: 'bold' }}>
+                    {activeUsableKeyCount} Key sẵn sàng hoạt động
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '240px', overflowY: 'auto', paddingRight: '0.2rem' }}>
+                  {vclipKeyItems.length === 0 ? (
+                    <div style={{ fontSize: '0.75rem', color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: '1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '6px' }}>
+                      Chưa có API Key nào trong danh sách. Hãy dán key vào ô textarea phía trên.
+                    </div>
+                  ) : (
+                    vclipKeyItems.map((item, idx) => {
+                      const info = getVclipKeyStatusInfo(item);
+                      const isSelected = item.key === vclipApiKey;
+
+                      return (
+                        <div 
+                          key={idx}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '0.5rem 0.75rem',
+                            borderRadius: '6px',
+                            border: isSelected ? '1px solid var(--accent-indigo)' : '1px solid rgba(255,255,255,0.08)',
+                            background: isSelected ? 'rgba(99, 102, 241, 0.18)' : !info.isUsable ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255,255,255,0.03)',
+                            opacity: !info.isUsable ? 0.45 : 1.0,
+                            filter: !info.isUsable ? 'grayscale(0.6)' : 'none',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                              <span style={{ fontSize: '0.75rem', fontWeight: 'bold', fontFamily: 'monospace', color: isSelected ? '#a5b4fc' : '#e2e8f0', textDecoration: !info.isUsable ? 'line-through' : 'none' }}>
+                                #{idx + 1}. {item.key.substring(0, 14)}...{item.key.slice(-4)}
+                              </span>
+                              {isSelected && (
+                                <span style={{ fontSize: '0.6rem', background: 'var(--accent-indigo)', color: '#fff', padding: '0.1rem 0.35rem', borderRadius: '3px', fontWeight: 'bold' }}>
+                                  ĐANG DÙNG
+                                </span>
+                              )}
+                            </div>
+                            <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>
+                              Ngày tạo: {item.createdDate} | 
+                              {info.isUsable ? (
+                                <span style={{ color: '#34d399', marginLeft: '0.3rem', fontWeight: 'bold' }}>🟢 Sẵn sàng (Còn Credit)</span>
+                              ) : (
+                                <span style={{ color: '#f43f5e', marginLeft: '0.3rem', fontWeight: 'bold' }}>🔴 Hết Credit (Mở lại sau {info.daysLeft} ngày)</span>
+                              )}
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '0.3rem' }}>
+                            {info.isUsable && !isSelected && (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', background: 'rgba(99, 102, 241, 0.2)', border: '1px solid var(--accent-indigo)', color: '#818cf8' }}
+                                onClick={() => handleSelectActiveVclipKey(item.key)}
+                              >
+                                Dùng Key này
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', color: item.status === 'exhausted' ? '#34d399' : '#f43f5e', border: item.status === 'exhausted' ? '1px solid #10b981' : '1px solid #f43f5e' }}
+                              onClick={() => handleToggleVclipKeyStatus(item.key)}
+                              title={item.status === 'exhausted' ? 'Khôi phục Key' : 'Đánh dấu hết Credit'}
+                            >
+                              {item.status === 'exhausted' ? 'Mở lại Key' : 'Báo hết Credit'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={() => setShowVclipKeyModal(false)}
+                  style={{ flex: 1, padding: '0.5rem' }}
+                >
+                  Đóng
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-primary"
+                  onClick={handleSaveVclipKeyModal}
+                  style={{ flex: 1, padding: '0.5rem' }}
+                >
+                  Lưu Danh sách Keys
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
