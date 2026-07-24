@@ -372,6 +372,30 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   const leftX = 360 - midGap / 2 - panelW;
   const rightX = 360 + midGap / 2;
 
+  // Smart fallback keyword matching for highlight when block highlight is missing or 'none'
+  const getSmartHighlight = (block) => {
+    if (!block) return 'none';
+    if (block.highlight && block.highlight !== 'none') return block.highlight;
+    
+    const textLower = (block.text || '').toLowerCase();
+    if (!textLower) return 'none';
+
+    const getCleanWords = (str) => (str || '').toLowerCase().replace(/[^\w\sàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/g, '').split(/\s+/).filter(w => w.length > 1);
+
+    const leftWords = getCleanWords(activeComp.leftTitle);
+    const rightWords = getCleanWords(activeComp.rightTitle);
+
+    const leftDistinct = leftWords.filter(w => !rightWords.includes(w));
+    const rightDistinct = rightWords.filter(w => !leftWords.includes(w));
+
+    const matchesLeft = leftDistinct.some(w => textLower.includes(w)) || (leftWords.length > 0 && textLower.includes(activeComp.leftTitle.toLowerCase()));
+    const matchesRight = rightDistinct.some(w => textLower.includes(w)) || (rightWords.length > 0 && textLower.includes(activeComp.rightTitle.toLowerCase()));
+
+    if (matchesLeft && !matchesRight) return 'left';
+    if (matchesRight && !matchesLeft) return 'right';
+    return 'none';
+  };
+
   // Determine current and previous highlights for smooth interpolation
   let t = 1;
   let prevHighlight = 'none';
@@ -384,14 +408,14 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     : null;
 
   if (currentBlock) {
-    currHighlight = currentBlock.highlight || 'none';
+    currHighlight = getSmartHighlight(currentBlock);
     const timeInBlock = currentTime - currentBlock.start;
     const transitionDuration = 0.3; // 300ms transition
     if (timeInBlock < transitionDuration) {
       t = timeInBlock / transitionDuration;
       // Ease-in-out curve
       t = t * t * (3 - 2 * t);
-      prevHighlight = prevBlock ? (prevBlock.highlight || 'none') : 'none';
+      prevHighlight = prevBlock ? getSmartHighlight(prevBlock) : 'none';
     } else {
       t = 1;
       prevHighlight = currHighlight;
@@ -452,40 +476,41 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     isActive: isRightActive
   };
 
-  // Draw Labels dynamically matching their respective panel zoom
+  // Draw Labels dynamically matching their respective panel zoom with auto-fitting font size to prevent overlapping
   const baseFontSize = state.titleFontSize || 36;
   const outlineColor = state.titleOutlineColor || '#000000';
   const outlineW = state.titleOutlineWidth !== undefined ? state.titleOutlineWidth : 6;
 
+  const drawFittedTitle = (titleText, centerX, centerY, scale, fillCol, opacityVal) => {
+    ctx.save();
+    const baseSize = Math.round(baseFontSize * scale);
+    const maxW = panelW * 1.02;
+    
+    ctx.font = `900 ${baseSize}px "Montserrat", Arial, sans-serif`;
+    let actualFontSize = baseSize;
+    const measuredW = ctx.measureText(titleText).width;
+    if (measuredW > maxW && measuredW > 0) {
+      actualFontSize = Math.max(16, Math.floor(baseSize * (maxW / measuredW)));
+    }
+
+    ctx.font = `900 ${actualFontSize}px "Montserrat", Arial, sans-serif`;
+    ctx.textBaseline = 'alphabetic';
+    ctx.strokeStyle = outlineColor;
+    ctx.lineWidth = Math.round(outlineW * scale);
+    ctx.lineJoin = 'round';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = fillCol;
+    ctx.globalAlpha = opacityVal;
+    ctx.strokeText(titleText, centerX, centerY);
+    ctx.fillText(titleText, centerX, centerY);
+    ctx.restore();
+  };
+
   // Left Label
-  ctx.save();
-  const leftLabelSize = Math.round(baseFontSize * leftScale);
-  ctx.font = `900 ${leftLabelSize}px "Montserrat", Arial, sans-serif`;
-  ctx.textBaseline = 'alphabetic';
-  ctx.strokeStyle = outlineColor;
-  ctx.lineWidth = Math.round(outlineW * leftScale);
-  ctx.lineJoin = 'round';
-  ctx.textAlign = 'center';
-  ctx.fillStyle = activeComp.leftColor || '#FF9800';
-  ctx.globalAlpha = leftOpacity;
-  ctx.strokeText(activeComp.leftTitle, leftLayout.x + leftLayout.w / 2, leftLayout.y - 25);
-  ctx.fillText(activeComp.leftTitle, leftLayout.x + leftLayout.w / 2, leftLayout.y - 25);
-  ctx.restore();
+  drawFittedTitle(activeComp.leftTitle, leftLayout.x + leftLayout.w / 2, leftLayout.y - 25, leftScale, activeComp.leftColor || '#FF9800', leftOpacity);
 
   // Right Label
-  ctx.save();
-  const rightLabelSize = Math.round(baseFontSize * rightScale);
-  ctx.font = `900 ${rightLabelSize}px "Montserrat", Arial, sans-serif`;
-  ctx.textBaseline = 'alphabetic';
-  ctx.strokeStyle = outlineColor;
-  ctx.lineWidth = Math.round(outlineW * rightScale);
-  ctx.lineJoin = 'round';
-  ctx.textAlign = 'center';
-  ctx.fillStyle = activeComp.rightColor || '#10B981';
-  ctx.globalAlpha = rightOpacity;
-  ctx.strokeText(activeComp.rightTitle, rightLayout.x + rightLayout.w / 2, rightLayout.y - 25);
-  ctx.fillText(activeComp.rightTitle, rightLayout.x + rightLayout.w / 2, rightLayout.y - 25);
-  ctx.restore();
+  drawFittedTitle(activeComp.rightTitle, rightLayout.x + rightLayout.w / 2, rightLayout.y - 25, rightScale, activeComp.rightColor || '#10B981', rightOpacity);
 
   // Helper to draw a panel image
   const drawPanelImage = (imgUrl, x, y, width, height, layout) => {
@@ -573,8 +598,11 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   drawPanelImage(activeComp.rightImageUrl, rightLayout.x, rightLayout.y, rightLayout.w, rightLayout.h, rightLayout);
 
   // 5. Draw Mascot (Bottom Center)
-  const mascotPose = state.mascotPose || 'default';
-  const mascotImg = loadedImages[mascotPose];
+  let mascotPose = state.mascotPose || 'default';
+  if ((!state.mascotPose || state.mascotPose === 'default') && currHighlight !== 'none') {
+    mascotPose = currHighlight === 'left' ? 'point_left' : 'point_right';
+  }
+  const mascotImg = loadedImages[mascotPose] || loadedImages['default'];
 
   if (mascotImg) {
     ctx.save();

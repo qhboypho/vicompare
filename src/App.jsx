@@ -3162,33 +3162,37 @@ export default function App() {
 
       // Smart gesture and highlights mapping
       if (relativeOffset === 0) {
-        // Line "Đây là Left"
         pose = 'point_left';
         highlight = 'left';
       } else if (relativeOffset === 1) {
-        // Line "Đây là Right"
         pose = 'point_right';
         highlight = 'right';
       } else if (lineLower.includes('khác nhau') || lineLower.includes('khac nhau')) {
         pose = 'shrug';
         highlight = 'none';
       } else {
-        // Check text content to assign target
-        const leftKeyword = activeComp.leftTitle.toLowerCase();
-        const rightKeyword = activeComp.rightTitle.toLowerCase();
+        const getCleanWords = (str) => (str || '').toLowerCase().replace(/[^\w\sàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/g, '').split(/\s+/).filter(w => w.length > 1);
 
-        if (lineLower.includes(leftKeyword)) {
+        const leftWords = getCleanWords(activeComp.leftTitle);
+        const rightWords = getCleanWords(activeComp.rightTitle);
+
+        const leftDistinct = leftWords.filter(w => !rightWords.includes(w));
+        const rightDistinct = rightWords.filter(w => !leftWords.includes(w));
+
+        const matchesLeft = leftDistinct.some(w => lineLower.includes(w)) || (leftWords.length > 0 && lineLower.includes(activeComp.leftTitle.toLowerCase()));
+        const matchesRight = rightDistinct.some(w => lineLower.includes(w)) || (rightWords.length > 0 && lineLower.includes(activeComp.rightTitle.toLowerCase()));
+
+        if (matchesLeft && !matchesRight) {
           pose = 'point_left';
           highlight = 'left';
-        } else if (lineLower.includes(rightKeyword)) {
+        } else if (matchesRight && !matchesLeft) {
           pose = 'point_right';
           highlight = 'right';
         } else {
-          // If no keyword, assign based on alternation or sequence offset
-          if (relativeOffset === 3) {
+          if (relativeOffset % 2 === 1) {
             pose = 'point_left';
             highlight = 'left';
-          } else if (relativeOffset === 4) {
+          } else {
             pose = 'point_right';
             highlight = 'right';
           }
