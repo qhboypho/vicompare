@@ -3001,19 +3001,23 @@ export default function App() {
     let weight = 0;
     const words = text.trim().split(/\s+/);
     for (const word of words) {
-      // Nếu là chuỗi số (e.g. 365, 2026, 100%) -> mỗi chữ số tính bằng 3.5 ký tự tiếng Việt
-      if (/^\d+[%]?$/.test(word)) {
-        weight += word.length * 3.5;
+      const cleanWord = word.replace(/[^\w\d]/g, '');
+      if (!cleanWord) continue;
+
+      // 1. Chuỗi số (e.g. 365 -> "ba trăm sáu mươi lăm" = 5 âm tiết; 2026 -> 7 âm tiết)
+      if (/^\d+[%]?$/.test(cleanWord)) {
+        weight += Math.max(1, cleanWord.length * 1.6);
       } 
-      // Nếu chứa chữ cái tiếng Anh / từ kỹ thuật (e.g. Windows, Microsoft, Azure, API) -> tính 1.8x
-      else if (/[A-Za-z0-9]/.test(word) && (!/[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(word))) {
-        weight += Math.ceil(word.length * 1.8);
+      // 2. Từ viết tắt in hoa (e.g. API -> "a-pê-i", USB, HTML)
+      else if (/^[A-Z0-9]{2,5}$/.test(cleanWord)) {
+        weight += cleanWord.length * 1.4;
       } 
+      // 3. Mỗi từ thường = 1.0 âm tiết chuẩn (tiếng Việt hay từ tên riêng Alaska, Husky, Windows...)
       else {
-        weight += word.length;
+        weight += 1.0;
       }
     }
-    return Math.max(weight, 1);
+    return Math.max(weight, 0.5);
   };
 
   // Proportional timings redistribution
