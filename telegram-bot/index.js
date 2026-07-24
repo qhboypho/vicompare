@@ -143,6 +143,29 @@ export default {
   }
 };
 
+// Helper tự động lấy Voice ID hợp lệ từ tài khoản LucyLab / VClip
+async function fetchVoiceId(host, apiKey) {
+  const methods = ["getUserVoices", "getVoices", "getPublicVoices"];
+  for (const m of methods) {
+    try {
+      const res = await fetch(`https://${host}/json-rpc`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ method: m, input: { limit: 20, page: 1 } })
+      });
+      const data = await res.json();
+      const list = data.result?.items || data.result?.voices || (Array.isArray(data.result) ? data.result : []);
+      if (list && list.length > 0) {
+        for (const item of list) {
+          const id = item.id || item._id || item.voiceId;
+          if (id) return id;
+        }
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
 // Helper lấy danh sách Mẫu Kênh hiện tại
 async function getProfiles(env) {
   if (env.VICOMPARE_KV) {
@@ -412,32 +435,24 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         const apiKey = env.DEFAULT_LUCY_KEY;
         if (!apiKey) throw new Error("Chưa cấu hình DEFAULT_LUCY_KEY!");
         
-        let voiceId = "67e37e5c5ffbc46fa2e75e11";
-        try {
-          const vRes = await fetch("https://api.lucylab.io/json-rpc", {
+        let voiceId = await fetchVoiceId("api.lucylab.io", apiKey) || "67e37e5c5ffbc46fa2e75e11";
+        
+        let startRes = await fetch("https://api.lucylab.io/json-rpc", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ method: "ttsLongText", input: { text: scriptText, userVoiceId: voiceId, speed: 0.85 } })
+        });
+        let startData = await startRes.json();
+
+        if (startData.error && startData.error.message?.includes("userVoiceId")) {
+          startRes = await fetch("https://api.lucylab.io/json-rpc", {
             method: "POST",
             headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ method: "getUserVoices", input: { limit: 10, page: 1 } })
+            body: JSON.stringify({ method: "ttsLongText", input: { text: scriptText, voiceId: voiceId, speed: 0.85 } })
           });
-          const vData = await vRes.json();
-          if (vData.result?.items?.[0]?.id) {
-            voiceId = vData.result.items[0].id;
-          }
-        } catch (e) {}
-        
-        const startRes = await fetch("https://api.lucylab.io/json-rpc", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${apiKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            method: "ttsLongText",
-            input: { text: scriptText, userVoiceId: voiceId, speed: 0.85 }
-          })
-        });
+          startData = await startRes.json();
+        }
 
-        const startData = await startRes.json();
         if (startData.error) throw new Error(startData.error.message || "LucyLab TTS failed");
 
         const exportId = startData.result?.projectExportId;
@@ -447,14 +462,8 @@ async function handleCallbackQuery(callbackQuery, token, env) {
           await new Promise(resolve => setTimeout(resolve, 3000));
           const statusRes = await fetch("https://api.lucylab.io/json-rpc", {
             method: "POST",
-            headers: {
-              "Authorization": `Bearer ${apiKey}`,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              method: "getExportStatus",
-              input: { projectExportId: exportId }
-            })
+            headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ method: "getExportStatus", input: { projectExportId: exportId } })
           });
           const statusData = await statusRes.json();
           if (statusData.result?.status === "completed") {
@@ -472,32 +481,24 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         const apiKey = env.DEFAULT_VCLIP_KEY;
         if (!apiKey) throw new Error("Chưa cấu hình DEFAULT_VCLIP_KEY!");
         
-        let voiceId = "67e37e5c5ffbc46fa2e75e11";
-        try {
-          const vRes = await fetch("https://api-tts.vclip.io/json-rpc", {
+        let voiceId = await fetchVoiceId("api-tts.vclip.io", apiKey) || "67e37e5c5ffbc46fa2e75e11";
+        
+        let startRes = await fetch("https://api-tts.vclip.io/json-rpc", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ method: "ttsLongText", input: { text: scriptText, userVoiceId: voiceId, speed: 1.0 } })
+        });
+        let startData = await startRes.json();
+
+        if (startData.error && (startData.error.message?.includes("userVoiceId") || startData.error.message?.includes("Voice"))) {
+          startRes = await fetch("https://api-tts.vclip.io/json-rpc", {
             method: "POST",
             headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ method: "getUserVoices", input: { limit: 10, page: 1 } })
+            body: JSON.stringify({ method: "ttsLongText", input: { text: scriptText, voiceId: voiceId, speed: 1.0 } })
           });
-          const vData = await vRes.json();
-          if (vData.result?.items?.[0]?.id) {
-            voiceId = vData.result.items[0].id;
-          }
-        } catch (e) {}
-        
-        const startRes = await fetch("https://api-tts.vclip.io/json-rpc", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${apiKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            method: "ttsLongText",
-            input: { text: scriptText, userVoiceId: voiceId, speed: 1.0 }
-          })
-        });
+          startData = await startRes.json();
+        }
 
-        const startData = await startRes.json();
         if (startData.error) throw new Error(startData.error.message || "VClip TTS failed");
 
         const exportId = startData.result?.projectExportId;
