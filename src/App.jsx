@@ -3107,14 +3107,14 @@ export default function App() {
         silences.push({ start: startSilence, end: audioDuration, mid: (startSilence + audioDuration) / 2 });
       }
 
-      // Gộp các khoảng lặng (Simple: gộp các khoảng nghỉ câu dưới 1.2 giây, DP: gộp dưới 0.15 giây)
+      // Gộp các khoảng lặng bị đứt đoạn quá ngắn (< 80ms) do nhiễu micro, bảo toàn 100% các khoảng ngắt câu thực tế
       const cleanSilences = [];
       silences.forEach(s => {
         if (cleanSilences.length === 0) {
           cleanSilences.push(s);
         } else {
           const last = cleanSilences[cleanSilences.length - 1];
-          const shouldMerge = isSimple ? (s.mid - last.mid < 1.2) : (s.start - last.end < 0.15);
+          const shouldMerge = (s.start - last.end < 0.08);
           if (shouldMerge) {
             last.end = s.end;
             last.mid = (last.start + s.end) / 2;
@@ -3139,128 +3139,31 @@ export default function App() {
         }
 
         const matchedTimes = [];
+        let lastMatchIdx = -1;
 
-        if (isSimple) {
-          // Thuật toán tuần tự kết hợp ưu tiên điểm độ dài khoảng nghỉ ngắt câu
-          let lastMatchIdx = -1;
-          for (let i = 0; i < neededCount; i++) {
-            const targetTime = propTransitions[i];
-            let closest = null;
-            let closestDist = Infinity;
-            let closestIdx = -1;
+        for (let i = 0; i < neededCount; i++) {
+          const targetTime = propTransitions[i];
+          let closest = null;
+          let closestDist = Infinity;
+          let closestIdx = -1;
 
-            for (let sIdx = lastMatchIdx + 1; sIdx < cleanSilences.length; sIdx++) {
-              const silence = cleanSilences[sIdx];
-              const sDur = silence.end - silence.start;
-              // Khấu trừ điểm ưu tiên khoảng nghỉ ngắt câu dài để không nhảy nhầm vào dấu phẩy ngắt nhỏ trong câu
-              const dist = Math.abs(silence.mid - targetTime) - Math.min(1.2, sDur * 1.5);
-              if (dist < closestDist) {
-                closestDist = dist;
-                closest = silence;
-                closestIdx = sIdx;
-              }
-            }
-
-            if (closest && Math.abs(closest.mid - targetTime) < 4.5) {
-              matchedTimes.push(closest.mid); // Đặt tại mốc chính giữa khoảng lặng để khớp nhịp tự nhiên nhất
-              lastMatchIdx = closestIdx;
-            } else {
-              matchedTimes.push(targetTime);
-              lastMatchIdx = lastMatchIdx + 1;
-            }
-          }
-        } else {
-          // Dynamic Programming (mode 'dp' tối ưu cho LucyLab)
-          if (cleanSilences.length >= neededCount) {
-            const dp = Array.from({ length: neededCount + 1 }, () => Array(cleanSilences.length).fill(Infinity));
-            const parent = Array.from({ length: neededCount + 1 }, () => Array(cleanSilences.length).fill(-1));
-
-            for (let j = 0; j < cleanSilences.length; j++) {
-              dp[0][j] = 0;
-            }
-
-            for (let i = 1; i <= neededCount; i++) {
-              const targetTime = propTransitions[i - 1];
-              for (let j = i - 1; j < cleanSilences.length; j++) {
-                const s = cleanSilences[j];
-                const sDur = s.end - s.start;
-                const dist = Math.abs(s.mid - targetTime);
-                const pauseBonus = Math.min(1.8, sDur * 2.2);
-                const stepCost = dist - pauseBonus;
-
-                let minPrevCost = Infinity;
-                let bestPrevK = -1;
-
-                for (let k = i - 2; k < j; k++) {
-                  const prevCost = k >= 0 ? dp[i - 1][k] : 0;
-                  if (prevCost < minPrevCost) {
-                    minPrevCost = prevCost;
-                    bestPrevK = k;
-                  }
-                }
-
-                dp[i][j] = minPrevCost + stepCost;
-                parent[i][j] = bestPrevK;
-              }
-            }
-
-            let bestLastJ = -1;
-            let minFinalCost = Infinity;
-            for (let j = neededCount - 1; j < cleanSilences.length; j++) {
-              if (dp[neededCount][j] < minFinalCost) {
-                minFinalCost = dp[neededCount][j];
-                bestLastJ = j;
-              }
-            }
-
-            if (bestLastJ !== -1) {
-              const chosenIndices = [];
-              let currI = neededCount;
-              let currJ = bestLastJ;
-              while (currI > 0 && currJ !== -1) {
-                chosenIndices.unshift(currJ);
-                currJ = parent[currI][currJ];
-                currI--;
-              }
-
-              for (let i = 0; i < chosenIndices.length; i++) {
-                const s = cleanSilences[chosenIndices[i]];
-                const transitionTime = s.start + Math.min(0.12, (s.end - s.start) * 0.25);
-                matchedTimes.push(transitionTime);
-              }
+          for (let sIdx = lastMatchIdx + 1; sIdx < cleanSilences.length; sIdx++) {
+            const silence = cleanSilences[sIdx];
+            const sDur = silence.end - silence.start;
+            const dist = Math.abs(silence.mid - targetTime) - Math.min(1.8, sDur * 2.2);
+            if (dist < closestDist) {
+              closestDist = dist;
+              closest = silence;
+              closestIdx = sIdx;
             }
           }
 
-          if (matchedTimes.length < neededCount) {
-            matchedTimes.length = 0;
-            let lastMatchIdx = -1;
-
-            for (let i = 0; i < neededCount; i++) {
-              const targetTime = propTransitions[i];
-              let closest = null;
-              let closestDist = Infinity;
-              let closestIdx = -1;
-
-              for (let sIdx = lastMatchIdx + 1; sIdx < cleanSilences.length; sIdx++) {
-                const silence = cleanSilences[sIdx];
-                const sDur = silence.end - silence.start;
-                const dist = Math.abs(silence.mid - targetTime) - Math.min(1.2, sDur * 1.5);
-                if (dist < closestDist) {
-                  closestDist = dist;
-                  closest = silence;
-                  closestIdx = sIdx;
-                }
-              }
-
-              if (closest && Math.abs(closest.mid - targetTime) < 5.5) {
-                const transitionTime = closest.start + Math.min(0.12, (closest.end - closest.start) * 0.25);
-                matchedTimes.push(transitionTime);
-                lastMatchIdx = closestIdx;
-              } else {
-                matchedTimes.push(targetTime);
-                lastMatchIdx = lastMatchIdx + 1;
-              }
-            }
+          if (closest && Math.abs(closest.mid - targetTime) < 6.0) {
+            const transitionTime = closest.start + Math.min(0.1, (closest.end - closest.start) * 0.25);
+            matchedTimes.push(transitionTime);
+            lastMatchIdx = closestIdx;
+          } else {
+            matchedTimes.push(targetTime);
           }
         }
 
