@@ -3075,10 +3075,8 @@ export default function App() {
         if (rms > maxRms) maxRms = rms;
       }
 
-      // Ngưỡng phát hiện khoảng lặng (Simple dùng trực tiếp silenceThreshold, DP tự điều chỉnh linh hoạt)
-      const dynamicThreshold = isSimple 
-        ? silenceThreshold 
-        : Math.max(silenceThreshold, minRms + (maxRms - minRms) * 0.06);
+      // Ngưỡng phát hiện khoảng lặng tự động phân ứng thích nghi cho cả giọng Nữ (tần số cao/tiếng thở) và giọng Nam
+      const dynamicThreshold = Math.max(0.008, minRms + (maxRms - minRms) * 0.12);
 
       const silences = [];
       let isSilent = false;
@@ -3096,7 +3094,8 @@ export default function App() {
             isSilent = false;
             const endSilence = time;
             const silenceDuration = endSilence - startSilence;
-            if (silenceDuration >= minSilenceDuration) {
+            // Bắt cả các khoảng ngắt câu nhanh từ 50ms trở lên cho giọng nữ/giọng đọc tốc độ cao
+            if (silenceDuration >= 0.05) {
               silences.push({ start: startSilence, end: endSilence, mid: (startSilence + endSilence) / 2 });
             }
           }
