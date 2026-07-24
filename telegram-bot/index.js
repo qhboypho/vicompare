@@ -155,10 +155,13 @@ async function fetchVoiceId(host, apiKey) {
       });
       const data = await res.json();
       const list = data.result?.items || data.result?.voices || (Array.isArray(data.result) ? data.result : []);
-      if (list && list.length > 0) {
+      if (list && Array.isArray(list) && list.length > 0) {
         for (const item of list) {
-          const id = item.id || item._id || item.voiceId;
-          if (id) return id;
+          if (!item) continue;
+          const candidate = item.id || item._id || item.voiceId || item.userVoiceId || item.voice_id;
+          if (candidate && typeof candidate === "string" && candidate.trim().length > 0) {
+            return candidate.trim();
+          }
         }
       }
     } catch (e) {}
@@ -435,7 +438,12 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         const apiKey = env.DEFAULT_LUCY_KEY;
         if (!apiKey) throw new Error("Chưa cấu hình DEFAULT_LUCY_KEY!");
         
-        let voiceId = await fetchVoiceId("api.lucylab.io", apiKey) || "67e37e5c5ffbc46fa2e75e11";
+        let fetchedVoice = await fetchVoiceId("api.lucylab.io", apiKey);
+        let voiceId = env.DEFAULT_LUCY_VOICE_ID || fetchedVoice || "67e37e5c5ffbc46fa2e75e11";
+        if (typeof voiceId !== "string" || !voiceId.trim()) {
+          voiceId = "67e37e5c5ffbc46fa2e75e11";
+        }
+        voiceId = String(voiceId).trim();
         
         let startRes = await fetch("https://api.lucylab.io/json-rpc", {
           method: "POST",
@@ -481,7 +489,12 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         const apiKey = env.DEFAULT_VCLIP_KEY;
         if (!apiKey) throw new Error("Chưa cấu hình DEFAULT_VCLIP_KEY!");
         
-        let voiceId = await fetchVoiceId("api-tts.vclip.io", apiKey) || "67e37e5c5ffbc46fa2e75e11";
+        let fetchedVoice = await fetchVoiceId("api-tts.vclip.io", apiKey);
+        let voiceId = env.DEFAULT_VCLIP_VOICE_ID || fetchedVoice || "67e37e5c5ffbc46fa2e75e11";
+        if (typeof voiceId !== "string" || !voiceId.trim()) {
+          voiceId = "67e37e5c5ffbc46fa2e75e11";
+        }
+        voiceId = String(voiceId).trim();
         
         let startRes = await fetch("https://api-tts.vclip.io/json-rpc", {
           method: "POST",
