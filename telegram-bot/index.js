@@ -435,33 +435,57 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         fileName = "elevenlabs_voice.mp3";
 
       } else if (engineType === "tts_lucy") {
-        const apiKey = env.DEFAULT_LUCY_KEY;
-        if (!apiKey) throw new Error("Chưa cấu hình DEFAULT_LUCY_KEY!");
+        const apiKey = env.DEFAULT_LUCY_KEY || env.LUCY_KEY || env.LUCY_API_KEY;
+        if (!apiKey) throw new Error("Chưa cấu hình API Key LucyLab (DEFAULT_LUCY_KEY hoặc LUCY_KEY)!");
         
         let fetchedVoice = await fetchVoiceId("api.lucylab.io", apiKey);
-        let voiceId = env.DEFAULT_LUCY_VOICE_ID || fetchedVoice || "67e37e5c5ffbc46fa2e75e11";
-        if (typeof voiceId !== "string" || !voiceId.trim()) {
-          voiceId = "67e37e5c5ffbc46fa2e75e11";
-        }
-        voiceId = String(voiceId).trim();
+        let rawVoiceId = 
+          env.DEFAULT_LUCY_VOICE_ID || 
+          env.LUCY_VOICE_ID || 
+          env.LUCY_USER_VOICE_ID || 
+          env.USER_VOICE_ID || 
+          env.DEFAULT_VOICE_ID || 
+          fetchedVoice || 
+          "67e37e5c5ffbc46fa2e75e11";
+          
+        const voiceId = (rawVoiceId && typeof rawVoiceId === "string" && rawVoiceId.trim().length > 0)
+          ? rawVoiceId.trim()
+          : "67e37e5c5ffbc46fa2e75e11";
         
         let startRes = await fetch("https://api.lucylab.io/json-rpc", {
           method: "POST",
           headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ method: "ttsLongText", input: { text: scriptText, userVoiceId: voiceId, speed: 0.85 } })
+          body: JSON.stringify({
+            method: "ttsLongText",
+            input: {
+              text: String(scriptText).trim(),
+              userVoiceId: voiceId,
+              speed: 0.85
+            }
+          })
         });
         let startData = await startRes.json();
 
-        if (startData.error && startData.error.message?.includes("userVoiceId")) {
+        if (startData.error) {
           startRes = await fetch("https://api.lucylab.io/json-rpc", {
             method: "POST",
             headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ method: "ttsLongText", input: { text: scriptText, voiceId: voiceId, speed: 0.85 } })
+            body: JSON.stringify({
+              method: "ttsLongText",
+              input: {
+                text: String(scriptText).trim(),
+                voiceId: voiceId,
+                speed: 0.85
+              }
+            })
           });
-          startData = await startRes.json();
+          const retryData = await startRes.json();
+          if (!retryData.error) {
+            startData = retryData;
+          }
         }
 
-        if (startData.error) throw new Error(startData.error.message || "LucyLab TTS failed");
+        if (startData.error) throw new Error(`LucyLab API: ${startData.error.message || JSON.stringify(startData.error)} (Dùng VoiceID: ${voiceId})`);
 
         const exportId = startData.result?.projectExportId;
         if (!exportId) throw new Error("LucyLab: Không nhận được export ID.");
@@ -486,33 +510,57 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         fileName = "lucylab_voice.mp3";
 
       } else if (engineType === "tts_vclip") {
-        const apiKey = env.DEFAULT_VCLIP_KEY;
-        if (!apiKey) throw new Error("Chưa cấu hình DEFAULT_VCLIP_KEY!");
+        const apiKey = env.DEFAULT_VCLIP_KEY || env.VCLIP_KEY || env.VCLIP_API_KEY;
+        if (!apiKey) throw new Error("Chưa cấu hình API Key VClip (DEFAULT_VCLIP_KEY hoặc VCLIP_KEY)!");
         
         let fetchedVoice = await fetchVoiceId("api-tts.vclip.io", apiKey);
-        let voiceId = env.DEFAULT_VCLIP_VOICE_ID || fetchedVoice || "67e37e5c5ffbc46fa2e75e11";
-        if (typeof voiceId !== "string" || !voiceId.trim()) {
-          voiceId = "67e37e5c5ffbc46fa2e75e11";
-        }
-        voiceId = String(voiceId).trim();
+        let rawVoiceId = 
+          env.DEFAULT_VCLIP_VOICE_ID || 
+          env.VCLIP_VOICE_ID || 
+          env.VCLIP_USER_VOICE_ID || 
+          env.USER_VOICE_ID || 
+          env.DEFAULT_VOICE_ID || 
+          fetchedVoice || 
+          "67e37e5c5ffbc46fa2e75e11";
+          
+        const voiceId = (rawVoiceId && typeof rawVoiceId === "string" && rawVoiceId.trim().length > 0)
+          ? rawVoiceId.trim()
+          : "67e37e5c5ffbc46fa2e75e11";
         
         let startRes = await fetch("https://api-tts.vclip.io/json-rpc", {
           method: "POST",
           headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ method: "ttsLongText", input: { text: scriptText, userVoiceId: voiceId, speed: 1.0 } })
+          body: JSON.stringify({
+            method: "ttsLongText",
+            input: {
+              text: String(scriptText).trim(),
+              userVoiceId: voiceId,
+              speed: 1.0
+            }
+          })
         });
         let startData = await startRes.json();
 
-        if (startData.error && (startData.error.message?.includes("userVoiceId") || startData.error.message?.includes("Voice"))) {
+        if (startData.error) {
           startRes = await fetch("https://api-tts.vclip.io/json-rpc", {
             method: "POST",
             headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ method: "ttsLongText", input: { text: scriptText, voiceId: voiceId, speed: 1.0 } })
+            body: JSON.stringify({
+              method: "ttsLongText",
+              input: {
+                text: String(scriptText).trim(),
+                voiceId: voiceId,
+                speed: 1.0
+              }
+            })
           });
-          startData = await startRes.json();
+          const retryData = await startRes.json();
+          if (!retryData.error) {
+            startData = retryData;
+          }
         }
 
-        if (startData.error) throw new Error(startData.error.message || "VClip TTS failed");
+        if (startData.error) throw new Error(`VClip API: ${startData.error.message || JSON.stringify(startData.error)} (Dùng VoiceID: ${voiceId})`);
 
         const exportId = startData.result?.projectExportId;
         if (!exportId) throw new Error("VClip: Không nhận được export ID.");
