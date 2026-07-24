@@ -817,6 +817,7 @@ export default function App() {
     const updated = [...channelProfiles, newProfile];
     setChannelProfiles(updated);
     safeSaveChannelProfiles(updated);
+    syncChannelProfilesToTelegram(updated);
     setActiveChannelId(newId);
     try { localStorage.setItem('active_channel_id', newId); } catch {}
     alert(`Đã lưu Mẫu Kênh "${name.trim()}" thành công!`);
@@ -865,6 +866,7 @@ export default function App() {
 
     setChannelProfiles(updated);
     safeSaveChannelProfiles(updated);
+    syncChannelProfilesToTelegram(updated);
     alert(`Đã cập nhật thay đổi cho Mẫu Kênh "${profileName}"!`);
   };
 
@@ -880,6 +882,7 @@ export default function App() {
     const updated = channelProfiles.filter(p => p.id !== id);
     setChannelProfiles(updated);
     safeSaveChannelProfiles(updated);
+    syncChannelProfilesToTelegram(updated);
 
     if (activeChannelId === id) {
       handleApplyChannelProfile(updated[0]);
@@ -1358,7 +1361,94 @@ export default function App() {
       }
     };
     loadFromDisk();
+    
+    // Tự động đồng bộ Kênh & Nạp phiên làm việc từ Telegram khi mở Web App
+    syncChannelProfilesToTelegram(channelProfiles);
+    loadSessionFromTelegram();
   }, []);
+
+  // 1. Đồng bộ danh sách Mẫu Kênh sang Cloudflare Worker của Telegram Bot
+  const syncChannelProfilesToTelegram = async (profiles) => {
+    const list = profiles || channelProfiles;
+    if (!list || list.length === 0) return;
+    try {
+      await fetch('https://vicompare-telegram-bot.qhboypho.workers.dev/api/sync-profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profiles: list })
+      });
+    } catch (err) {
+      console.warn('Sync profiles to Telegram warning:', err);
+    }
+  };
+
+  // 2. Tự động kiểm tra URL parameter ?session=... để nạp dữ liệu từ Telegram
+  const loadSessionFromTelegram = async () => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const sessionId = urlParams.get('session');
+      if (!sessionId) return;
+
+      const res = await fetch(`https://vicompare-telegram-bot.qhboypho.workers.dev/api/get-session?id=${sessionId}`);
+      if (!res.ok) return;
+
+      const data = await res.json();
+      if (data.session) {
+        const { scriptText, channelId, audioBase64, audioUrl } = data.session;
+        if (scriptText) {
+          handleParseScript(scriptText);
+        }
+        if (channelId) {
+          handleSwitchChannelProfile(channelId);
+        }
+        
+        let localAudioBlobUrl = audioUrl;
+        if (audioBase64) {
+          try {
+            const byteCharacters = atob(audioBase64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'audio/mpeg' });
+            localAudioBlobUrl = URL.createObjectURL(blob);
+          } catch (bErr) {
+            console.warn('Base64 decode audio fallback:', bErr);
+          }
+        }
+
+        if (localAudioBlobUrl) {
+          setAudioUrl(localAudioBlobUrl);
+          const tempAudio = new Audio(localAudioBlobUrl);
+          tempAudio.onloadedmetadata = async () => {
+            await runSilenceSyncWithUrl(localAudioBlobUrl, tempAudio.duration);
+          };
+        }
+
+        alert('⚡ Tự động nạp Kịch bản, Voice & Mẫu Kênh từ Telegram thành công! Sẵn sàng xuất video.');
+      }
+    } catch (err) {
+      console.error('Lỗi khi nạp phiên làm việc từ Telegram:', err);
+    }
+  };
+
+  // 3. Gửi thông báo xuất bản MXH ngược về Telegram
+  const notifyTelegramPublish = async (videoTitle) => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const chatId = urlParams.get('chatId');
+      if (!chatId) return;
+
+      await fetch('https://vicompare-telegram-bot.qhboypho.workers.dev/api/publish-notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, videoTitle: videoTitle || headerTitle || 'Video so sánh' })
+      });
+    } catch (err) {
+      console.warn('Publish notify to Telegram warning:', err);
+    }
+  };
 
   // Synchronize comment logs to ref to avoid interval resets
   const commentLogsRef = useRef(commentLogs);
