@@ -34,6 +34,17 @@ import {
 import { drawFrame } from './utils/canvasRenderer';
 import { exportVideo } from './utils/videoExporter';
 import { saveAudioToStorage, getAudioFromStorage, clearAudioFromStorage, saveImageToStorage, getImageFromStorage, clearImagesFromStorage, deleteImageFromStorage, saveVideoToStorage, getVideoFromStorage } from './utils/audioStorage';
+import {
+  ACTIVE_SOCIAL_ACCOUNT_STORAGE_KEY,
+  SELECTED_SOCIAL_ACCOUNT_STORAGE_KEY,
+  SOCIAL_ACCOUNT_STORAGE_KEY,
+  getActiveSocialAccountIds,
+  getSelectedSocialAccountIds,
+  normalizeSocialAccounts,
+  removeSocialAccount,
+  upsertSocialAccount
+} from './utils/socialAccounts';
+import { publishTikTokVideo } from './utils/tiktokPublisher';
 
 // Default prompt script replicating FastScene layout
 const DEFAULT_SCRIPT = `Đây là khách quan.
@@ -187,6 +198,34 @@ const formatVclipKeyItems = (items) => {
     }
     return `${item.key} | ${item.createdDate || new Date().toISOString().split('T')[0]}`;
   }).join('\n');
+};
+
+const cleanTelegramScriptText = (text) => {
+  if (!text) return '';
+  const lines = String(text)
+    .replace(/📝\s*\*{0,2}Kịch bản đề xuất:\*{0,2}\s*/i, '')
+    .split(/\r?\n/);
+
+  const cleanLines = [];
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      if (cleanLines.length > 0) cleanLines.push('');
+      continue;
+    }
+
+    if (
+      /^👇\s*\*{0,2}Bước\s+1\/2\b/i.test(line) ||
+      /^📺\s*\*{0,2}Kênh đã chọn\b/i.test(line) ||
+      /^👇\s*\*{0,2}Bước\s+2\/2\b/i.test(line)
+    ) {
+      break;
+    }
+
+    cleanLines.push(rawLine.trimEnd());
+  }
+
+  return cleanLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 };
 
 // Helper tính toán số ngày còn lại đến chu kỳ reset 30 ngày (1 tháng)
@@ -441,7 +480,7 @@ export default function App() {
   const DEFAULT_VCLIP_KEY = safeAtob(['dmNfbGl2ZV9kODNlMjBlODMx', 'MjA0MGIyYTc1OGU1ZDA3MDEwNDFhYg=='].join(''));
   const [ttsProvider, setTtsProvider] = useState(() => localStorage.getItem('tts_provider') || 'lucylab');
   const [vclipApiKey, setVclipApiKey] = useState(() => localStorage.getItem('vclip_api_key') || DEFAULT_VCLIP_KEY);
-  const [vclipVoiceId, setVclipVoiceId] = useState(() => localStorage.getItem('vclip_voice_id') || '67e37e5c5ffbc46fa2e75e11');
+  const [vclipVoiceId, setVclipVoiceId] = useState(() => localStorage.getItem('vclip_voice_id') || '');
   const [vclipSpeed, setVclipSpeed] = useState(1.0);
 
   // Quản lý Danh sách Key VClip & Auto-Switch
@@ -1134,18 +1173,24 @@ export default function App() {
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishingStatus, setPublishingStatus] = useState('');
   
-  // Facebook credentials (split base64 decoded fallbacks)
+  // Facebook credentials
   const DEFAULT_FB_PAGE_ID = safeAtob(['MTIyMzYzNDg0', 'NzQ5OTI2NA=='].join(''));
-  const DEFAULT_FB_TOKEN = safeAtob(['RUFBV0tpanRUWFJJQlNDVFpCdE82ZU1PYVd1TmMzemFrS1A5RWR0RUZ5OVNDeTJzbHNmdlBZa1pDS3FDMm1ybE9aQ010RjI5bU9aQ1BTSVA1REdXa1pDNzJNWkF5ZmV2Z2FuTWVIdFNoOFRUT2ZyWkE0WkJjUUZJOGZ6VFFIY2haQ1BPaFI4eUJPMDFieUJPZlA3WkJaQjVCV1hNbHZjYnZOVE5ZMURpQW1sYzNBQ3RBcmdBWHd3aTBUQlpCMzZ4T2VnWkNtQ1VVNXVDUXBOUWlycFRaQzZXZzNaQ2ZnWkJz'].join(''));
+  const DEFAULT_FB_TOKEN = '';
   const [fbPageId, setFbPageId] = useState(() => localStorage.getItem('fb_page_id') || DEFAULT_FB_PAGE_ID);
   const [fbAccessToken, setFbAccessToken] = useState(() => localStorage.getItem('fb_access_token') || DEFAULT_FB_TOKEN);
   
-  // YouTube credentials (split base64 decoded fallbacks)
+  // YouTube credentials
   const DEFAULT_YT_CHANNEL_ID = safeAtob(['VUNZY2o0REFk', 'MUdGVUdVaTJCMnlZRzVn'].join(''));
-  const DEFAULT_YT_TOKEN = safeAtob(['eWEyOS5hMEFSR251MFoxeWJpREdLQkRQTng1UFkzTTdsYWlEQlNWSVFFamFjZ1RzMEJYYTQ1NDBNc2U1VU1KeEhEYnZkS1dBbkhLWTFJU1VQcVFpSUstbDRKdkZWeHlOd0FwaWtFYVBUYk9GU0VCTG9ROWhkXzZfbTZQqd6NNbKNX4dTGGQIYyC_VHJgpbeqfoP1NzIUuyue21RDadlnCDMuzyk7kCfNjMwrdmRyksywXyrtT-d-EQGyaCgYKAakSARISFQHGX2MiRcylzK2RxzMRN7K0eKnCNg0207'].join(''));
+  const DEFAULT_YT_TOKEN = '';
   const DEFAULT_YT_CLIENT_ID = safeAtob(['ODMyODQzODk0MTE0LWMzaGM0ODMzdXQydjdqbHRiNzljcjVtMHNjZDZxam10', 'LmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29t'].join(''));
-  const DEFAULT_YT_CLIENT_SECRET = safeAtob(['R09DU1BYLWJXTExJ', 'emxyM3FsdHo1UmJHNGlORVZCS1VGeW8='].join(''));
-  const DEFAULT_YT_REFRESH_TOKEN = safeAtob(['MS8vMDRjNE1KQVZyVkVLX0NnWUlBUkFBR0FRU053Ri1MOUly', 'dnphZ3NzTndXV3N3SlJ3V2xZcm9EQnZISzZvelNZbnphT3NMWlVINEJVNlRFZzZ5U04xdEc4NC1iZ213OFMxcTAtTQ=='].join(''));
+  const DEFAULT_YT_CLIENT_SECRET = '';
+  const DEFAULT_YT_REFRESH_TOKEN = '';
+  const DEFAULT_YT_DISPLAY_NAME = 'Mèo thông thái';
+  const DEFAULT_TT_DISPLAY_NAME = '@namhuuhoc.official';
+  const getStoredYouTubeDisplayName = () => {
+    const saved = localStorage.getItem('yt_display_name');
+    return !saved || saved === 'Nam Hưu Học Shorts' ? DEFAULT_YT_DISPLAY_NAME : saved;
+  };
 
   const [ytChannelId, setYtChannelId] = useState(() => localStorage.getItem('yt_channel_id') || DEFAULT_YT_CHANNEL_ID);
   const [ytAccessToken, setYtAccessToken] = useState(() => localStorage.getItem('yt_access_token') || DEFAULT_YT_TOKEN);
@@ -1156,6 +1201,68 @@ export default function App() {
   // TikTok credentials
   const [ttSessionId, setTtSessionId] = useState(() => localStorage.getItem('tt_session_id') || '');
   const [ttAccessToken, setTtAccessToken] = useState(() => localStorage.getItem('tt_access_token') || '');
+  const [ttClientKey, setTtClientKey] = useState(() => localStorage.getItem('tt_client_key') || '');
+  const [ttClientSecret, setTtClientSecret] = useState(() => localStorage.getItem('tt_client_secret') || '');
+  const [ttRefreshToken, setTtRefreshToken] = useState(() => localStorage.getItem('tt_refresh_token') || '');
+  const [ttOpenId, setTtOpenId] = useState(() => localStorage.getItem('tt_open_id') || '');
+  const [ttRedirectUri, setTtRedirectUri] = useState(() => localStorage.getItem('tt_redirect_uri') || 'https://vicompare.pages.dev/');
+  const [ttAuthCode, setTtAuthCode] = useState('');
+  const [isTtExchanging, setIsTtExchanging] = useState(false);
+
+  const [socialAccounts, setSocialAccounts] = useState(() => {
+    let savedAccounts = null;
+    try {
+      savedAccounts = JSON.parse(localStorage.getItem(SOCIAL_ACCOUNT_STORAGE_KEY) || 'null');
+    } catch {}
+    return normalizeSocialAccounts(savedAccounts, {
+      facebook: {
+        connected: localStorage.getItem('fbConnected') !== 'false',
+        pageId: localStorage.getItem('fb_page_id') || DEFAULT_FB_PAGE_ID,
+        accessToken: localStorage.getItem('fb_access_token') || DEFAULT_FB_TOKEN
+      },
+      youtube: {
+        connected: localStorage.getItem('ytConnected') !== 'false',
+        channelId: localStorage.getItem('yt_channel_id') || DEFAULT_YT_CHANNEL_ID,
+        accessToken: localStorage.getItem('yt_access_token') || DEFAULT_YT_TOKEN,
+        clientId: localStorage.getItem('yt_client_id') || DEFAULT_YT_CLIENT_ID,
+        clientSecret: localStorage.getItem('yt_client_secret') || DEFAULT_YT_CLIENT_SECRET,
+        refreshToken: localStorage.getItem('yt_refresh_token') || DEFAULT_YT_REFRESH_TOKEN,
+        displayName: getStoredYouTubeDisplayName()
+      },
+      tiktok: {
+        connected: localStorage.getItem('ttConnected') === 'true',
+        sessionId: localStorage.getItem('tt_session_id') || '',
+        accessToken: localStorage.getItem('tt_access_token') || '',
+        clientKey: localStorage.getItem('tt_client_key') || '',
+        clientSecret: localStorage.getItem('tt_client_secret') || '',
+        refreshToken: localStorage.getItem('tt_refresh_token') || '',
+        openId: localStorage.getItem('tt_open_id') || '',
+        redirectUri: localStorage.getItem('tt_redirect_uri') || 'https://vicompare.pages.dev/',
+        displayName: localStorage.getItem('tt_display_name') || DEFAULT_TT_DISPLAY_NAME
+      }
+    });
+  });
+  const [activeSocialAccountIds, setActiveSocialAccountIds] = useState(() => {
+    let savedAccounts = null;
+    let savedActiveIds = null;
+    try {
+      savedAccounts = JSON.parse(localStorage.getItem(SOCIAL_ACCOUNT_STORAGE_KEY) || 'null');
+      savedActiveIds = JSON.parse(localStorage.getItem(ACTIVE_SOCIAL_ACCOUNT_STORAGE_KEY) || 'null');
+    } catch {}
+    return getActiveSocialAccountIds(normalizeSocialAccounts(savedAccounts), savedActiveIds || {});
+  });
+  const [selectedSocialAccountIds, setSelectedSocialAccountIds] = useState(() => {
+    let savedAccounts = null;
+    let savedSelectedIds = null;
+    try {
+      savedAccounts = JSON.parse(localStorage.getItem(SOCIAL_ACCOUNT_STORAGE_KEY) || 'null');
+      savedSelectedIds = JSON.parse(localStorage.getItem(SELECTED_SOCIAL_ACCOUNT_STORAGE_KEY) || 'null');
+    } catch {}
+    return getSelectedSocialAccountIds(normalizeSocialAccounts(savedAccounts), savedSelectedIds || {});
+  });
+  const [showAddSocialMenu, setShowAddSocialMenu] = useState(false);
+  const [editingSocialAccountId, setEditingSocialAccountId] = useState('');
+  const [socialDisplayName, setSocialDisplayName] = useState('');
 
   const [publishCaption, setPublishCaption] = useState('');
   const [publishPlatforms, setPublishPlatforms] = useState({ facebook: true, youtube: true, tiktok: true });
@@ -1195,6 +1302,25 @@ export default function App() {
   const [manualVideoId, setManualVideoId] = useState('');
   const [isScanning, setIsScanning] = useState(false);
 
+  useEffect(() => {
+    const nextActiveIds = getActiveSocialAccountIds(socialAccounts, activeSocialAccountIds);
+    const nextSelectedIds = getSelectedSocialAccountIds(socialAccounts, selectedSocialAccountIds);
+    if (
+      nextActiveIds.facebook !== activeSocialAccountIds.facebook ||
+      nextActiveIds.youtube !== activeSocialAccountIds.youtube ||
+      nextActiveIds.tiktok !== activeSocialAccountIds.tiktok
+    ) {
+      setActiveSocialAccountIds(nextActiveIds);
+    }
+    if (
+      nextSelectedIds.facebook.join('|') !== (selectedSocialAccountIds.facebook || []).join('|') ||
+      nextSelectedIds.youtube.join('|') !== (selectedSocialAccountIds.youtube || []).join('|') ||
+      nextSelectedIds.tiktok.join('|') !== (selectedSocialAccountIds.tiktok || []).join('|')
+    ) {
+      setSelectedSocialAccountIds(nextSelectedIds);
+    }
+  }, [socialAccounts, activeSocialAccountIds, selectedSocialAccountIds]);
+
   // Auto-save social media scheduling data, credentials, and comment responder settings
   useEffect(() => {
     localStorage.setItem('fbConnected', fbConnected.toString());
@@ -1209,6 +1335,26 @@ export default function App() {
     localStorage.setItem('yt_refresh_token', ytRefreshToken);
     localStorage.setItem('tt_session_id', ttSessionId);
     localStorage.setItem('tt_access_token', ttAccessToken);
+    localStorage.setItem('tt_client_key', ttClientKey);
+    localStorage.setItem('tt_client_secret', ttClientSecret);
+    localStorage.setItem('tt_refresh_token', ttRefreshToken);
+    localStorage.setItem('tt_open_id', ttOpenId);
+    localStorage.setItem('tt_redirect_uri', ttRedirectUri);
+    const activeYouTubeAccount = (socialAccounts.youtube || []).find(account => (selectedSocialAccountIds.youtube || []).includes(account.id)) || socialAccounts.youtube?.[0];
+    const activeTikTokAccount = (socialAccounts.tiktok || []).find(account => (selectedSocialAccountIds.tiktok || []).includes(account.id)) || socialAccounts.tiktok?.[0];
+    if (activeYouTubeAccount?.credentials?.displayName) {
+      localStorage.setItem('yt_display_name', activeYouTubeAccount.credentials.displayName);
+    }
+    if (activeTikTokAccount?.credentials?.displayName) {
+      localStorage.setItem('tt_display_name', activeTikTokAccount.credentials.displayName);
+    }
+    try {
+      localStorage.setItem(SOCIAL_ACCOUNT_STORAGE_KEY, JSON.stringify(socialAccounts));
+      localStorage.setItem(ACTIVE_SOCIAL_ACCOUNT_STORAGE_KEY, JSON.stringify(activeSocialAccountIds));
+      localStorage.setItem(SELECTED_SOCIAL_ACCOUNT_STORAGE_KEY, JSON.stringify(selectedSocialAccountIds));
+    } catch (err) {
+      console.error('Failed to serialize socialAccounts to localStorage:', err);
+    }
     try {
       localStorage.setItem('scheduledPosts', JSON.stringify(scheduledPosts));
     } catch (err) {
@@ -1245,6 +1391,14 @@ export default function App() {
     ytRefreshToken,
     ttSessionId, 
     ttAccessToken, 
+    ttClientKey,
+    ttClientSecret,
+    ttRefreshToken,
+    ttOpenId,
+    ttRedirectUri,
+    socialAccounts,
+    activeSocialAccountIds,
+    selectedSocialAccountIds,
     scheduledPosts,
     botEnabled,
     commentAiProvider,
@@ -1275,8 +1429,15 @@ export default function App() {
             yt_client_id: ytClientId,
             yt_client_secret: ytClientSecret,
             yt_refresh_token: ytRefreshToken,
+            yt_display_name: getStoredYouTubeDisplayName(),
             tt_session_id: ttSessionId,
             tt_access_token: ttAccessToken,
+            tt_client_key: ttClientKey,
+            tt_client_secret: ttClientSecret,
+            tt_refresh_token: ttRefreshToken,
+            tt_open_id: ttOpenId,
+            tt_redirect_uri: ttRedirectUri,
+            tt_display_name: localStorage.getItem('tt_display_name') || DEFAULT_TT_DISPLAY_NAME,
             comment_ai_api_key: commentAiApiKey,
             comment_ai_provider: commentAiProvider
           })
@@ -1287,14 +1448,14 @@ export default function App() {
     };
     
     // Chỉ lưu khi có ít nhất một thông tin kết nối để tránh ghi đè dữ liệu trống lúc khởi tạo
-    if (fbPageId || fbAccessToken || ytChannelId || ytAccessToken || commentAiApiKey) {
+    if (fbPageId || fbAccessToken || ytChannelId || ytAccessToken || ttSessionId || ttAccessToken || ttRefreshToken || commentAiApiKey) {
       const timer = setTimeout(saveToDisk, 1000); // debounce 1s
       return () => clearTimeout(timer);
     }
   }, [
     fbPageId, fbAccessToken, 
     ytChannelId, ytAccessToken, ytClientId, ytClientSecret, ytRefreshToken,
-    ttSessionId, ttAccessToken,
+    ttSessionId, ttAccessToken, ttClientKey, ttClientSecret, ttRefreshToken, ttOpenId, ttRedirectUri,
     commentAiApiKey, commentAiProvider
   ]);
 
@@ -1347,6 +1508,28 @@ export default function App() {
             setTtConnected(true);
             localStorage.setItem('ttConnected', 'true');
           }
+          if (data.tt_client_key && !ttClientKey) {
+            setTtClientKey(data.tt_client_key);
+            localStorage.setItem('tt_client_key', data.tt_client_key);
+          }
+          if (data.tt_client_secret && !ttClientSecret) {
+            setTtClientSecret(data.tt_client_secret);
+            localStorage.setItem('tt_client_secret', data.tt_client_secret);
+          }
+          if (data.tt_refresh_token && !ttRefreshToken) {
+            setTtRefreshToken(data.tt_refresh_token);
+            localStorage.setItem('tt_refresh_token', data.tt_refresh_token);
+            setTtConnected(true);
+            localStorage.setItem('ttConnected', 'true');
+          }
+          if (data.tt_open_id && !ttOpenId) {
+            setTtOpenId(data.tt_open_id);
+            localStorage.setItem('tt_open_id', data.tt_open_id);
+          }
+          if (data.tt_redirect_uri && !ttRedirectUri) {
+            setTtRedirectUri(data.tt_redirect_uri);
+            localStorage.setItem('tt_redirect_uri', data.tt_redirect_uri);
+          }
           if (data.comment_ai_api_key && !commentAiApiKey) {
             setCommentAiApiKey(data.comment_ai_api_key);
             localStorage.setItem('comment_ai_api_key', data.comment_ai_api_key);
@@ -1367,39 +1550,152 @@ export default function App() {
     loadSessionFromTelegram();
   }, []);
 
+  const telegramCredentialSyncTimerRef = useRef(null);
+
+  const sanitizeTelegramCredentials = (credentials) => ({
+    ...credentials,
+    vclipVoiceId: credentials.vclipVoiceId === '67e37e5c5ffbc46fa2e75e11' ? '' : credentials.vclipVoiceId
+  });
+
+  const buildTelegramCredentials = (overrides = {}) => sanitizeTelegramCredentials({
+    vclipApiKey: vclipApiKey || '',
+    vclipVoiceId: vclipVoiceId || '',
+    lucyLabApiKey: lucyLabApiKey || '',
+    lucyLabVoiceId: lucyLabVoiceId || '',
+    elevenLabsApiKey: elevenLabsApiKey || '',
+    ttSessionId: ttSessionId || '',
+    ttAccessToken: ttAccessToken || '',
+    ttClientKey: ttClientKey || '',
+    ttClientSecret: ttClientSecret || '',
+    ttRefreshToken: ttRefreshToken || '',
+    ttOpenId: ttOpenId || '',
+    ttDisplayName: localStorage.getItem('tt_display_name') || DEFAULT_TT_DISPLAY_NAME,
+    ...overrides
+  });
+
   // 1. Đồng bộ danh sách Mẫu Kênh sang Cloudflare Worker của Telegram Bot
-  const syncChannelProfilesToTelegram = async (profiles) => {
+  const syncChannelProfilesToTelegram = async (profiles, credentialOverrides = {}) => {
     const list = profiles || channelProfiles;
     if (!list || list.length === 0) return;
     try {
       await fetch('https://vicompare-telegram-bot.qhboypho.workers.dev/api/sync-profiles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profiles: list })
+        body: JSON.stringify({
+          profiles: list,
+          credentials: buildTelegramCredentials(credentialOverrides)
+        })
       });
     } catch (err) {
       console.warn('Sync profiles to Telegram warning:', err);
     }
   };
 
+  const scheduleTelegramCredentialSync = (credentialOverrides = {}) => {
+    if (telegramCredentialSyncTimerRef.current) {
+      clearTimeout(telegramCredentialSyncTimerRef.current);
+    }
+    telegramCredentialSyncTimerRef.current = setTimeout(() => {
+      syncChannelProfilesToTelegram(channelProfiles, credentialOverrides);
+    }, 800);
+  };
+
+  const normalizeCompareTitle = (value) => cleanTelegramScriptText(value)
+    .toLowerCase()
+    .replace(/[^\w\sàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const applyComparisonImages = (baseComparisons, comparisonImages) => {
+    if (!Array.isArray(baseComparisons) || !Array.isArray(comparisonImages)) return baseComparisons || [];
+
+    return baseComparisons.map((comparison, index) => {
+      const match = comparisonImages.find(item => item.startIndex === comparison.startIndex)
+        || comparisonImages.find(item =>
+          normalizeCompareTitle(item.leftTitle) === normalizeCompareTitle(comparison.leftTitle)
+          && normalizeCompareTitle(item.rightTitle) === normalizeCompareTitle(comparison.rightTitle)
+        )
+        || comparisonImages[index];
+
+      if (!match) return comparison;
+
+      const nextComparison = {
+        ...comparison,
+        leftImageUrl: match.leftImageUrl || comparison.leftImageUrl || '',
+        rightImageUrl: match.rightImageUrl || comparison.rightImageUrl || ''
+      };
+
+      if (nextComparison.leftImageUrl) cacheImage(nextComparison.leftImageUrl, nextComparison.leftImageUrl);
+      if (nextComparison.rightImageUrl) cacheImage(nextComparison.rightImageUrl, nextComparison.rightImageUrl);
+
+      return nextComparison;
+    });
+  };
+
   // 2. Tự động kiểm tra URL parameter ?session=... để nạp dữ liệu từ Telegram
   const loadSessionFromTelegram = async () => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
-      const sessionId = urlParams.get('session');
-      if (!sessionId) return;
-
-      const res = await fetch(`https://vicompare-telegram-bot.qhboypho.workers.dev/api/get-session?id=${sessionId}`);
-      if (!res.ok) return;
-
-      const data = await res.json();
-      if (data.session) {
-        const { scriptText, channelId, audioBase64, audioUrl } = data.session;
-        if (scriptText) {
-          handleParseScript(scriptText);
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      let inlinePayload = {};
+      const encodedTelegramData = urlParams.get('tdata') || hashParams.get('tdata');
+      if (encodedTelegramData) {
+        try {
+          const base64 = encodedTelegramData.replace(/-/g, '+').replace(/_/g, '/');
+          const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+          inlinePayload = JSON.parse(decodeURIComponent(escape(atob(padded))));
+        } catch (payloadErr) {
+          console.warn('Telegram URL payload decode failed:', payloadErr);
         }
+      }
+
+      const sessionId = urlParams.get('session');
+      const fallbackSession = {
+        scriptText: inlinePayload.scriptText || urlParams.get('scriptText') || urlParams.get('script') || '',
+        channelId: inlinePayload.channelId || urlParams.get('channelId') || '',
+        audioBase64: '',
+        audioUrl: inlinePayload.audioUrl || urlParams.get('audioUrl') || '',
+        comparisonImages: Array.isArray(inlinePayload.comparisonImages) ? inlinePayload.comparisonImages : []
+      };
+
+      let telegramSession = null;
+      if (sessionId) {
+        try {
+          const res = await fetch(`https://vicompare-telegram-bot.qhboypho.workers.dev/api/get-session?id=${sessionId}`);
+          if (res.ok) {
+            const data = await res.json();
+            telegramSession = data.session || null;
+          }
+        } catch (sessionErr) {
+          console.warn('Telegram session API unavailable, using URL payload fallback:', sessionErr);
+        }
+      }
+
+      const session = telegramSession || (
+        fallbackSession.scriptText || fallbackSession.audioUrl || fallbackSession.channelId
+          ? fallbackSession
+          : null
+      );
+
+      if (session) {
+        const { scriptText, channelId, audioBase64, audioUrl, comparisonImages = [] } = session;
+        let parsedTelegramScript = null;
         if (channelId) {
-          handleSwitchChannelProfile(channelId);
+          const selectedProfile = channelProfiles.find(profile => profile.id === channelId);
+          if (selectedProfile) {
+            handleApplyChannelProfile(selectedProfile);
+          }
+        }
+
+        const cleanedScriptText = cleanTelegramScriptText(scriptText);
+        if (cleanedScriptText) {
+          setScriptText(cleanedScriptText);
+          try { localStorage.setItem('scriptText', cleanedScriptText); } catch {}
+          parsedTelegramScript = handleParseScript(cleanedScriptText, { notify: false });
+          if (parsedTelegramScript?.comparisons && Array.isArray(comparisonImages) && comparisonImages.length > 0) {
+            const comparisonsWithImages = applyComparisonImages(parsedTelegramScript.comparisons, comparisonImages);
+            setComparisons(comparisonsWithImages);
+          }
         }
         
         let localAudioBlobUrl = audioUrl;
@@ -1419,11 +1715,33 @@ export default function App() {
         }
 
         if (localAudioBlobUrl) {
-          setAudioUrl(localAudioBlobUrl);
-          const tempAudio = new Audio(localAudioBlobUrl);
-          tempAudio.onloadedmetadata = async () => {
-            await runSilenceSyncWithUrl(localAudioBlobUrl, tempAudio.duration);
+          const syncLoadedAudio = (targetUrl) => {
+            const tempAudio = new Audio(targetUrl);
+            tempAudio.onloadedmetadata = async () => {
+              await runSilenceSyncWithUrl(targetUrl, tempAudio.duration, parsedTelegramScript?.timelineBlocks);
+            };
           };
+
+          setAudioUrl(localAudioBlobUrl);
+          setAudioFileName('telegram_voice.mp3');
+
+          if (!localAudioBlobUrl.startsWith('blob:') && !localAudioBlobUrl.startsWith('data:')) {
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 8000);
+              const directRes = await fetch(localAudioBlobUrl, { signal: controller.signal });
+              clearTimeout(timeoutId);
+              if (directRes.ok) {
+                const audioBlob = await directRes.blob();
+                localAudioBlobUrl = URL.createObjectURL(audioBlob);
+                setAudioUrl(localAudioBlobUrl);
+              }
+            } catch (audioErr) {
+              console.warn('Direct Telegram audio fetch fallback:', audioErr);
+            }
+          }
+
+          syncLoadedAudio(localAudioBlobUrl);
         }
 
         const isAutoRender = urlParams.get('auto') === 'true' || urlParams.get('autoRender') === 'true';
@@ -1440,17 +1758,72 @@ export default function App() {
     }
   };
 
+  const buildSmartPublishCaption = () => {
+    const pairs = comparisons
+      .filter(comp => comp.leftTitle?.trim() && comp.rightTitle?.trim())
+      .map(comp => ({
+        left: comp.leftTitle.trim(),
+        right: comp.rightTitle.trim()
+      }));
+
+    const hashtags = '#shorts #reels';
+    const currentCaption = (publishCaption || '').trim();
+    const isManualCaption = currentCaption
+      && !/^tìm hiểu các loài chó(?:\s+phần\s+\d+)?\s*(#shorts\s+#reels)?$/i.test(currentCaption)
+      && currentCaption !== hashtags;
+    if (isManualCaption) {
+      return currentCaption.includes('#shorts') && currentCaption.includes('#reels')
+        ? currentCaption
+        : `${currentCaption} ${hashtags}`;
+    }
+
+    if (pairs.length === 0) {
+      return `Tìm hiểu sự khác nhau qua video so sánh thú vị này ${hashtags}`;
+    }
+
+    const pairText = pairs
+      .map(pair => `${pair.left} và ${pair.right}`)
+      .join(', ');
+    const firstPair = pairs[0];
+    const openings = [
+      `Tìm hiểu về ${pairText}`,
+      `So sánh ${pairText}: khác nhau ở điểm nào?`,
+      `Sự khác nhau giữa ${pairText}`,
+      `Cùng khám phá điểm khác biệt giữa ${pairText}`,
+      `Bạn phân biệt được ${firstPair.left} và ${firstPair.right} chưa?`
+    ];
+
+    const seed = pairs.map(pair => pair.left + pair.right).join('').length + new Date().getMinutes();
+    const opening = openings[seed % openings.length];
+    return `${opening} ${hashtags}`;
+  };
+
   // 3. Gửi thông báo xuất bản MXH ngược về Telegram
-  const notifyTelegramPublish = async (videoTitle) => {
+  const notifyTelegramPublish = async (videoTitle, videoUrl = '') => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const chatId = urlParams.get('chatId');
       if (!chatId) return;
 
+      if (videoUrl) {
+        const videoBlob = await fetch(videoUrl).then(r => r.blob());
+        const formData = new FormData();
+        formData.append('chatId', chatId);
+        formData.append('videoTitle', videoTitle || headerTitle || 'Video so sánh');
+        formData.append('caption', buildSmartPublishCaption());
+        formData.append('video', videoBlob, `${customFilename || 'video_so_sanh'}.${exportedExt || 'webm'}`);
+
+        await fetch('https://vicompare-telegram-bot.qhboypho.workers.dev/api/publish-notify', {
+          method: 'POST',
+          body: formData
+        });
+        return;
+      }
+
       await fetch('https://vicompare-telegram-bot.qhboypho.workers.dev/api/publish-notify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId, videoTitle: videoTitle || headerTitle || 'Video so sánh' })
+        body: JSON.stringify({ chatId, videoTitle: videoTitle || headerTitle || 'Video so sánh', caption: buildSmartPublishCaption() })
       });
     } catch (err) {
       console.warn('Publish notify to Telegram warning:', err);
@@ -1503,7 +1876,9 @@ export default function App() {
       for (const post of activePosts) {
         try {
           // Lấy chính xác ID bài đăng Facebook, nếu không có thì fallback về postId cũ
-          const fbPostId = post.postIds?.facebook || post.postId;
+          const fbPostId = Array.isArray(post.postIds?.facebook)
+            ? post.postIds.facebook[0]?.postId
+            : (post.postIds?.facebook || post.postId);
           if (!fbPostId) continue;
 
           // Nếu ID không phải là số thuần túy (ví dụ ID YouTube dạng chữ O7x3jBu6jMI), hãy bỏ qua
@@ -1858,6 +2233,28 @@ export default function App() {
 
           const uploadData = await uploadRes.json();
           postIds.youtube = uploadData.id;
+        } else if (platform === 'tiktok') {
+          const scheduledTikTokRefs = post.selectedAccounts?.tiktok || [];
+          const selectedIds = scheduledTikTokRefs.map(item => item.id).filter(Boolean);
+          const tiktokAccounts = selectedIds.length > 0
+            ? (socialAccounts.tiktok || []).filter(account => selectedIds.includes(account.id))
+            : getCheckedSocialAccounts('tiktok');
+          const account = tiktokAccounts[0] || (socialAccounts.tiktok || [])[0] || null;
+          const credentials = account?.credentials || {};
+          const tiktokResult = await publishTikTokVideo({
+            credentials: {
+              ...credentials,
+              accessToken: credentials.accessToken || ttAccessToken,
+              clientKey: credentials.clientKey || ttClientKey,
+              clientSecret: credentials.clientSecret || ttClientSecret,
+              refreshToken: credentials.refreshToken || ttRefreshToken
+            },
+            videoBlob,
+            caption: post.caption,
+            setStatus: () => {}
+          });
+          persistRefreshedTikTokToken(account, tiktokResult.refreshedTokenData);
+          postIds.tiktok = tiktokResult.publishId;
         }
       }
 
@@ -2192,6 +2589,7 @@ export default function App() {
   const handleSaveApiKey = (key) => {
     setElevenLabsApiKey(key);
     localStorage.setItem('elevenlabs_api_key', key);
+    scheduleTelegramCredentialSync({ elevenLabsApiKey: key });
     if (key) fetchVoices(key);
   };
 
@@ -2324,6 +2722,7 @@ export default function App() {
   const handleSaveVclipApiKey = (key) => {
     setVclipApiKey(key);
     localStorage.setItem('vclip_api_key', key);
+    scheduleTelegramCredentialSync({ vclipApiKey: key });
   };
 
   // Đếm số lượng Key khả dụng trong danh sách VClip Keys
@@ -2342,6 +2741,7 @@ export default function App() {
       if (firstUsable) {
         setVclipApiKey(firstUsable.key);
         try { localStorage.setItem('vclip_api_key', firstUsable.key); } catch {}
+        scheduleTelegramCredentialSync({ vclipApiKey: firstUsable.key });
       }
     }
     setShowVclipKeyModal(false);
@@ -2404,6 +2804,7 @@ export default function App() {
     if (nextUsable) {
       setVclipApiKey(nextUsable.key);
       try { localStorage.setItem('vclip_api_key', nextUsable.key); } catch {}
+      scheduleTelegramCredentialSync({ vclipApiKey: nextUsable.key });
 
       alert(`⚠️ API Key VClip (${failedKey.substring(0, 10)}...) vừa HẾT CREDIT!\n\n⚡ Hệ thống tự động chuyển sang Key khả dụng tiếp theo: ${nextUsable.key.substring(0, 12)}... và khởi động lại quá trình sinh giọng.`);
 
@@ -2418,18 +2819,21 @@ export default function App() {
   const handleSaveVclipVoiceId = (id) => {
     setVclipVoiceId(id);
     localStorage.setItem('vclip_voice_id', id);
+    scheduleTelegramCredentialSync({ vclipVoiceId: id });
   };
 
   // Lưu API Key LucyLab
   const handleSaveLucyLabApiKey = (key) => {
     setLucyLabApiKey(key);
     localStorage.setItem('lucylab_api_key', key);
+    scheduleTelegramCredentialSync({ lucyLabApiKey: key });
   };
 
   // Lưu Voice ID LucyLab
   const handleSaveLucyLabVoiceId = (id) => {
     setLucyLabVoiceId(id);
     localStorage.setItem('lucylab_voice_id', id);
+    scheduleTelegramCredentialSync({ lucyLabVoiceId: id });
   };
 
   // Tải danh sách giọng đọc từ LucyLab
@@ -3039,8 +3443,10 @@ export default function App() {
   };
 
   // Bộ phân tích khoảng lặng và căn khớp nhịp dùng chung (Web Audio API PCM scanner)
-  const runSilenceSyncWithUrl = async (targetUrl, targetDuration) => {
+  const runSilenceSyncWithUrl = async (targetUrl, targetDuration, baseBlocks = null) => {
     if (!targetUrl) return;
+    const sourceBlocks = Array.isArray(baseBlocks) && baseBlocks.length > 0 ? baseBlocks : timelineBlocks;
+    if (!sourceBlocks.length) return;
     setIsProcessingAudio(true);
     setSilenceSyncError('');
     try {
@@ -3125,15 +3531,15 @@ export default function App() {
 
       setDetectedSilencesCount(cleanSilences.length);
 
-      const updated = [...timelineBlocks];
-      const totalWeight = timelineBlocks.reduce((sum, b) => sum + getSpokenWeight(b.text), 0);
-      const neededCount = timelineBlocks.length - 1;
+      const updated = sourceBlocks.map(block => ({ ...block }));
+      const totalWeight = sourceBlocks.reduce((sum, b) => sum + getSpokenWeight(b.text), 0);
+      const neededCount = sourceBlocks.length - 1;
 
       if (neededCount > 0 && totalWeight > 0) {
         const propTransitions = [];
         let acc = 0;
         for (let i = 0; i < neededCount; i++) {
-          acc += (getSpokenWeight(timelineBlocks[i].text) / totalWeight) * audioDuration;
+          acc += (getSpokenWeight(sourceBlocks[i].text) / totalWeight) * audioDuration;
           propTransitions.push(acc);
         }
 
@@ -3185,10 +3591,10 @@ export default function App() {
       setDetectedSilencesCount(0);
       
       // Dự phòng
-      const totalWeight = timelineBlocks.reduce((sum, b) => sum + getSpokenWeight(b.text), 0);
+      const totalWeight = sourceBlocks.reduce((sum, b) => sum + getSpokenWeight(b.text), 0);
       if (totalWeight > 0) {
         let acc = 0;
-        const fallbackBlocks = timelineBlocks.map(block => {
+        const fallbackBlocks = sourceBlocks.map(block => {
           const ratio = getSpokenWeight(block.text) / totalWeight;
           const blockDuration = targetDuration * ratio;
           const start = parseFloat(acc.toFixed(2));
@@ -3259,18 +3665,27 @@ export default function App() {
   }, [isPlaying, currentTime, timelineBlocks]);
 
   // Parser: splits raw chatbot text script into timeline beats and comparison blocks
-  const handleParseScript = () => {
-    if (!scriptText.trim()) {
-      alert('Vui lòng nhập kịch bản.');
-      return;
+  const handleParseScript = (inputText, options = {}) => {
+    const rawScript = typeof inputText === 'string' ? inputText : scriptText;
+    const sourceScript = cleanTelegramScriptText(rawScript);
+    const shouldNotify = options.notify !== false;
+
+    if (!sourceScript.trim()) {
+      if (shouldNotify) alert('Vui lòng nhập kịch bản.');
+      return null;
     }
 
-    const lines = scriptText
+    if (sourceScript !== rawScript) {
+      setScriptText(sourceScript);
+      try { localStorage.setItem('scriptText', sourceScript); } catch {}
+    }
+
+    const lines = sourceScript
       .split('\n')
       .map(l => l.trim())
       .filter(l => l !== '');
 
-    if (lines.length === 0) return;
+    if (lines.length === 0) return null;
 
     const parsedBlocks = [];
     const parsedComparisons = [];
@@ -3400,7 +3815,15 @@ export default function App() {
     
     // Auto switch to timeline beats tab to let user review
     setActiveTab('timeline');
-    alert(`Đã nhận diện thành công: ${parsedComparisons.length} So Sánh & ${parsedBlocks.length} nhịp đọc!`);
+    if (shouldNotify) {
+      alert(`Đã nhận diện thành công: ${parsedComparisons.length} So Sánh & ${parsedBlocks.length} nhịp đọc!`);
+    }
+
+    return {
+      timelineBlocks: parsedBlocks,
+      comparisons: parsedComparisons,
+      duration: estimatedTotal
+    };
   };
 
   // Add/Remove comparison rounds manually
@@ -3981,7 +4404,7 @@ export default function App() {
           setExportedVideoUrl(url);
           setExportedExt(extension);
           setIsExporting(false);
-          notifyTelegramPublish(headerTitle || 'Video so sánh');
+          notifyTelegramPublish(headerTitle || 'Video so sánh', url);
         },
         onError: (err) => {
           alert('Lỗi xuất video: ' + err);
@@ -3994,55 +4417,276 @@ export default function App() {
   }, [isExporting]);
 
   // Social Media Scheduling Handlers
-  const handleToggleFbConnect = () => {
-    if (fbConnected) {
+  const getPlatformAccounts = (platform) => socialAccounts[platform] || [];
+  const getCheckedSocialAccounts = (platform) => {
+    const selectedIds = selectedSocialAccountIds[platform] || [];
+    return getPlatformAccounts(platform).filter((account) => selectedIds.includes(account.id));
+  };
+  const persistRefreshedTikTokToken = (account, tokenData = {}) => {
+    if (!account || !tokenData.access_token) return;
+    const credentials = {
+      ...(account.credentials || {}),
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token || account.credentials?.refreshToken || '',
+      openId: tokenData.open_id || account.credentials?.openId || ''
+    };
+    setTtAccessToken(credentials.accessToken);
+    setTtRefreshToken(credentials.refreshToken);
+    setTtOpenId(credentials.openId);
+    localStorage.setItem('tt_access_token', credentials.accessToken);
+    if (credentials.refreshToken) localStorage.setItem('tt_refresh_token', credentials.refreshToken);
+    if (credentials.openId) localStorage.setItem('tt_open_id', credentials.openId);
+    setSocialAccounts(prev => upsertSocialAccount(prev, 'tiktok', {
+      id: account.id,
+      credentials
+    }));
+    scheduleTelegramCredentialSync({
+      ttAccessToken: credentials.accessToken,
+      ttRefreshToken: credentials.refreshToken,
+      ttOpenId: credentials.openId
+    });
+  };
+  const resolveFacebookPageName = async (pageId, accessToken) => {
+    if (!pageId || !accessToken) return '';
+    try {
+      const res = await fetch(`/fb-api/v21.0/${encodeURIComponent(pageId)}?fields=name&access_token=${encodeURIComponent(accessToken)}`);
+      const data = await res.json().catch(() => ({}));
+      return res.ok ? (data.name || '') : '';
+    } catch {
+      return '';
+    }
+  };
+  const resolveYouTubeChannelName = async ({ channelId, accessToken, clientId, clientSecret, refreshToken }) => {
+    if (!channelId) return '';
+    let activeToken = accessToken || '';
+    try {
+      if (!activeToken && clientId && clientSecret && refreshToken) {
+        const tokenRes = await fetch('/google-token/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id: clientId,
+            client_secret: clientSecret,
+            refresh_token: refreshToken,
+            grant_type: 'refresh_token'
+          })
+        });
+        if (tokenRes.ok) {
+          const tokenData = await tokenRes.json();
+          activeToken = tokenData.access_token || '';
+        }
+      }
+      if (!activeToken) return '';
+      const res = await fetch(`/youtube-api/youtube/v3/channels?part=snippet&id=${encodeURIComponent(channelId)}`, {
+        headers: { Authorization: `Bearer ${activeToken}` }
+      });
+      const data = await res.json().catch(() => ({}));
+      return res.ok ? (data.items?.[0]?.snippet?.title || '') : '';
+    } catch {
+      return '';
+    }
+  };
+  const enrichMissingSocialNames = async () => {
+    setSocialAccounts(prev => {
+      let next = prev;
+      let changed = false;
+      for (const account of next.youtube || []) {
+        const shouldFixYouTubeName =
+          account.credentials?.channelId === ytChannelId &&
+          (!account.credentials?.displayName || account.credentials.displayName === 'Nam Hưu Học Shorts');
+        if (shouldFixYouTubeName) {
+          next = upsertSocialAccount(next, 'youtube', {
+            id: account.id,
+            credentials: { ...account.credentials, displayName: DEFAULT_YT_DISPLAY_NAME }
+          });
+          changed = true;
+        }
+      }
+      for (const account of next.tiktok || []) {
+        if (!account.credentials?.displayName && account.credentials?.sessionId) {
+          next = upsertSocialAccount(next, 'tiktok', {
+            id: account.id,
+            credentials: { ...account.credentials, displayName: account.credentials.sessionId.startsWith('@') ? account.credentials.sessionId : DEFAULT_TT_DISPLAY_NAME }
+          });
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+
+    const updates = [];
+    for (const account of socialAccounts.facebook || []) {
+      if (!account.credentials?.displayName && account.credentials?.pageId && account.credentials?.accessToken) {
+        updates.push((async () => ({
+          platform: 'facebook',
+          account,
+          displayName: await resolveFacebookPageName(account.credentials.pageId, account.credentials.accessToken)
+        }))());
+      }
+    }
+    for (const account of socialAccounts.youtube || []) {
+      if (!account.credentials?.displayName && account.credentials?.channelId) {
+        updates.push((async () => ({
+          platform: 'youtube',
+          account,
+          displayName: await resolveYouTubeChannelName(account.credentials)
+        }))());
+      }
+    }
+    const results = (await Promise.all(updates)).filter(item => item.displayName);
+    if (results.length === 0) return;
+    setSocialAccounts(prev => {
+      let next = prev;
+      for (const item of results) {
+        next = upsertSocialAccount(next, item.platform, {
+          id: item.account.id,
+          credentials: { ...item.account.credentials, displayName: item.displayName }
+        });
+      }
+      return next;
+    });
+  };
+  useEffect(() => {
+    enrichMissingSocialNames();
+  }, []);
+  const syncSocialCredentialsToForm = (platform, account) => {
+    if (!account) return;
+    const credentials = account.credentials || {};
+    setSocialDisplayName(credentials.displayName || credentials.name || '');
+    if (platform === 'facebook') {
+      setFbPageId(credentials.pageId || '');
+      setFbAccessToken(credentials.accessToken || '');
+      setFbConnected(true);
+    } else if (platform === 'youtube') {
+      setYtChannelId(credentials.channelId || '');
+      setYtAccessToken(credentials.accessToken || '');
+      setYtClientId(credentials.clientId || '');
+      setYtClientSecret(credentials.clientSecret || '');
+      setYtRefreshToken(credentials.refreshToken || '');
+      setYtConnected(true);
+    } else if (platform === 'tiktok') {
+      setTtSessionId(credentials.sessionId || '');
+      setTtAccessToken(credentials.accessToken || '');
+      setTtClientKey(credentials.clientKey || '');
+      setTtClientSecret(credentials.clientSecret || '');
+      setTtRefreshToken(credentials.refreshToken || '');
+      setTtOpenId(credentials.openId || '');
+      setTtRedirectUri(credentials.redirectUri || 'https://vicompare.pages.dev/');
+      setTtConnected(true);
+    }
+  };
+  const openAddSocialAccount = (platform) => {
+    setEditingSocialAccountId('');
+    setSocialDisplayName('');
+    setShowAddSocialMenu(false);
+    if (platform === 'facebook') {
+      setFbPageId('');
+      setFbAccessToken('');
+    } else if (platform === 'youtube') {
+      setYtChannelId('');
+      setYtAccessToken('');
+      setYtRefreshToken('');
+    } else if (platform === 'tiktok') {
+      setTtSessionId('');
+      setTtAccessToken('');
+      setTtRefreshToken('');
+      setTtOpenId('');
+      setTtAuthCode('');
+    }
+    setActiveConnectModal(platform);
+  };
+  const handleSelectSocialAccount = (platform, accountId) => {
+    const account = getPlatformAccounts(platform).find((item) => item.id === accountId);
+    if (!account) return;
+    setActiveSocialAccountIds(prev => ({ ...prev, [platform]: accountId }));
+    syncSocialCredentialsToForm(platform, account);
+  };
+  const handleToggleCheckedSocialAccount = (platform, accountId, checked) => {
+    setSelectedSocialAccountIds(prev => {
+      const current = prev[platform] || [];
+      const nextPlatformIds = checked
+        ? Array.from(new Set([...current, accountId]))
+        : current.filter((id) => id !== accountId);
+      return { ...prev, [platform]: nextPlatformIds };
+    });
+    if (checked) {
+      handleSelectSocialAccount(platform, accountId);
+    }
+  };
+  const handleEditSocialAccount = (platform, account) => {
+    setEditingSocialAccountId(account.id);
+    syncSocialCredentialsToForm(platform, account);
+    setActiveConnectModal(platform);
+  };
+  const handleRemoveSocialAccount = (platform, accountId) => {
+    if (!confirm('Xóa kết nối tài khoản này khỏi danh sách?')) return;
+    const nextAccounts = removeSocialAccount(socialAccounts, platform, accountId);
+    const nextActiveIds = getActiveSocialAccountIds(nextAccounts, activeSocialAccountIds);
+    const nextSelectedIds = getSelectedSocialAccountIds(nextAccounts, selectedSocialAccountIds);
+    setSocialAccounts(nextAccounts);
+    setActiveSocialAccountIds(nextActiveIds);
+    setSelectedSocialAccountIds(nextSelectedIds);
+    const nextActive = (nextAccounts[platform] || []).find((account) => account.id === nextActiveIds[platform]) || null;
+    if (nextActive) {
+      syncSocialCredentialsToForm(platform, nextActive);
+    } else if (platform === 'facebook') {
       setFbConnected(false);
-      alert('Đã hủy liên kết Facebook.');
-    } else {
-      setActiveConnectModal('facebook');
-    }
-  };
-
-  const handleToggleYtConnect = () => {
-    if (ytConnected) {
+    } else if (platform === 'youtube') {
       setYtConnected(false);
-      alert('Đã hủy liên kết YouTube.');
-    } else {
-      setActiveConnectModal('youtube');
-    }
-  };
-
-  const handleToggleTtConnect = () => {
-    if (ttConnected) {
+    } else if (platform === 'tiktok') {
       setTtConnected(false);
-      alert('Đã hủy liên kết TikTok.');
-    } else {
-      setActiveConnectModal('tiktok');
     }
   };
+  const saveSocialAccount = (platform, credentials) => {
+    const account = {
+      id: editingSocialAccountId || undefined,
+      credentials
+    };
+    const nextAccounts = upsertSocialAccount(socialAccounts, platform, account);
+    const savedAccount = editingSocialAccountId
+      ? (nextAccounts[platform] || []).find((item) => item.id === editingSocialAccountId)
+      : (nextAccounts[platform] || []).at(-1);
+    const nextActiveIds = { ...getActiveSocialAccountIds(nextAccounts, activeSocialAccountIds), [platform]: savedAccount?.id || '' };
+    const existingSelected = selectedSocialAccountIds[platform] || [];
+    const nextSelectedIds = {
+      ...getSelectedSocialAccountIds(nextAccounts, selectedSocialAccountIds),
+      [platform]: savedAccount?.id
+        ? Array.from(new Set([...existingSelected, savedAccount.id]))
+        : existingSelected
+    };
+    setSocialAccounts(nextAccounts);
+    setActiveSocialAccountIds(nextActiveIds);
+    setSelectedSocialAccountIds(nextSelectedIds);
+    setEditingSocialAccountId('');
+    return savedAccount;
+  };
 
-  const handleSaveFbCredentials = (e) => {
+  const handleSaveFbCredentials = async (e) => {
     e.preventDefault();
     const pId = fbPageId.trim();
     const token = fbAccessToken.trim();
+    const typedName = socialDisplayName.trim();
     if (!pId || !token) {
       alert('Vui lòng nhập đầy đủ Page ID và Access Token.');
       return;
     }
+    const displayName = typedName || await resolveFacebookPageName(pId, token);
     setFbPageId(pId);
     setFbAccessToken(token);
+    saveSocialAccount('facebook', { pageId: pId, accessToken: token, displayName });
     setFbConnected(true);
     setActiveConnectModal(null);
     alert('Đã kết nối tài khoản Facebook thành công!');
   };
 
-  const handleSaveYtCredentials = (e) => {
+  const handleSaveYtCredentials = async (e) => {
     e.preventDefault();
     const chId = ytChannelId.trim();
     const token = ytAccessToken.trim();
     const cId = ytClientId.trim();
     const cSecret = ytClientSecret.trim();
     const rToken = ytRefreshToken.trim();
+    const typedName = socialDisplayName.trim();
 
     if (!chId) {
       alert('Vui lòng nhập Channel ID.');
@@ -4052,30 +4696,181 @@ export default function App() {
       alert('Vui lòng cung cấp Access Token HOẶC điền đầy đủ (Client ID + Client Secret + Refresh Token) để tự động làm mới mã.');
       return;
     }
+    const displayName = typedName || await resolveYouTubeChannelName({
+      channelId: chId,
+      accessToken: token,
+      clientId: cId,
+      clientSecret: cSecret,
+      refreshToken: rToken
+    });
     setYtChannelId(chId);
     setYtAccessToken(token);
     setYtClientId(cId);
     setYtClientSecret(cSecret);
     setYtRefreshToken(rToken);
+    saveSocialAccount('youtube', {
+      channelId: chId,
+      accessToken: token,
+      clientId: cId,
+      clientSecret: cSecret,
+      refreshToken: rToken,
+      displayName
+    });
     setYtConnected(true);
     setActiveConnectModal(null);
     alert('Đã kết nối tài khoản YouTube thành công!');
+  };
+
+  const buildTikTokAuthUrl = () => {
+    const clientKey = ttClientKey.trim();
+    const redirectUri = ttRedirectUri.trim();
+    if (!clientKey || !redirectUri) {
+      alert('Vui lòng nhập TikTok Client Key và Redirect URI trước.');
+      return '';
+    }
+
+    const state = `vicompare-tiktok-${Date.now()}`;
+    localStorage.setItem('tt_oauth_state', state);
+    const params = new URLSearchParams({
+      client_key: clientKey,
+      scope: 'user.info.basic,video.publish,video.upload',
+      response_type: 'code',
+      redirect_uri: redirectUri,
+      state
+    });
+    return `https://www.tiktok.com/v2/auth/authorize/?${params.toString()}`;
+  };
+
+  const handleOpenTikTokOAuth = () => {
+    const url = buildTikTokAuthUrl();
+    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const exchangeTikTokCode = async (code) => {
+    const clientKey = ttClientKey.trim();
+    const clientSecret = ttClientSecret.trim();
+    const redirectUri = ttRedirectUri.trim();
+    if (!clientKey || !clientSecret || !redirectUri || !code.trim()) {
+      throw new Error('Thiếu Client Key, Client Secret, Redirect URI hoặc Authorization Code.');
+    }
+
+    const tokenRes = await fetch('/tiktok-api/v2/oauth/token/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cache-Control': 'no-cache'
+      },
+      body: new URLSearchParams({
+        client_key: clientKey,
+        client_secret: clientSecret,
+        code: code.trim(),
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri
+      })
+    });
+    const tokenData = await tokenRes.json().catch(() => ({}));
+    if (!tokenRes.ok || !tokenData.access_token) {
+      throw new Error(tokenData.error_description || tokenData.error || tokenRes.statusText || 'Không đổi được TikTok token.');
+    }
+    return tokenData;
+  };
+
+  const handleExchangeTikTokCode = async () => {
+    setIsTtExchanging(true);
+    try {
+      const tokenData = await exchangeTikTokCode(ttAuthCode);
+      const nextSessionId = ttSessionId.trim() || tokenData.open_id || '';
+      const nextDisplayName = socialDisplayName.trim() || nextSessionId || DEFAULT_TT_DISPLAY_NAME;
+      setTtSessionId(nextSessionId);
+      setTtAccessToken(tokenData.access_token || '');
+      setTtRefreshToken(tokenData.refresh_token || '');
+      setTtOpenId(tokenData.open_id || '');
+      setSocialDisplayName(nextDisplayName);
+      setTtConnected(true);
+      saveSocialAccount('tiktok', {
+        sessionId: nextSessionId,
+        accessToken: tokenData.access_token || '',
+        refreshToken: tokenData.refresh_token || '',
+        openId: tokenData.open_id || '',
+        clientKey: ttClientKey.trim(),
+        clientSecret: ttClientSecret.trim(),
+        redirectUri: ttRedirectUri.trim(),
+        displayName: nextDisplayName
+      });
+      scheduleTelegramCredentialSync({
+        ttSessionId: nextSessionId,
+        ttAccessToken: tokenData.access_token || '',
+        ttRefreshToken: tokenData.refresh_token || '',
+        ttOpenId: tokenData.open_id || '',
+        ttClientKey: ttClientKey.trim(),
+        ttClientSecret: ttClientSecret.trim(),
+        ttDisplayName: nextDisplayName
+      });
+      alert('Đã lấy TikTok Access Token thành công. Bấm Lưu & Kết nối để đóng modal.');
+    } catch (err) {
+      alert(`Lấy TikTok token thất bại: ${err.message}`);
+    } finally {
+      setIsTtExchanging(false);
+    }
   };
 
   const handleSaveTtCredentials = (e) => {
     e.preventDefault();
     const sId = ttSessionId.trim();
     const token = ttAccessToken.trim();
+    const typedName = socialDisplayName.trim();
+    const clientKey = ttClientKey.trim();
+    const clientSecret = ttClientSecret.trim();
+    const refreshToken = ttRefreshToken.trim();
+    const openId = ttOpenId.trim();
+    const redirectUri = ttRedirectUri.trim();
     if (!sId || !token) {
-      alert('Vui lòng nhập đầy đủ Session ID và Access Token.');
+      alert('Vui lòng nhập tên tài khoản và Access Token, hoặc dùng OAuth để tự lấy token.');
       return;
     }
     setTtSessionId(sId);
     setTtAccessToken(token);
+    setTtClientKey(clientKey);
+    setTtClientSecret(clientSecret);
+    setTtRefreshToken(refreshToken);
+    setTtOpenId(openId);
+    setTtRedirectUri(redirectUri);
+    saveSocialAccount('tiktok', {
+      sessionId: sId,
+      accessToken: token,
+      clientKey,
+      clientSecret,
+      refreshToken,
+      openId,
+      redirectUri,
+      displayName: typedName || sId
+    });
+    scheduleTelegramCredentialSync({
+      ttSessionId: sId,
+      ttAccessToken: token,
+      ttClientKey: clientKey,
+      ttClientSecret: clientSecret,
+      ttRefreshToken: refreshToken,
+      ttOpenId: openId,
+      ttDisplayName: typedName || sId
+    });
     setTtConnected(true);
     setActiveConnectModal(null);
     alert('Đã kết nối tài khoản TikTok thành công!');
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const state = params.get('state');
+    if (!code || !state?.startsWith('vicompare-tiktok')) return;
+    setActiveConnectModal('tiktok');
+    setTtAuthCode(code);
+    try {
+      const cleanUrl = `${window.location.origin}${window.location.pathname}${window.location.hash || ''}`;
+      window.history.replaceState({}, document.title, cleanUrl);
+    } catch {}
+  }, []);
 
   const handleAddManualVideo = () => {
     if (!manualVideoId.trim()) {
@@ -4116,14 +4911,16 @@ export default function App() {
       alert('Vui lòng chọn ít nhất một nền tảng để đăng.');
       return;
     }
+    const selectedAccountsByPlatform = Object.fromEntries(
+      selectedPlatforms.map(platform => [platform, getCheckedSocialAccounts(platform)])
+    );
 
-    const connectedPlatforms = [];
-    if (publishPlatforms.facebook && !fbConnected) connectedPlatforms.push('Facebook');
-    if (publishPlatforms.youtube && !ytConnected) connectedPlatforms.push('YouTube');
-    if (publishPlatforms.tiktok && !ttConnected) connectedPlatforms.push('TikTok');
+    const missingAccountPlatforms = selectedPlatforms
+      .filter(platform => (selectedAccountsByPlatform[platform] || []).length === 0)
+      .map(platform => platform === 'facebook' ? 'Facebook' : platform === 'youtube' ? 'YouTube' : 'TikTok');
 
-    if (connectedPlatforms.length > 0) {
-      alert(`Vui lòng kết nối tài khoản cho các nền tảng: ${connectedPlatforms.join(', ')} trước khi đặt lịch.`);
+    if (missingAccountPlatforms.length > 0) {
+      alert(`Vui lòng tick ít nhất một tài khoản/trang cho: ${missingAccountPlatforms.join(', ')} trước khi đăng.`);
       return;
     }
 
@@ -4132,6 +4929,12 @@ export default function App() {
       id: newPostId,
       caption: publishCaption,
       platforms: selectedPlatforms,
+      selectedAccounts: Object.fromEntries(
+        Object.entries(selectedAccountsByPlatform).map(([platform, accounts]) => [
+          platform,
+          accounts.map(account => ({ id: account.id, label: account.label }))
+        ])
+      ),
       mode: publishMode,
       date: publishMode === 'schedule' ? scheduleDate.replace('T', ' ') : new Date().toLocaleString('vi-VN'),
       status: publishMode === 'schedule' ? 'pending' : 'publishing',
@@ -4212,15 +5015,21 @@ export default function App() {
     const postIds = {};
     try {
       for (const platform of selectedPlatforms) {
-        setPublishingStatus(`Đang đăng lên ${platform === 'facebook' ? 'Facebook Reels' : platform}...`);
-        
-        if (platform === 'facebook') {
+        const platformAccounts = selectedAccountsByPlatform[platform] || [];
+        for (const account of platformAccounts) {
+          const accountLabel = account.label || platform;
+          const credentials = account.credentials || {};
+          setPublishingStatus(`Đang đăng lên ${accountLabel}...`);
+
+          if (platform === 'facebook') {
+          const accountPageId = credentials.pageId || fbPageId;
+          const accountAccessToken = credentials.accessToken || fbAccessToken;
           // 1. Khởi tạo phiên upload Reel lên Page (gọi qua proxy /fb-api)
-          const startRes = await fetch(`/fb-api/v21.0/${fbPageId}/video_reels`, {
+          const startRes = await fetch(`/fb-api/v21.0/${accountPageId}/video_reels`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              access_token: fbAccessToken,
+              access_token: accountAccessToken,
               upload_phase: 'start'
             })
           });
@@ -4249,7 +5058,7 @@ export default function App() {
           const uploadRes = await fetch(proxyUploadUrl, {
             method: 'POST',
             headers: {
-              'Authorization': `OAuth ${fbAccessToken}`,
+              'Authorization': `OAuth ${accountAccessToken}`,
               'offset': '0',
               'file_size': videoBlob.size.toString(),
               'Content-Type': 'application/octet-stream'
@@ -4264,11 +5073,11 @@ export default function App() {
           
           // 4. Hoàn tất & Xuất bản bài viết (gọi qua proxy /fb-api)
           setPublishingStatus('Đang xuất bản Reels lên Fanpage...');
-          const finishRes = await fetch(`/fb-api/v21.0/${fbPageId}/video_reels`, {
+          const finishRes = await fetch(`/fb-api/v21.0/${accountPageId}/video_reels`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              access_token: fbAccessToken,
+              access_token: accountAccessToken,
               upload_phase: 'finish',
               video_id: video_id,
               video_state: 'PUBLISHED',
@@ -4284,10 +5093,13 @@ export default function App() {
           const finishData = await finishRes.json();
           const fbPostIdValue = finishData.fb_id || finishData.id || video_id;
           fbPostId = fbPostIdValue;
-          postIds.facebook = fbPostIdValue;
-        } else if (platform === 'youtube') {
-          let activeToken = ytAccessToken;
-          if (ytClientId.trim() && ytClientSecret.trim() && ytRefreshToken.trim()) {
+          postIds.facebook = [...(postIds.facebook || []), { accountId: account.id, label: accountLabel, postId: fbPostIdValue }];
+          } else if (platform === 'youtube') {
+          let activeToken = credentials.accessToken || ytAccessToken;
+          const accountClientId = credentials.clientId || ytClientId;
+          const accountClientSecret = credentials.clientSecret || ytClientSecret;
+          const accountRefreshToken = credentials.refreshToken || ytRefreshToken;
+          if (accountClientId.trim() && accountClientSecret.trim() && accountRefreshToken.trim()) {
             setPublishingStatus('Đang tự động làm mới YouTube Access Token...');
             try {
               // Call Google OAuth Token endpoint via proxy
@@ -4295,9 +5107,9 @@ export default function App() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: new URLSearchParams({
-                  client_id: ytClientId.trim(),
-                  client_secret: ytClientSecret.trim(),
-                  refresh_token: ytRefreshToken.trim(),
+                  client_id: accountClientId.trim(),
+                  client_secret: accountClientSecret.trim(),
+                  refresh_token: accountRefreshToken.trim(),
                   grant_type: 'refresh_token'
                 })
               });
@@ -4354,10 +5166,31 @@ export default function App() {
           const uploadData = await uploadRes.json();
           const ytVideoId = uploadData.id;
           fbPostId = ytVideoId;
-          postIds.youtube = ytVideoId;
-        } else {
-          // Giả lập tiến trình upload cho TikTok
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          postIds.youtube = [...(postIds.youtube || []), { accountId: account.id, label: accountLabel, postId: ytVideoId }];
+          } else {
+          setPublishingStatus('Đang chuẩn bị file video cho TikTok...');
+          const videoBlob = await fetch(exportedVideoUrl).then(r => r.blob());
+          const tiktokResult = await publishTikTokVideo({
+            credentials: {
+              ...credentials,
+              accessToken: credentials.accessToken || ttAccessToken,
+              clientKey: credentials.clientKey || ttClientKey,
+              clientSecret: credentials.clientSecret || ttClientSecret,
+              refreshToken: credentials.refreshToken || ttRefreshToken
+            },
+            videoBlob,
+            caption: publishCaption,
+            setStatus: setPublishingStatus
+          });
+          persistRefreshedTikTokToken(account, tiktokResult.refreshedTokenData);
+          postIds.tiktok = [...(postIds.tiktok || []), {
+            accountId: account.id,
+            label: accountLabel,
+            postId: tiktokResult.publishId,
+            privacyLevel: tiktokResult.privacyLevel,
+            creator: tiktokResult.creatorInfo?.creator_username || tiktokResult.creatorInfo?.creator_nickname || ''
+          }];
+          }
         }
       }
 
@@ -4376,7 +5209,9 @@ export default function App() {
   };
 
   const handleCheckFbReelStatus = async (post) => {
-    const fbId = post.postIds?.facebook || post.postId;
+    const fbId = Array.isArray(post.postIds?.facebook)
+      ? post.postIds.facebook[0]?.postId
+      : (post.postIds?.facebook || post.postId);
     if (!fbId) {
       alert('Không tìm thấy Facebook Video ID của bài đăng này!');
       return;
@@ -4412,6 +5247,101 @@ export default function App() {
     if (confirm('Bạn có chắc chắn muốn xóa bài đăng này khỏi lịch trình?')) {
       setScheduledPosts(scheduledPosts.filter(p => p.id !== id));
     }
+  };
+
+  const renderSocialPlatformCard = ({ platform, title, color, icon, connected, emptyText }) => {
+    const accounts = getPlatformAccounts(platform);
+    const checkedAccounts = getCheckedSocialAccounts(platform);
+    return (
+      <div style={{ 
+        background: '#0b0f19', 
+        border: connected ? `1.5px solid ${color}` : '1px solid var(--border-light)', 
+        borderRadius: '8px', 
+        padding: '0.65rem', 
+        boxShadow: connected ? `0 0 10px ${color}26` : 'none',
+        transition: 'all 0.3s ease',
+        minWidth: 0
+      }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '30px 1fr', alignItems: 'center', gap: '0.5rem', marginBottom: '0.45rem', minWidth: 0 }}>
+          <div style={{ 
+            width: '30px', 
+            height: '30px', 
+            borderRadius: '50%', 
+            background: platform === 'tiktok' ? '#010101' : color, 
+            border: platform === 'tiktok' ? `1.5px solid ${color}` : 'none',
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            color: '#ffffff',
+            fontWeight: 'bold',
+            fontSize: '0.95rem'
+          }}>{icon}</div>
+          <div style={{ minWidth: 0 }}>
+            <h3 style={{ fontSize: '0.78rem', fontWeight: 'bold', margin: 0, lineHeight: 1.15 }}>{title}</h3>
+            <p style={{ fontSize: '0.62rem', color: '#888', margin: '0.12rem 0 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {checkedAccounts.length > 0 ? `Đã chọn ${checkedAccounts.length} tài khoản` : emptyText}
+            </p>
+          </div>
+        </div>
+
+        {accounts.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', marginBottom: '0.5rem', textAlign: 'left', maxHeight: '116px', overflowY: 'auto', paddingRight: '0.15rem' }}>
+            {accounts.map((account) => {
+              const isChecked = (selectedSocialAccountIds[platform] || []).includes(account.id);
+              const identifier = account.credentials?.pageId || account.credentials?.channelId || account.credentials?.sessionId || '';
+              return (
+                <div
+                  key={account.id}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'auto 1fr auto auto',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    padding: '0.32rem 0.38rem',
+                    borderRadius: '6px',
+                    background: isChecked ? 'rgba(99, 102, 241, 0.18)' : 'rgba(255,255,255,0.04)',
+                    border: isChecked ? '1px solid var(--accent-indigo)' : '1px solid rgba(255,255,255,0.07)',
+                    minWidth: 0
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={(e) => handleToggleCheckedSocialAccount(platform, account.id, e.target.checked)}
+                    title="Tick để đăng vào tài khoản này"
+                    style={{ width: '14px', height: '14px', cursor: 'pointer' }}
+                  />
+                  <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.05rem' }} title={identifier}>
+                    <span style={{ fontSize: '0.64rem', color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: isChecked ? 700 : 500 }}>
+                      {account.label}
+                    </span>
+                    {identifier && account.label !== identifier && (
+                      <span style={{ fontSize: '0.55rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {identifier}
+                      </span>
+                    )}
+                  </div>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleEditSocialAccount(platform, account)} style={{ padding: '0.12rem 0.28rem', fontSize: '0.58rem' }}>
+                    Sửa
+                  </button>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleRemoveSocialAccount(platform, account.id)} title="Xóa kết nối" style={{ padding: '0.12rem 0.24rem', color: '#f87171', borderColor: 'rgba(248,113,113,0.35)' }}>
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <button 
+          className="btn btn-primary btn-sm" 
+          onClick={() => openAddSocialAccount(platform)}
+          style={{ width: '100%', padding: '0.26rem', fontSize: '0.66rem' }}
+        >
+          <Plus size={12} /> Thêm
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -6272,120 +7202,54 @@ export default function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {/* Connected Accounts */}
               <div className="glass-card">
-                <h2 className="card-title" style={{ marginBottom: '0.25rem' }}>Liên kết tài khoản mạng xã hội</h2>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                  Kết nối tài khoản của bạn để xuất bản video tự động lên đa nền tảng.
-                </p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '1rem' }}>
+                  <div>
+                    <h2 className="card-title" style={{ marginBottom: '0.25rem' }}>Liên kết tài khoản mạng xã hội</h2>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0 }}>
+                      Kết nối nhiều trang/kênh, chọn tài khoản đang dùng để xuất bản video tự động.
+                    </p>
+                  </div>
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => setShowAddSocialMenu(prev => !prev)}
+                      title="Thêm kết nối mạng xã hội"
+                      style={{ width: '36px', height: '36px', padding: 0, justifyContent: 'center' }}
+                    >
+                      <Plus size={18} />
+                    </button>
+                    {showAddSocialMenu && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '42px',
+                        right: 0,
+                        zIndex: 30,
+                        minWidth: '210px',
+                        background: '#0f172a',
+                        border: '1px solid var(--border-light)',
+                        borderRadius: '8px',
+                        boxShadow: '0 12px 30px rgba(0,0,0,0.35)',
+                        padding: '0.35rem'
+                      }}>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openAddSocialAccount('facebook')} style={{ width: '100%', justifyContent: 'flex-start', marginBottom: '0.3rem' }}>
+                          <Plus size={13} /> Thêm trang Facebook
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openAddSocialAccount('youtube')} style={{ width: '100%', justifyContent: 'flex-start', marginBottom: '0.3rem' }}>
+                          <Plus size={13} /> Thêm kênh YouTube
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openAddSocialAccount('tiktok')} style={{ width: '100%', justifyContent: 'flex-start' }}>
+                          <Plus size={13} /> Thêm tài khoản TikTok
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
-                  {/* Facebook Page/Reels */}
-                  <div style={{ 
-                    background: '#0b0f19', 
-                    border: fbConnected ? '1.5px solid #1877f2' : '1px solid var(--border-light)', 
-                    borderRadius: '8px', 
-                    padding: '1rem', 
-                    textAlign: 'center',
-                    boxShadow: fbConnected ? '0 0 10px rgba(24, 119, 242, 0.15)' : 'none',
-                    transition: 'all 0.3s ease'
-                  }}>
-                    <div style={{ 
-                      width: '44px', 
-                      height: '44px', 
-                      borderRadius: '50%', 
-                      background: '#1877f2', 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      justifyContent: 'center', 
-                      margin: '0 auto 0.75rem',
-                      color: '#ffffff',
-                      fontWeight: 'bold',
-                      fontSize: '1.25rem'
-                    }}>f</div>
-                    <h3 style={{ fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '0.25rem' }}>Facebook Reels</h3>
-                    <p style={{ fontSize: '0.7rem', color: '#888', marginBottom: '1rem', wordBreak: 'break-all' }}>
-                      {fbConnected ? `Đã liên kết Page ID: ${fbPageId}` : 'Chưa liên kết tài khoản'}
-                    </p>
-                    <button 
-                      className={`btn btn-sm ${fbConnected ? 'btn-secondary' : 'btn-primary'}`} 
-                      onClick={handleToggleFbConnect}
-                      style={{ width: '100%', padding: '0.35rem' }}
-                    >
-                      {fbConnected ? 'Hủy liên kết' : 'Kết nối'}
-                    </button>
-                  </div>
-
-                  {/* YouTube Shorts */}
-                  <div style={{ 
-                    background: '#0b0f19', 
-                    border: ytConnected ? '1.5px solid #ff0000' : '1px solid var(--border-light)', 
-                    borderRadius: '8px', 
-                    padding: '1rem', 
-                    textAlign: 'center',
-                    boxShadow: ytConnected ? '0 0 10px rgba(255, 0, 0, 0.15)' : 'none',
-                    transition: 'all 0.3s ease'
-                  }}>
-                    <div style={{ 
-                      width: '44px', 
-                      height: '44px', 
-                      borderRadius: '50%', 
-                      background: '#ff0000', 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      justifyContent: 'center', 
-                      margin: '0 auto 0.75rem',
-                      color: '#ffffff',
-                      fontWeight: 'bold',
-                      fontSize: '1.25rem'
-                    }}>▶</div>
-                    <h3 style={{ fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '0.25rem' }}>YouTube Shorts</h3>
-                    <p style={{ fontSize: '0.7rem', color: '#888', marginBottom: '1rem' }}>
-                      {ytConnected ? 'Đã liên kết: Nam Hưu Học Shorts' : 'Chưa liên kết tài khoản'}
-                    </p>
-                    <button 
-                      className={`btn btn-sm ${ytConnected ? 'btn-secondary' : 'btn-primary'}`} 
-                      onClick={handleToggleYtConnect}
-                      style={{ width: '100%', padding: '0.35rem' }}
-                    >
-                      {ytConnected ? 'Hủy liên kết' : 'Kết nối'}
-                    </button>
-                  </div>
-
-                  {/* TikTok */}
-                  <div style={{ 
-                    background: '#0b0f19', 
-                    border: ttConnected ? '1.5px solid #00f2fe' : '1px solid var(--border-light)', 
-                    borderRadius: '8px', 
-                    padding: '1rem', 
-                    textAlign: 'center',
-                    boxShadow: ttConnected ? '0 0 10px rgba(0, 242, 254, 0.15)' : 'none',
-                    transition: 'all 0.3s ease'
-                  }}>
-                    <div style={{ 
-                      width: '44px', 
-                      height: '44px', 
-                      borderRadius: '50%', 
-                      background: '#010101', 
-                      border: '1.5px solid #00f2fe',
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      justifyContent: 'center', 
-                      margin: '0 auto 0.75rem',
-                      color: '#ffffff',
-                      fontWeight: 'bold',
-                      fontSize: '1.25rem'
-                    }}>🎵</div>
-                    <h3 style={{ fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '0.25rem' }}>TikTok Video</h3>
-                    <p style={{ fontSize: '0.7rem', color: '#888', marginBottom: '1rem' }}>
-                      {ttConnected ? 'Đã liên kết: @namhuuhoc.official' : 'Chưa liên kết tài khoản'}
-                    </p>
-                    <button 
-                      className={`btn btn-sm ${ttConnected ? 'btn-secondary' : 'btn-primary'}`} 
-                      onClick={handleToggleTtConnect}
-                      style={{ width: '100%', padding: '0.35rem' }}
-                    >
-                      {ttConnected ? 'Hủy liên kết' : 'Kết nối'}
-                    </button>
-                  </div>
+                  {renderSocialPlatformCard({ platform: 'facebook', title: 'Facebook Reels', color: '#1877f2', icon: 'f', connected: fbConnected, emptyText: 'Chưa liên kết tài khoản' })}
+                  {renderSocialPlatformCard({ platform: 'youtube', title: 'YouTube Shorts', color: '#ff0000', icon: '▶', connected: ytConnected, emptyText: 'Chưa liên kết tài khoản' })}
+                  {renderSocialPlatformCard({ platform: 'tiktok', title: 'TikTok Video', color: '#00f2fe', icon: '♪', connected: ttConnected, emptyText: 'Chưa liên kết tài khoản' })}
                 </div>
               </div>
 
@@ -6935,9 +7799,9 @@ export default function App() {
       {/* Social Media Credentials Connection Modals */}
       {activeConnectModal && (
         <div className="render-overlay">
-          <div className="glass-card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', border: '1px solid var(--border-light)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: '440px', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', border: '1px solid var(--border-light)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', maxHeight: '90vh', overflowY: 'auto' }}>
             <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', textTransform: 'capitalize' }}>
-              <Share2 size={16} /> Kết nối {activeConnectModal}
+              <Share2 size={16} /> {editingSocialAccountId ? 'Sửa' : 'Thêm'} kết nối {activeConnectModal}
             </h2>
             
             <form onSubmit={
@@ -6945,6 +7809,17 @@ export default function App() {
               activeConnectModal === 'youtube' ? handleSaveYtCredentials :
               handleSaveTtCredentials
             } style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div className="form-group">
+                <label>Tên hiển thị</label>
+                <input 
+                  type="text" 
+                  placeholder="Ví dụ: Mèo thông thái, @namhuuhoc.official..." 
+                  value={socialDisplayName} 
+                  onChange={(e) => setSocialDisplayName(e.target.value)} 
+                  style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
+                />
+              </div>
+
               {activeConnectModal === 'facebook' && (
                 <>
                   <div className="form-group">
@@ -7038,25 +7913,103 @@ export default function App() {
               {activeConnectModal === 'tiktok' && (
                 <>
                   <div className="form-group">
-                    <label>Session ID / Account name</label>
+                    <label>Account name / Open ID</label>
                     <input 
                       type="text" 
-                      placeholder="Nhập tên tài khoản hoặc Session ID..." 
+                      placeholder="@tenkenh hoặc open_id sau OAuth" 
                       value={ttSessionId} 
                       onChange={(e) => setTtSessionId(e.target.value)} 
                       style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
-                      required
                     />
                   </div>
                   <div className="form-group">
-                    <label>Developer Access Token</label>
+                    <label>User Access Token</label>
                     <ApiKeyInput 
-                      placeholder="act.tkt..." 
+                      placeholder="act.... (tự sinh từ OAuth hoặc paste thủ công)" 
                       value={ttAccessToken} 
                       onChange={(e) => setTtAccessToken(e.target.value)} 
                       style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
-                      required
                     />
+                  </div>
+
+                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.75rem', marginTop: '0.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--primary)' }}>⚙️ TikTok OAuth (Lấy Access Token)</span>
+                    <p style={{ fontSize: '0.65rem', color: '#94a3b8', margin: 0, lineHeight: '1.4' }}>
+                      TikTok yêu cầu Redirect URI dạng HTTPS. Nếu đang chạy local, dùng Redirect URI đã đăng ký trên TikTok Developer, sau khi TikTok trả về URL có code thì copy code dán vào ô bên dưới.
+                    </p>
+
+                    <div className="form-group">
+                      <label>Client Key</label>
+                      <input
+                        type="text"
+                        placeholder="TikTok Client Key..."
+                        value={ttClientKey}
+                        onChange={(e) => setTtClientKey(e.target.value)}
+                        style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Client Secret</label>
+                      <ApiKeyInput
+                        placeholder="TikTok Client Secret..."
+                        value={ttClientSecret}
+                        onChange={(e) => setTtClientSecret(e.target.value)}
+                        style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Redirect URI đã đăng ký</label>
+                      <input
+                        type="text"
+                        placeholder="https://vicompare.pages.dev/"
+                        value={ttRedirectUri}
+                        onChange={(e) => setTtRedirectUri(e.target.value)}
+                        style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={handleOpenTikTokOAuth}
+                      style={{ padding: '0.45rem', justifyContent: 'center' }}
+                    >
+                      <Share2 size={13} /> Mở TikTok Login
+                    </button>
+
+                    <div className="form-group">
+                      <label>Authorization Code</label>
+                      <input
+                        type="text"
+                        placeholder="Dán giá trị code=... sau khi TikTok redirect"
+                        value={ttAuthCode}
+                        onChange={(e) => setTtAuthCode(e.target.value)}
+                        style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={handleExchangeTikTokCode}
+                      disabled={isTtExchanging}
+                      style={{ padding: '0.45rem', justifyContent: 'center' }}
+                    >
+                      <RefreshCw size={13} style={{ animation: isTtExchanging ? 'spin 1.5s linear infinite' : 'none' }} />
+                      {isTtExchanging ? 'Đang lấy token...' : 'Đổi Code lấy Token'}
+                    </button>
+
+                    <div className="form-group">
+                      <label>Refresh Token</label>
+                      <ApiKeyInput
+                        placeholder="rft...."
+                        value={ttRefreshToken}
+                        onChange={(e) => setTtRefreshToken(e.target.value)}
+                        style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
+                      />
+                    </div>
                   </div>
                 </>
               )}
@@ -7065,7 +8018,10 @@ export default function App() {
                 <button 
                   type="button" 
                   className="btn btn-secondary" 
-                  onClick={() => setActiveConnectModal(null)}
+                  onClick={() => {
+                    setEditingSocialAccountId('');
+                    setActiveConnectModal(null);
+                  }}
                   style={{ flex: 1, padding: '0.5rem' }}
                 >
                   Hủy bỏ

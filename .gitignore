@@ -25,3 +25,9 @@ dist-ssr
 
 # Sensitive Credentials
 credentials_backup.json
+
+# Local Codex/debug artifacts
+.codegraph/
+.playwright-mcp/
+output/
+social-accounts-compact.png

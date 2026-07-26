@@ -92,10 +92,12 @@ export async function exportVideo({
 }) {
   let audioContext = null;
   let audioSource = null;
+  let audioBufferSource = null;
   let audioDestination = null;
   let recorder = null;
   let animationFrameId = null;
   let audioEl = null;
+  let decodedAudioBuffer = null;
 
   try {
     onProgress(1); // Start loading
@@ -117,27 +119,6 @@ export async function exportVideo({
     // 3. Set up Audio if available
     const hasAudio = !!audioUrl;
     if (hasAudio) {
-      audioEl = new Audio(audioUrl);
-      if (audioUrl.startsWith('http://') || audioUrl.startsWith('https://')) {
-        audioEl.crossOrigin = 'anonymous';
-      }
-      
-      // Wait for audio metadata to load to get precise duration
-      await new Promise((resolve) => {
-        audioEl.onloadedmetadata = () => {
-          if (audioEl.duration && !isNaN(audioEl.duration)) {
-            duration = audioEl.duration;
-          }
-          resolve();
-        };
-        audioEl.onerror = (err) => {
-          console.warn('audioEl loading error:', err);
-          resolve();
-        };
-        setTimeout(resolve, 3000);
-      });
-
-      // Prepare Audio Context and Routing
       try {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         if (audioContext.state === 'suspended') {
@@ -146,31 +127,47 @@ export async function exportVideo({
           } catch (resErr) {}
         }
 
-        if (typeof audioContext.createMediaStreamAudioDestination === 'function') {
-          audioSource = audioContext.createMediaElementSource(audioEl);
-          audioDestination = audioContext.createMediaStreamAudioDestination();
-          
-          // 1. Route audio directly to recording stream (Guarantees recorded video HAS audio)
-          audioSource.connect(audioDestination);
-
-          // 2. Route audio to speaker monitor gain for live Mute/Unmute control
-          const monitorGain = audioContext.createGain();
-          const isMuted = !!window.isExportMuted;
-          monitorGain.gain.value = isMuted ? 0 : 0.4;
-          audioSource.connect(monitorGain);
-          monitorGain.connect(audioContext.destination);
-          window.exportMonitorGain = monitorGain;
-
-          // Add audio track to output tracks for MediaRecorder
-          audioDestination.stream.getAudioTracks().forEach(track => {
-            outputTracks.push(track);
-          });
-        } else {
+        if (typeof audioContext.createMediaStreamAudioDestination !== 'function') {
           throw new Error('createMediaStreamAudioDestination is not supported');
         }
+
+        const isLocalAudio = audioUrl.startsWith('blob:') || audioUrl.startsWith('data:');
+        const requestUrl = isLocalAudio ? audioUrl : `/cors-proxy?url=${encodeURIComponent(audioUrl)}`;
+        const audioRes = await fetch(requestUrl);
+        if (!audioRes.ok) throw new Error('Audio fetch failed');
+
+        const audioArrayBuffer = await audioRes.arrayBuffer();
+        decodedAudioBuffer = await audioContext.decodeAudioData(audioArrayBuffer.slice(0));
+        if (decodedAudioBuffer.duration && !isNaN(decodedAudioBuffer.duration)) {
+          duration = decodedAudioBuffer.duration;
+        }
+
+        audioDestination = audioContext.createMediaStreamAudioDestination();
+        audioDestination.stream.getAudioTracks().forEach(track => {
+          outputTracks.push(track);
+        });
       } catch (ctxErr) {
-        console.warn('Web Audio API routing fallback to captureStream:', ctxErr);
+        console.warn('Web Audio API buffer routing fallback to captureStream:', ctxErr);
         try {
+          audioEl = new Audio(audioUrl);
+          if (audioUrl.startsWith('http://') || audioUrl.startsWith('https://')) {
+            audioEl.crossOrigin = 'anonymous';
+          }
+
+          await new Promise((resolve) => {
+            audioEl.onloadedmetadata = () => {
+              if (audioEl.duration && !isNaN(audioEl.duration)) {
+                duration = audioEl.duration;
+              }
+              resolve();
+            };
+            audioEl.onerror = (err) => {
+              console.warn('audioEl loading error:', err);
+              resolve();
+            };
+            setTimeout(resolve, 3000);
+          });
+
           let fallbackStream = null;
           if (typeof audioEl.captureStream === 'function') {
             fallbackStream = audioEl.captureStream();
@@ -233,6 +230,11 @@ export async function exportVideo({
           audioEl.pause();
         } catch (e) {}
       }
+      if (audioBufferSource) {
+        try {
+          audioBufferSource.stop();
+        } catch (e) {}
+      }
       if (audioContext) {
         try {
           audioContext.close();
@@ -247,24 +249,41 @@ export async function exportVideo({
     };
 
     // 5. Start Rendering & Recording Loop
-    if (hasAudio && audioEl) {
-      if (audioContext && audioContext.state === 'suspended') {
+    const startTime = Date.now();
+    recorder.start();
+
+    if (hasAudio && audioContext && decodedAudioBuffer && audioDestination) {
+      if (audioContext.state === 'suspended') {
         try {
           await audioContext.resume();
         } catch (resErr) {
           console.warn('Failed to resume AudioContext:', resErr);
         }
       }
-      
+
+      try {
+        audioBufferSource = audioContext.createBufferSource();
+        audioBufferSource.buffer = decodedAudioBuffer;
+        audioBufferSource.connect(audioDestination);
+
+        const monitorGain = audioContext.createGain();
+        const isMuted = !!window.isExportMuted;
+        monitorGain.gain.value = isMuted ? 0 : 0.4;
+        audioBufferSource.connect(monitorGain);
+        monitorGain.connect(audioContext.destination);
+        window.exportMonitorGain = monitorGain;
+
+        audioBufferSource.start(0);
+      } catch (sourceErr) {
+        console.warn('decoded audio source start warning:', sourceErr);
+      }
+    } else if (hasAudio && audioEl) {
       try {
         await audioEl.play();
       } catch (playErr) {
         console.warn('audioEl play warning (rendering will continue):', playErr);
       }
     }
-
-    const startTime = Date.now();
-    recorder.start();
 
     const renderLoop = () => {
       // Use the system clock as the master time source for rendering.
@@ -315,6 +334,11 @@ export async function exportVideo({
     if (audioEl) {
       try {
         audioEl.pause();
+      } catch (e) {}
+    }
+    if (audioBufferSource) {
+      try {
+        audioBufferSource.stop();
       } catch (e) {}
     }
     if (recorder && recorder.state !== 'inactive') recorder.stop();

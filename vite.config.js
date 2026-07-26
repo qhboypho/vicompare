@@ -112,6 +112,16 @@ export default defineConfig({
         target: 'https://www.googleapis.com',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/youtube-api/, '')
+      },
+      '/tiktok-api': {
+        target: 'https://open.tiktokapis.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/tiktok-api/, '')
+      },
+      '/tiktok-upload': {
+        target: 'https://open-upload.tiktokapis.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/tiktok-upload/, '')
       }
     }
   }
