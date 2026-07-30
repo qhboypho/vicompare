@@ -5743,11 +5743,30 @@ export default function App() {
                     <div key={comp.id} className="comp-box">
                       <div className="comp-header">
                         <span className="comp-title">SO SÁNH CẶP {idx + 1}</span>
+
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          <div className="form-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '0.25rem' }}>
+                            <label style={{ fontSize: '0.65rem' }}>Bắt đầu từ câu</label>
+                            <select
+                              value={comp.startIndex}
+                              onChange={(e) => handleUpdateComparison(comp.id, 'startIndex', parseInt(e.target.value, 10))}
+                              style={{ padding: '0.2rem 0.35rem', fontSize: '0.75rem', height: '24px' }}
+                            >
+                              {timelineBlocks.map((b, bIdx) => (
+                                <option key={b.id} value={bIdx}>Câu {bIdx + 1}: {b.text.substring(0, 15)}...</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <button className="btn btn-danger btn-sm" style={{ padding: '0.2rem', height: '24px' }} onClick={() => handleDeleteComparison(comp.id)} title="Xóa cặp so sánh">
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="comparison-editor-layout">
-                        <div className="comparison-image-column">
-                          <div className="form-group" style={{ marginBottom: '0.5rem' }}>
+                      <div className="form-grid comparison-two-column-layout">
+                        <div className="comparison-side-editor comparison-side-editor-left">
+                          <div className="comparison-side-image-pane">
                             <label>Ảnh bên Trái</label>
                             <ComparisonImageDropzone
                               imageUrl={comp.leftImageUrl}
@@ -5757,7 +5776,39 @@ export default function App() {
                             />
                           </div>
 
-                          <div className="form-group" style={{ marginBottom: '0.5rem' }}>
+                          <div className="comparison-side-fields">
+                            <div className="form-group">
+                              <label style={{ color: '#aaa' }}>Tiêu đề Trái</label>
+                              <input
+                                type="text"
+                                value={comp.leftTitle}
+                                onChange={(e) => handleUpdateComparison(comp.id, 'leftTitle', e.target.value)}
+                                style={{ padding: '0.35rem', fontSize: '0.8rem' }}
+                              />
+                            </div>
+
+                            <div className="form-group">
+                              <label>Màu chữ trái</label>
+                              <div style={{ display: 'flex', gap: '0.25rem' }}>
+                                <input
+                                  type="text"
+                                  value={comp.leftColor}
+                                  onChange={(e) => handleUpdateComparison(comp.id, 'leftColor', e.target.value)}
+                                  style={{ padding: '0.35rem', fontSize: '0.8rem', flex: 1 }}
+                                />
+                                <input
+                                  type="color"
+                                  value={comp.leftColor}
+                                  onChange={(e) => handleUpdateComparison(comp.id, 'leftColor', e.target.value)}
+                                  style={{ width: '28px', height: '28px', padding: 0 }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="comparison-side-editor">
+                          <div className="comparison-side-image-pane">
                             <label>Ảnh bên Phải</label>
                             <ComparisonImageDropzone
                               imageUrl={comp.rightImageUrl}
@@ -5766,86 +5817,33 @@ export default function App() {
                               onRemove={() => handleRemoveCompImage(comp.id, 'right')}
                             />
                           </div>
-                        </div>
 
-                        <div className="comparison-settings-column">
-                          <div className="comparison-settings-top">
+                          <div className="comparison-side-fields">
                             <div className="form-group">
-                              <label style={{ fontSize: '0.65rem' }}>Bắt đầu từ câu</label>
-                              <select
-                                value={comp.startIndex}
-                                onChange={(e) => handleUpdateComparison(comp.id, 'startIndex', parseInt(e.target.value, 10))}
-                                style={{ padding: '0.35rem', fontSize: '0.78rem' }}
-                              >
-                                {timelineBlocks.map((b, bIdx) => (
-                                  <option key={b.id} value={bIdx}>Câu {bIdx + 1}: {b.text.substring(0, 26)}...</option>
-                                ))}
-                              </select>
+                              <label style={{ color: '#aaa' }}>Tiêu đề Phải</label>
+                              <input
+                                type="text"
+                                value={comp.rightTitle}
+                                onChange={(e) => handleUpdateComparison(comp.id, 'rightTitle', e.target.value)}
+                                style={{ padding: '0.35rem', fontSize: '0.8rem' }}
+                              />
                             </div>
 
-                            <button className="btn btn-danger btn-sm" onClick={() => handleDeleteComparison(comp.id)} title="Xóa cặp so sánh">
-                              <Trash2 size={12} /> Xóa cặp
-                            </button>
-                          </div>
-
-                          <div className="comparison-settings-sides">
-                            <div className="comparison-side-settings">
-                              <div className="form-group">
-                                <label style={{ color: '#aaa' }}>Tiêu đề Trái</label>
+                            <div className="form-group">
+                              <label>Màu chữ phải</label>
+                              <div style={{ display: 'flex', gap: '0.25rem' }}>
                                 <input
                                   type="text"
-                                  value={comp.leftTitle}
-                                  onChange={(e) => handleUpdateComparison(comp.id, 'leftTitle', e.target.value)}
-                                  style={{ padding: '0.35rem', fontSize: '0.8rem' }}
+                                  value={comp.rightColor}
+                                  onChange={(e) => handleUpdateComparison(comp.id, 'rightColor', e.target.value)}
+                                  style={{ padding: '0.35rem', fontSize: '0.8rem', flex: 1 }}
                                 />
-                              </div>
-
-                              <div className="form-group">
-                                <label>Màu chữ trái</label>
-                                <div style={{ display: 'flex', gap: '0.25rem' }}>
-                                  <input
-                                    type="text"
-                                    value={comp.leftColor}
-                                    onChange={(e) => handleUpdateComparison(comp.id, 'leftColor', e.target.value)}
-                                    style={{ padding: '0.35rem', fontSize: '0.8rem', flex: 1 }}
-                                  />
-                                  <input
-                                    type="color"
-                                    value={comp.leftColor}
-                                    onChange={(e) => handleUpdateComparison(comp.id, 'leftColor', e.target.value)}
-                                    style={{ width: '28px', height: '28px', padding: 0 }}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="comparison-side-settings">
-                              <div className="form-group">
-                                <label style={{ color: '#aaa' }}>Tiêu đề Phải</label>
-                                <input 
-                                  type="text" 
-                                  value={comp.rightTitle} 
-                                  onChange={(e) => handleUpdateComparison(comp.id, 'rightTitle', e.target.value)} 
-                                  style={{ padding: '0.35rem', fontSize: '0.8rem' }}
+                                <input
+                                  type="color"
+                                  value={comp.rightColor}
+                                  onChange={(e) => handleUpdateComparison(comp.id, 'rightColor', e.target.value)}
+                                  style={{ width: '28px', height: '28px', padding: 0 }}
                                 />
-                              </div>
-
-                              <div className="form-group">
-                                <label>Màu chữ phải</label>
-                                <div style={{ display: 'flex', gap: '0.25rem' }}>
-                                  <input 
-                                    type="text" 
-                                    value={comp.rightColor} 
-                                    onChange={(e) => handleUpdateComparison(comp.id, 'rightColor', e.target.value)}
-                                    style={{ padding: '0.35rem', fontSize: '0.8rem', flex: 1 }}
-                                  />
-                                  <input 
-                                    type="color" 
-                                    value={comp.rightColor} 
-                                    onChange={(e) => handleUpdateComparison(comp.id, 'rightColor', e.target.value)}
-                                    style={{ width: '28px', height: '28px', padding: 0 }}
-                                  />
-                                </div>
                               </div>
                             </div>
                           </div>
