@@ -3045,6 +3045,8 @@ export default function App() {
     }
   };
 
+  const HYPERFRAMES_VIDEO_BG = 'linear-gradient(135deg, #0D0A1A 0%, #17122C 48%, #2B1240 100%)';
+
   // Áp dụng Theme Nhanh cho Video (Quick Theme Presets)
   const applyThemePreset = (presetKey) => {
     let updates = {};
@@ -3093,7 +3095,18 @@ export default function App() {
         titleOutlineColor: '#000000',
         headerTitleColor: '#FFFFFF'
       };
+    } else if (presetKey === 'hyperframes') {
+      updates = {
+        bgColor: HYPERFRAMES_VIDEO_BG,
+        subtitleColor: '#F3F1FF',
+        subtitleOutlineColor: '#080714',
+        subtitleHighlightColor: '#37E6C4',
+        titleOutlineColor: '#0D0A1A',
+        headerTitleColor: '#37E6C4'
+      };
     }
+
+    if (!updates.bgColor) return;
 
     setBgColor(updates.bgColor);
     setSubtitleColor(updates.subtitleColor);
@@ -6924,7 +6937,7 @@ export default function App() {
                           gridColumn: 'span 2',
                           padding: '0.5rem 0.6rem',
                           borderRadius: '8px',
-                          border: bgColor.startsWith('linear-gradient') ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          border: bgColor === 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
                           background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)',
                           color: '#F43F5E',
                           fontWeight: 'bold',
@@ -6934,10 +6947,34 @@ export default function App() {
                           display: 'flex',
                           alignItems: 'center',
                           gap: '0.4rem',
-                          boxShadow: bgColor.startsWith('linear-gradient') ? '0 0 10px rgba(244, 63, 94, 0.4)' : 'none'
+                          boxShadow: bgColor === 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)' ? '0 0 10px rgba(244, 63, 94, 0.4)' : 'none'
                         }}
                       >
                         <span style={{ fontSize: '0.9rem' }}>🌌</span> Theme Gradient Biển Đêm Sang Trọng
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => applyThemePreset('hyperframes')}
+                        style={{
+                          gridColumn: 'span 2',
+                          padding: '0.55rem 0.65rem',
+                          borderRadius: '8px',
+                          border: bgColor === HYPERFRAMES_VIDEO_BG ? '2px solid #37E6C4' : '1px solid rgba(55, 230, 196, 0.28)',
+                          background: HYPERFRAMES_VIDEO_BG,
+                          color: '#37E6C4',
+                          fontWeight: 'bold',
+                          fontSize: '0.75rem',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          boxShadow: bgColor === HYPERFRAMES_VIDEO_BG ? '0 0 14px rgba(55, 230, 196, 0.38)' : 'none'
+                        }}
+                      >
+                        <span style={{ color: '#FF4FA3', fontSize: '0.9rem' }}>✦</span> Theme Hyperframes Neon
                       </button>
                     </div>
                   </div>
@@ -7233,7 +7270,7 @@ export default function App() {
                           gridColumn: 'span 2',
                           padding: '0.5rem 0.6rem',
                           borderRadius: '8px',
-                          border: bgColor.startsWith('linear-gradient') ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          border: bgColor === 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
                           background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)',
                           color: '#F43F5E',
                           fontWeight: 'bold',
@@ -7243,10 +7280,34 @@ export default function App() {
                           display: 'flex',
                           alignItems: 'center',
                           gap: '0.4rem',
-                          boxShadow: bgColor.startsWith('linear-gradient') ? '0 0 10px rgba(244, 63, 94, 0.4)' : 'none'
+                          boxShadow: bgColor === 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)' ? '0 0 10px rgba(244, 63, 94, 0.4)' : 'none'
                         }}
                       >
                         <span style={{ fontSize: '0.9rem' }}>🌌</span> Theme Gradient Biển Đêm Sang Trọng
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => applyThemePreset('hyperframes')}
+                        style={{
+                          gridColumn: 'span 2',
+                          padding: '0.55rem 0.65rem',
+                          borderRadius: '8px',
+                          border: bgColor === HYPERFRAMES_VIDEO_BG ? '2px solid #37E6C4' : '1px solid rgba(55, 230, 196, 0.28)',
+                          background: HYPERFRAMES_VIDEO_BG,
+                          color: '#37E6C4',
+                          fontWeight: 'bold',
+                          fontSize: '0.75rem',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          boxShadow: bgColor === HYPERFRAMES_VIDEO_BG ? '0 0 14px rgba(55, 230, 196, 0.38)' : 'none'
+                        }}
+                      >
+                        <span style={{ color: '#FF4FA3', fontSize: '0.9rem' }}>✦</span> Theme Hyperframes Neon
                       </button>
                     </div>
                   </div>
