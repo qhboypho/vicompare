@@ -66,6 +66,21 @@ test('buildActionSfxEvents maps mascot actions to stable audio cues', () => {
   assert.deepEqual(buildActionSfxEvents(blocks, { enabled: false }), []);
 });
 
+test('buildActionSfxEvents lets each timeline block override or disable its cue', () => {
+  const blocks = [
+    { id: 'a', start: 0.5, pose: 'point_left', actionSfx: 'off' },
+    { id: 'b', start: 1.5, pose: 'default', actionSfx: 'point_right' },
+    { id: 'c', start: 2.5, pose: 'point_left', actionSfx: 'shrug' },
+    { id: 'd', start: 3.5, pose: 'point_right', actionSfx: 'auto' }
+  ];
+
+  assert.deepEqual(buildActionSfxEvents(blocks, { enabled: true, offset: 0.02 }), [
+    { id: 'b', type: 'point_right', time: 1.52 },
+    { id: 'c', type: 'shrug', time: 2.52 },
+    { id: 'd', type: 'point_right', time: 3.52 }
+  ]);
+});
+
 test('getSpokenWeight treats punctuation-only text as a safe minimum', () => {
   assert.equal(getSpokenWeight('...'), 1);
   assert.ok(getSpokenWeight('Doberman co than hinh thon gon') > 1);

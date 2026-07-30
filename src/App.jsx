@@ -4688,7 +4688,8 @@ export default function App() {
       end,
       text: 'Câu phụ đề mới...',
       pose: 'default',
-      highlight: 'none'
+      highlight: 'none',
+      actionSfx: 'auto'
     };
 
     setTimelineBlocks([...timelineBlocks, newBlock]);
@@ -6368,12 +6369,13 @@ export default function App() {
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '75px 75px 1fr 115px 105px 35px', gap: '0.5rem', padding: '0.25rem 0.5rem', borderBottom: '1px solid var(--border-light)', fontSize: '0.7rem', fontWeight: 'bold', color: 'var(--text-secondary)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '75px 75px 1fr 115px 105px 105px 35px', gap: '0.5rem', padding: '0.25rem 0.5rem', borderBottom: '1px solid var(--border-light)', fontSize: '0.7rem', fontWeight: 'bold', color: 'var(--text-secondary)' }}>
                   <div>BẮT ĐẦU</div>
                   <div>KẾT THÚC</div>
                   <div>TEXT PHỤ ĐỀ</div>
                   <div>BIỂU CẢM MASCOT</div>
                   <div>HIGHLIGHT</div>
+                  <div>ÂM THANH</div>
                   <div>XÓA</div>
                 </div>
 
@@ -6429,6 +6431,20 @@ export default function App() {
                             <option value="none">Không sáng</option>
                             <option value="left">Trái sáng</option>
                             <option value="right">Phải sáng</option>
+                          </select>
+                        </div>
+                        <div>
+                          <select
+                            value={block.actionSfx || 'auto'}
+                            onChange={(e) => handleUpdateTimelineBlock(block.id, 'actionSfx', e.target.value)}
+                            className="timeline-select"
+                            title="Âm thanh ngắn phát đúng lúc đổi biểu cảm"
+                          >
+                            <option value="auto">Tự động</option>
+                            <option value="off">Tắt</option>
+                            <option value="point_left">Chỉ trái</option>
+                            <option value="point_right">Chỉ phải</option>
+                            <option value="shrug">Nhún vai</option>
                           </select>
                         </div>
                         <div style={{ textAlign: 'center' }}>

@@ -71,6 +71,10 @@ export function buildSegmentTimeline(blocks, segmentDurations = [], options = {}
 }
 
 function getActionType(block) {
+  const override = String(block?.actionSfx || block?.sfx || 'auto').toLowerCase();
+  if (['off', 'none', 'silent', 'tat', 'tắt'].includes(override)) return null;
+  if (['point_left', 'point_right', 'shrug'].includes(override)) return override;
+
   const pose = String(block?.pose || '').toLowerCase();
   const highlight = String(block?.highlight || '').toLowerCase();
   if (pose === 'point_left' || highlight === 'left' || highlight === 'trai_sang') return 'point_left';
