@@ -55,7 +55,7 @@ export async function renderSegmentedAudio({ audioBuffers, timelineBlocks, actio
   }
 
   const sampleRate = audioBuffers.find(Boolean)?.sampleRate || 44100;
-  const channelCount = Math.max(1, Math.min(2, ...audioBuffers.filter(Boolean).map(buffer => buffer.numberOfChannels || 1)));
+  const channelCount = 2;
   const totalDuration = Math.max(
     1,
     ...timelineBlocks.map(block => Number(block.end || 0)),
@@ -85,23 +85,65 @@ export async function renderSegmentedAudio({ audioBuffers, timelineBlocks, actio
 
 function createActionSfxBuffer(ctx, type, volume) {
   const sampleRate = ctx.sampleRate;
-  const duration = type === 'shrug' ? 0.34 : 0.18;
+  const duration = type === 'shrug' ? 0.36 : 0.3;
   const length = Math.ceil(duration * sampleRate);
-  const buffer = ctx.createBuffer(1, length, sampleRate);
-  const data = buffer.getChannelData(0);
+  const buffer = ctx.createBuffer(2, length, sampleRate);
+  const left = buffer.getChannelData(0);
+  const right = buffer.getChannelData(1);
   const safeVolume = Math.max(0, Math.min(1, Number(volume || 0)));
-  const baseFreq = type === 'point_right' ? 1040 : type === 'shrug' ? 520 : 780;
+  const profile = getActionSfxProfile(type);
+  let noiseSeed = profile.seed;
 
   for (let i = 0; i < length; i += 1) {
     const t = i / sampleRate;
-    const env = Math.pow(1 - i / length, type === 'shrug' ? 1.2 : 2.8);
-    const bend = type === 'shrug' ? Math.sin(t * Math.PI * 12) * 90 : 0;
-    const click = Math.sin(2 * Math.PI * (baseFreq + bend) * t);
-    const overtone = Math.sin(2 * Math.PI * (baseFreq * 1.8) * t) * 0.35;
-    data[i] = (click + overtone) * env * safeVolume;
+    const progress = i / length;
+    noiseSeed = (noiseSeed * 1664525 + 1013904223) >>> 0;
+    const noise = ((noiseSeed / 0xffffffff) * 2 - 1) * 0.18;
+    const popEnv = Math.exp(-progress * 22);
+    const whooshEnv = Math.sin(Math.PI * Math.min(1, progress / 0.92)) * Math.pow(1 - progress, 1.8);
+    const wobble = type === 'shrug' ? Math.sin(t * Math.PI * 18) * 120 : 0;
+    const sweepFreq = profile.startFreq + (profile.endFreq - profile.startFreq) * Math.min(1, progress * 1.2) + wobble;
+    const pop = Math.sin(2 * Math.PI * profile.popFreq * t) * popEnv;
+    const whoosh = (Math.sin(2 * Math.PI * sweepFreq * t) * 0.45 + noise) * whooshEnv;
+    const secondShrugTap = type === 'shrug'
+      ? Math.sin(2 * Math.PI * 660 * Math.max(0, t - 0.16)) * Math.exp(-Math.max(0, t - 0.16) * 30) * (t > 0.16 ? 0.7 : 0)
+      : 0;
+    const sample = (pop * 0.85 + whoosh + secondShrugTap) * safeVolume;
+    const leftGain = Math.sqrt((1 - profile.pan) / 2);
+    const rightGain = Math.sqrt((1 + profile.pan) / 2);
+    left[i] = sample * leftGain;
+    right[i] = sample * rightGain;
   }
 
   return buffer;
+}
+
+function getActionSfxProfile(type) {
+  if (type === 'point_right') {
+    return {
+      pan: 0.48,
+      startFreq: 420,
+      endFreq: 1280,
+      popFreq: 980,
+      seed: 0x9e3779b9
+    };
+  }
+  if (type === 'shrug') {
+    return {
+      pan: 0,
+      startFreq: 520,
+      endFreq: 760,
+      popFreq: 620,
+      seed: 0x7f4a7c15
+    };
+  }
+  return {
+    pan: -0.48,
+    startFreq: 1280,
+    endFreq: 420,
+    popFreq: 760,
+    seed: 0x45d9f3b
+  };
 }
 
 function writeString(view, offset, string) {
