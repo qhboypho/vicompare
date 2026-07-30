@@ -364,8 +364,8 @@ textarea:focus {
 
 .comparison-side-editor {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
-  gap: 0.55rem;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 0.65rem;
   align-items: stretch;
 }
 
@@ -396,31 +396,31 @@ textarea:focus {
 
 .comparison-side-image-pane .comparison-image-empty {
   flex-direction: column;
-  gap: 0.25rem;
-  min-height: 92px;
-  padding: 0.35rem;
+  gap: 0.35rem;
+  min-height: 104px;
+  padding: 0.45rem;
   text-align: center;
-  line-height: 1.18;
-  font-size: 0.66rem;
+  line-height: 1.24;
+  font-size: 0.72rem;
 }
 
 .comparison-side-image-pane .comparison-image-empty svg {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
 }
 
 .comparison-side-image-pane .comparison-image-preview {
-  min-height: 92px;
+  min-height: 104px;
 }
 
 .comparison-side-image-pane .comparison-image-preview img {
-  height: 92px;
+  height: 104px;
 }
 
 .comparison-side-image-pane .comparison-image-overlay {
   flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.64rem;
+  gap: 0.25rem;
+  font-size: 0.7rem;
   text-align: center;
 }
 
