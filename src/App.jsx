@@ -352,6 +352,42 @@ const FileUploadDropzone = ({ accept = "image/*", onChange, children, className 
   );
 };
 
+const ComparisonImageDropzone = ({ imageUrl, title, onUpload, onRemove }) => (
+  <div className={`comparison-image-dropzone ${imageUrl ? 'has-image' : ''}`}>
+    <FileUploadDropzone onChange={onUpload} className="comparison-image-upload-wrapper">
+      {imageUrl ? (
+        <div className="comparison-image-preview">
+          <img src={imageUrl} alt={title || 'Ảnh so sánh'} />
+          <div className="comparison-image-overlay">
+            <Upload size={14} />
+            <span>Thay ảnh</span>
+          </div>
+        </div>
+      ) : (
+        <div className="comparison-image-empty">
+          <Upload size={15} />
+          <span>Chọn hoặc kéo thả ảnh</span>
+        </div>
+      )}
+    </FileUploadDropzone>
+    {imageUrl && (
+      <button
+        type="button"
+        className="comparison-image-remove"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onRemove();
+        }}
+        aria-label={`Xóa ảnh ${title || 'so sánh'}`}
+        title="Xóa ảnh"
+      >
+        <Trash2 size={13} />
+      </button>
+    )}
+  </div>
+);
+
 export default function App() {
   // Ngăn chặn sự kiện drop mặc định của trình duyệt để tránh bị chuyển hướng trang (browser navigate)
   useEffect(() => {
@@ -3992,6 +4028,24 @@ export default function App() {
     }
   };
 
+  const handleRemoveCompImage = async (compId, side) => {
+    const field = `${side}ImageUrl`;
+    const targetComp = comparisons.find(c => c.id === compId);
+    const imageUrl = targetComp?.[field];
+
+    handleUpdateComparison(compId, field, '');
+
+    if (!imageUrl) return;
+    try {
+      if (imageUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(imageUrl);
+      }
+      await deleteImageFromStorage(imageUrl.startsWith('idb:') ? imageUrl.slice(4) : imageUrl);
+    } catch (err) {
+      console.warn('Lỗi xoá ảnh so sánh khỏi storage:', err);
+    }
+  };
+
   // Mascot custom pose uploads
   const handleMascotPoseUpload = (poseKey, e) => {
     const file = e.target.files[0];
@@ -5743,12 +5797,12 @@ export default function App() {
 
                           <div className="form-group" style={{ marginBottom: '0.5rem' }}>
                             <label>Ảnh bên Trái</label>
-                            <FileUploadDropzone onChange={(e) => handleCompImageUpload(comp.id, 'left', e)}>
-                              <div className="file-upload-btn" style={{ padding: '0.35rem' }}>
-                                <Upload size={12} /> Chọn ảnh
-                              </div>
-                            </FileUploadDropzone>
-                            {comp.leftImageUrl && <span className="file-upload-preview">✓ Đã tải</span>}
+                            <ComparisonImageDropzone
+                              imageUrl={comp.leftImageUrl}
+                              title={comp.leftTitle}
+                              onUpload={(e) => handleCompImageUpload(comp.id, 'left', e)}
+                              onRemove={() => handleRemoveCompImage(comp.id, 'left')}
+                            />
                           </div>
 
 
@@ -5786,12 +5840,12 @@ export default function App() {
 
                           <div className="form-group" style={{ marginBottom: '0.5rem' }}>
                             <label>Ảnh bên Phải</label>
-                            <FileUploadDropzone onChange={(e) => handleCompImageUpload(comp.id, 'right', e)}>
-                              <div className="file-upload-btn" style={{ padding: '0.35rem' }}>
-                                <Upload size={12} /> Chọn ảnh
-                              </div>
-                            </FileUploadDropzone>
-                            {comp.rightImageUrl && <span className="file-upload-preview">✓ Đã tải</span>}
+                            <ComparisonImageDropzone
+                              imageUrl={comp.rightImageUrl}
+                              title={comp.rightTitle}
+                              onUpload={(e) => handleCompImageUpload(comp.id, 'right', e)}
+                              onRemove={() => handleRemoveCompImage(comp.id, 'right')}
+                            />
                           </div>
 
 
