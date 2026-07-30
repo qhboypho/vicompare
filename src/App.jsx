@@ -5981,21 +5981,21 @@ export default function App() {
 
               <div className="glass-card" style={{ marginTop: 0 }}>
                 <h3 style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--accent-indigo)', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <Sliders size={14} /> Cơ chế khớp voice, sub và hành động
+                  <Sliders size={14} /> Khớp voice, sub và hành động
                 </h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '0.75rem', alignItems: 'stretch' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.55rem 0.7rem', borderRadius: '6px', background: 'rgba(79, 70, 229, 0.12)', border: '1px solid rgba(129, 140, 248, 0.35)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.55rem 0.7rem', borderRadius: '6px', background: 'rgba(55, 230, 196, 0.1)', border: '1px solid rgba(55, 230, 196, 0.28)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
-                      <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 10px rgba(34, 197, 94, 0.7)', flex: '0 0 auto' }} />
-                      <strong style={{ color: '#e0e7ff', fontSize: '0.78rem', whiteSpace: 'nowrap' }}>Chuẩn từng câu</strong>
-                      <span style={{ color: '#94a3b8', fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'var(--accent-cyan)', boxShadow: '0 0 10px rgba(55, 230, 196, 0.7)', flex: '0 0 auto' }} />
+                      <strong style={{ color: 'var(--text-primary)', fontSize: '0.78rem', whiteSpace: 'nowrap' }}>Chuẩn từng câu</strong>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         Tạo voice riêng từng dòng, dùng duration thật để khớp sub.
                       </span>
                     </div>
-                    <span style={{ color: '#a5b4fc', fontSize: '0.65rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Mặc định</span>
+                    <span style={{ color: 'var(--accent-cyan)', fontSize: '0.65rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Đang áp dụng</span>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.45rem 0.65rem', alignItems: 'center', padding: '0.45rem 0.65rem', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: '#dbeafe', fontWeight: 'bold', margin: 0 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.45rem 0.65rem', alignItems: 'center', padding: '0.45rem 0.65rem', borderRadius: '6px', background: 'rgba(9, 7, 19, 0.62)', border: '1px solid rgba(139, 125, 199, 0.18)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--text-primary)', fontWeight: 'bold', margin: 0 }}>
                       <input
                         type="checkbox"
                         checked={actionSfxEnabled}
@@ -6015,8 +6015,8 @@ export default function App() {
                     />
                   </div>
                 </div>
-                <p style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.55rem', marginBottom: 0 }}>
-                  Chuẩn từng câu sẽ tạo audio riêng cho từng dòng, lấy duration thật để cập nhật nhịp sub; các pose Chỉ Trái, Chỉ Phải, Nhún vai sẽ được chèn tiếng động nhẹ vào file audio render.
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.55rem', marginBottom: 0 }}>
+                  Hệ thống luôn dùng voice từng câu để lấy duration thật cho sub; các pose Chỉ Trái, Chỉ Phải, Nhún vai sẽ tự chèn tiếng động nhẹ vào file audio render.
                 </p>
               </div>
 
