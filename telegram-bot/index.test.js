@@ -214,6 +214,9 @@ Rottweiler mạnh mẽ.
       channelId: "cat-thong-thai",
       scriptText: "Đây là Chó Doberman.\nĐây là Chó Rottweiler.",
       audioUrl: "https://cdn.example.com/voice.mp3",
+      voiceSyncMode: "segment",
+      actionSfxEnabled: true,
+      actionSfxVolume: 0.35,
       comparisonImages: [{
         leftTitle: "Chó Doberman",
         rightTitle: "Chó Rottweiler",
@@ -233,6 +236,9 @@ Rottweiler mạnh mẽ.
     const decoded = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
     assert.equal(decoded.channelId, "cat-thong-thai");
     assert.equal(decoded.audioUrl, "https://cdn.example.com/voice.mp3");
+    assert.equal(decoded.voiceSyncMode, "segment");
+    assert.equal(decoded.actionSfxEnabled, true);
+    assert.equal(decoded.actionSfxVolume, 0.35);
     assert.equal(decoded.scriptText, "Đây là Chó Doberman.\nĐây là Chó Rottweiler.");
     assert.equal(decoded.comparisonImages[0].leftImageUrl, "https://upload.wikimedia.org/doberman.jpg");
   });

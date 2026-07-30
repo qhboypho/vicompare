@@ -824,6 +824,9 @@ export function buildWebAppUrls({
   channelId,
   scriptText,
   audioUrl,
+  voiceSyncMode = "segment",
+  actionSfxEnabled = true,
+  actionSfxVolume = 0.2,
   comparisonImages = [],
   includeInlinePayload = false
 }) {
@@ -834,6 +837,9 @@ export function buildWebAppUrls({
         channelId,
         scriptText: cleanTelegramScriptText(scriptText),
         audioUrl,
+        voiceSyncMode,
+        actionSfxEnabled,
+        actionSfxVolume,
         comparisonImages,
         createdAt: new Date(0).toISOString()
       }
@@ -1818,6 +1824,9 @@ async function handleCallbackQuery(callbackQuery, token, env) {
           scriptText,
           audioBase64: base64Audio,
           audioUrl: webAudioUrl || null,
+          voiceSyncMode: syncedCreds.voiceSyncMode || "segment",
+          actionSfxEnabled: syncedCreds.actionSfxEnabled !== false,
+          actionSfxVolume: Number.isFinite(Number(syncedCreds.actionSfxVolume)) ? Number(syncedCreds.actionSfxVolume) : 0.2,
           comparisonImages,
           createdAt: new Date().toISOString()
         };
@@ -1843,6 +1852,9 @@ async function handleCallbackQuery(callbackQuery, token, env) {
           channelId,
           scriptText,
           audioUrl: webAudioUrl || null,
+          voiceSyncMode: syncedCreds.voiceSyncMode || "segment",
+          actionSfxEnabled: syncedCreds.actionSfxEnabled !== false,
+          actionSfxVolume: Number.isFinite(Number(syncedCreds.actionSfxVolume)) ? Number(syncedCreds.actionSfxVolume) : 0.2,
           comparisonImages,
           includeInlinePayload: !sessionSaved
         });
