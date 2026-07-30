@@ -6500,21 +6500,48 @@ export default function App() {
                   <Sliders size={14} /> Cơ chế khớp voice, sub và hành động
                 </h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '0.75rem', alignItems: 'stretch' }}>
-                  <div style={{ display: 'flex', gap: '0.35rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.25rem', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <div style={{ display: 'flex', gap: '0.35rem', background: 'rgba(15, 23, 42, 0.95)', padding: '0.25rem', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.35)' }}>
                     {[
                       ['segment', 'Chuẩn từng câu'],
                       ['silence', 'Silence Sync'],
                       ['manual', 'Tap thủ công']
-                    ].map(([mode, label]) => (
-                      <button
+                    ].map(([mode, label]) => {
+                      const isSelected = voiceSyncMode === mode;
+                      return (
+                      <label
                         key={mode}
-                        type="button"
-                        onClick={() => setVoiceSyncMode(mode)}
-                        style={{ flex: 1, padding: '0.45rem 0.35rem', fontSize: '0.72rem', borderRadius: '4px', cursor: 'pointer', border: 'none', background: voiceSyncMode === mode ? 'var(--accent-indigo)' : 'transparent', color: '#fff', fontWeight: 'bold' }}
+                        style={{
+                          flex: 1,
+                          minHeight: '34px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.35rem',
+                          padding: '0.45rem 0.35rem',
+                          fontSize: '0.72rem',
+                          borderRadius: '5px',
+                          cursor: 'pointer',
+                          border: isSelected ? '1px solid #a5b4fc' : '1px solid transparent',
+                          background: isSelected ? 'linear-gradient(135deg, #4f46e5, #7c3aed)' : 'rgba(255, 255, 255, 0.04)',
+                          color: isSelected ? '#fff' : '#cbd5e1',
+                          fontWeight: 'bold',
+                          boxShadow: isSelected ? '0 0 0 1px rgba(99, 102, 241, 0.25), 0 8px 18px rgba(79, 70, 229, 0.28)' : 'none',
+                          userSelect: 'none'
+                        }}
                       >
+                        <input
+                          type="radio"
+                          name="voice-sync-mode"
+                          value={mode}
+                          checked={isSelected}
+                          onChange={() => setVoiceSyncMode(mode)}
+                          style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+                        />
+                        <span style={{ width: '14px', height: '14px', borderRadius: '50%', border: isSelected ? '4px solid #fff' : '1px solid #64748b', background: isSelected ? '#22c55e' : 'transparent', boxSizing: 'border-box' }} />
                         {label}
-                      </button>
-                    ))}
+                      </label>
+                    );
+                    })}
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.45rem 0.65rem', alignItems: 'center', padding: '0.45rem 0.65rem', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: '#dbeafe', fontWeight: 'bold', margin: 0 }}>
