@@ -1038,9 +1038,7 @@ export default function App() {
   const [silenceSyncMode, setSilenceSyncMode] = useState(() => {
     return localStorage.getItem('silenceSyncMode') || 'simple';
   });
-  const [voiceSyncMode, setVoiceSyncMode] = useState(() => {
-    return localStorage.getItem('voiceSyncMode') || 'segment';
-  });
+  const voiceSyncMode = 'segment';
   const [actionSfxEnabled, setActionSfxEnabled] = useState(() => {
     const saved = localStorage.getItem('actionSfxEnabled');
     return saved !== null ? saved === 'true' : true;
@@ -1816,7 +1814,6 @@ export default function App() {
         channelId: inlinePayload.channelId || urlParams.get('channelId') || '',
         audioBase64: '',
         audioUrl: inlinePayload.audioUrl || urlParams.get('audioUrl') || '',
-        voiceSyncMode: inlinePayload.voiceSyncMode || '',
         actionSfxEnabled: inlinePayload.actionSfxEnabled,
         actionSfxVolume: inlinePayload.actionSfxVolume,
         comparisonImages: Array.isArray(inlinePayload.comparisonImages) ? inlinePayload.comparisonImages : []
@@ -1843,7 +1840,6 @@ export default function App() {
 
       if (session) {
         const { scriptText, channelId, audioBase64, audioUrl, comparisonImages = [] } = session;
-        if (session.voiceSyncMode) setVoiceSyncMode(session.voiceSyncMode);
         if (session.actionSfxEnabled !== undefined) setActionSfxEnabled(session.actionSfxEnabled);
         if (session.actionSfxVolume !== undefined) setActionSfxVolume(Number(session.actionSfxVolume) || 0.2);
         let parsedTelegramScript = null;
@@ -1885,10 +1881,6 @@ export default function App() {
           const syncLoadedAudio = (targetUrl) => {
             const tempAudio = new Audio(targetUrl);
             tempAudio.onloadedmetadata = async () => {
-              if (session.voiceSyncMode === 'manual') {
-                setDuration(tempAudio.duration);
-                return;
-              }
               await runSilenceSyncWithUrl(targetUrl, tempAudio.duration, parsedTelegramScript?.timelineBlocks);
             };
           };
@@ -2975,81 +2967,9 @@ export default function App() {
     }
   };
 
-  const handleGeneratedLongAudioReady = async (targetUrl, targetDuration, successMessage) => {
-    if (Number.isFinite(targetDuration) && targetDuration > 0) {
-      setDuration(targetDuration);
-    }
-    if (voiceSyncMode === 'manual') {
-      alert('Đã tạo giọng nói. Tool đang ở chế độ Tap thủ công nên chưa tự đổi nhịp phụ đề.');
-      return;
-    }
-    await runSilenceSyncWithUrl(targetUrl, targetDuration);
-    alert(successMessage);
-  };
-
   // Generate TTS Audio via ElevenLabs
   const handleGenerateVoice = async () => {
-    if (voiceSyncMode === 'segment') {
-      return handleGenerateSegmentedVoice('eleven');
-    }
-    if (!elevenLabsApiKey) {
-      alert('Vui lòng nhập API Key ElevenLabs.');
-      return;
-    }
-    if (!selectedVoiceId) {
-      alert('Vui lòng chọn Voice.');
-      return;
-    }
-
-    setIsGeneratingVoice(true);
-    try {
-      // Use text from timeline blocks without forced periods (restores original 100% natural speech rhythm for ElevenLabs)
-      const combinedText = timelineBlocks.map(b => b.text).join('\n\n');
-
-      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
-        method: 'POST',
-        headers: {
-          'xi-api-key': elevenLabsApiKey,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          text: combinedText,
-          model_id: selectedModelId,
-          voice_settings: {
-            stability: parseFloat(stability),
-            similarity_boost: parseFloat(similarityBoost),
-            style: parseFloat(styleExaggeration),
-            use_speaker_boost: useSpeakerBoost
-          }
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || 'Không thể kết nối đến ElevenLabs.');
-      }
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      setAudioUrl(url);
-      const filename = `elevenlabs_${selectedVoiceId}.mp3`;
-      setAudioFileName(filename);
-      setIsPlaying(false);
-      setCurrentTime(0);
-
-      // Persist to IndexedDB
-      saveAudioToStorage(blob, filename);
-
-      // Đọc thời lượng âm thanh và tự động căn khớp nhịp khoảng lặng
-      const tempAudio = new Audio(url);
-      tempAudio.onloadedmetadata = async () => {
-        await handleGeneratedLongAudioReady(url, tempAudio.duration, 'Đã tạo giọng nói và tự động đồng bộ nhịp phụ đề thành công!');
-      };
-    } catch (err) {
-      alert('Lỗi tạo Voice: ' + err.message);
-    } finally {
-      setIsGeneratingVoice(false);
-    }
+    return handleGenerateSegmentedVoice('eleven');
   };
 
   // Save ElevenLabs API key to storage
@@ -3242,55 +3162,6 @@ export default function App() {
     try { localStorage.setItem('vclip_key_list', formatted); } catch {}
   };
 
-  const isCreditError = (msg) => {
-    if (!msg) return false;
-    const lower = msg.toString().toLowerCase();
-    return lower.includes('credit') || 
-           lower.includes('số dư') || 
-           lower.includes('balance') || 
-           lower.includes('gói') || 
-           lower.includes('hết hạn') || 
-           lower.includes('chưa mua') || 
-           lower.includes('insufficient') || 
-           lower.includes('402');
-  };
-
-  const handleVclipCreditExhausted = async (failedKey) => {
-    const nowStr = new Date().toISOString().split('T')[0];
-    
-    // Đánh dấu Key bị hỏng/hết credit
-    const updatedItems = vclipKeyItems.map(item => {
-      if (item.key === failedKey) {
-        return { ...item, status: 'exhausted', createdDate: item.createdDate || nowStr };
-      }
-      return item;
-    });
-
-    const newRawText = formatVclipKeyItems(updatedItems);
-    setVclipKeyItems(updatedItems);
-    setVclipRawKeyText(newRawText);
-    try { localStorage.setItem('vclip_key_list', newRawText); } catch {}
-
-    // Tìm Key khả dụng tiếp theo
-    const nextUsable = updatedItems.find(item => {
-      const info = getVclipKeyStatusInfo(item);
-      return info.isUsable && item.key !== failedKey;
-    });
-
-    if (nextUsable) {
-      setVclipApiKey(nextUsable.key);
-      try { localStorage.setItem('vclip_api_key', nextUsable.key); } catch {}
-      scheduleTelegramCredentialSync({ vclipApiKey: nextUsable.key });
-
-      alert(`⚠️ API Key VClip (${failedKey.substring(0, 10)}...) vừa HẾT CREDIT!\n\n⚡ Hệ thống tự động chuyển sang Key khả dụng tiếp theo: ${nextUsable.key.substring(0, 12)}... và khởi động lại quá trình sinh giọng.`);
-
-      return handleGenerateVoiceVClipWithKey(nextUsable.key);
-    } else {
-      alert(`❌ API Key VClip (${failedKey.substring(0, 10)}...) đã hết Credit và TẤT CẢ các Key còn lại trong danh sách cũng đã hết Credit!\n\nVui lòng nhấn nút "Danh sách Key" để thêm Key mới hoặc chờ đủ 30 ngày để các Key cũ được tự động reset Credit.`);
-      setIsGeneratingVoice(false);
-    }
-  };
-
   // Lưu Voice ID VClip
   const handleSaveVclipVoiceId = (id) => {
     setVclipVoiceId(id);
@@ -3379,144 +3250,7 @@ export default function App() {
 
   // Gửi tạo giọng nói qua API LucyLab và chờ phản hồi hoàn tất (Polling)
   const handleGenerateVoiceLucyLab = async () => {
-    if (voiceSyncMode === 'segment') {
-      return handleGenerateSegmentedVoice('lucylab');
-    }
-    if (!lucyLabApiKey) {
-      alert('Vui lòng nhập API Key LucyLab.');
-      return;
-    }
-    if (!lucyLabVoiceId) {
-      alert('Vui lòng chọn hoặc nhập ID Giọng nói LucyLab (userVoiceId).');
-      return;
-    }
-
-    setIsGeneratingVoice(true);
-    try {
-      const combinedText = timelineBlocks.map(b => {
-        let text = (b.text || '').trim();
-        if (text && !/[.!?:]$/.test(text)) {
-          text += '.';
-        }
-        return text;
-      }).join('\n\n');
-
-      // 1. Gọi API ttsLongText LucyLab
-      const response = await fetch('https://api.lucylab.io/json-rpc', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${lucyLabApiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          method: 'ttsLongText',
-          input: {
-            text: combinedText,
-            userVoiceId: lucyLabVoiceId,
-            speed: parseFloat(lucyLabSpeed || '1.0')
-          }
-        })
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(errText || 'Lỗi kết nối đến API LucyLab.');
-      }
-
-      const data = await response.json();
-      if (data.error) {
-        throw new Error(data.error.message || 'Lỗi API LucyLab.');
-      }
-
-      const projectExportId = data.result?.projectExportId;
-      if (!projectExportId) {
-        throw new Error('Không nhận được ID yêu cầu xuất Audio (projectExportId) từ LucyLab.');
-      }
-
-      // 2. Vòng lặp kiểm tra trạng thái getExportStatus (Polling)
-      let audioUrlResult = null;
-      let attempts = 0;
-      const maxAttempts = 30; // 30 lần * 2 giây = 60 giây tối đa
-
-      while (attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        attempts++;
-
-        const statusRes = await fetch('https://api.lucylab.io/json-rpc', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${lucyLabApiKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            method: 'getExportStatus',
-            input: {
-              projectExportId: projectExportId
-            }
-          })
-        });
-
-        if (!statusRes.ok) continue;
-
-        const statusData = await statusRes.json();
-        if (statusData.error) {
-          throw new Error(statusData.error.message || 'Lỗi kiểm tra tiến trình LucyLab.');
-        }
-
-        const result = statusData.result;
-        const state = result?.state?.toLowerCase() || result?.status?.toLowerCase() || '';
-        const url = result?.url || result?.audioUrl || result?.downloadUrl;
-
-        if (state === 'completed' || url) {
-          if (url) {
-            audioUrlResult = url;
-            break;
-          }
-        }
-
-        if (state === 'failed' || state === 'error') {
-          throw new Error('Tiến trình tạo giọng nói trên LucyLab bị lỗi.');
-        }
-      }
-
-      if (!audioUrlResult) {
-        throw new Error('Hết thời gian chờ tạo Audio trên LucyLab. Vui lòng thử lại.');
-      }
-
-      // Tải trực tiếp Binary Audio Blob về trình duyệt để tạo Blob URL cục bộ
-      let audioBlob;
-      try {
-        const isLocal = audioUrlResult.startsWith('blob:') || audioUrlResult.startsWith('data:');
-        const requestUrl = isLocal ? audioUrlResult : `/cors-proxy?url=${encodeURIComponent(audioUrlResult)}`;
-        const blobRes = await fetch(requestUrl);
-        if (!blobRes.ok) throw new Error('CORS fetch proxy error');
-        audioBlob = await blobRes.blob();
-      } catch (fErr) {
-        const directRes = await fetch(audioUrlResult);
-        audioBlob = await directRes.blob();
-      }
-
-      const localBlobUrl = URL.createObjectURL(audioBlob);
-      setAudioUrl(localBlobUrl);
-      const filename = `lucylab_${lucyLabVoiceId}.mp3`;
-      setAudioFileName(filename);
-      setIsPlaying(false);
-      setCurrentTime(0);
-
-      // Persist LucyLab audio binary Blob to IndexedDB
-      await saveAudioToStorage(audioBlob, filename);
-
-      // Đọc thời lượng âm thanh và tự động căn khớp nhịp khoảng lặng từ localBlobUrl
-      const tempAudio = new Audio(localBlobUrl);
-      tempAudio.onloadedmetadata = async () => {
-        await handleGeneratedLongAudioReady(localBlobUrl, tempAudio.duration, 'Đã tạo giọng nói LucyLab và tự động đồng bộ nhịp phụ đề chuẩn xác thành công!');
-      };
-
-    } catch (err) {
-      alert('Lỗi tạo Voice LucyLab: ' + err.message);
-    } finally {
-      setIsGeneratingVoice(false);
-    }
+    return handleGenerateSegmentedVoice('lucylab');
   };
 
   // Gửi tạo giọng nói qua API VClip và chờ phản hồi hoàn tất (Polling & Auto-Switch Key)
@@ -3525,259 +3259,11 @@ export default function App() {
   };
 
   const handleGenerateVoiceVClipWithKey = async (targetKey) => {
-    if (voiceSyncMode === 'segment') {
-      return handleGenerateSegmentedVoice('vclip', { apiKey: targetKey });
-    }
-    if (!targetKey) {
-      alert('Vui lòng nhập API Key VClip.');
-      return;
-    }
-    if (!vclipVoiceId) {
-      alert('Vui lòng nhập ID Giọng nói VClip.');
-      return;
-    }
-
-    setIsGeneratingVoice(true);
-    try {
-      // Use text from timeline blocks without forced periods (restores original 100% natural speech rhythm for VClip)
-      const combinedText = timelineBlocks.map(b => b.text).join('\n\n');
-
-      // 1. Gọi API tạo audio ttsLongText
-      const response = await fetch('https://api-tts.vclip.io/json-rpc', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${targetKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          method: 'ttsLongText',
-          input: {
-            text: combinedText,
-            userVoiceId: vclipVoiceId,
-            speed: parseFloat(vclipSpeed || '1.0')
-          }
-        })
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        if (isCreditError(errText) || response.status === 402 || response.status === 400) {
-          return await handleVclipCreditExhausted(targetKey);
-        }
-        throw new Error(errText || 'Lỗi kết nối đến API VClip.');
-      }
-
-      const data = await response.json();
-      if (data.error) {
-        const errMsg = data.error.message || '';
-        if (isCreditError(errMsg) || data.error.code === 402 || data.error.code === -32000) {
-          return await handleVclipCreditExhausted(targetKey);
-        }
-        throw new Error(errMsg || 'Lỗi API VClip.');
-      }
-
-      const projectExportId = data.result?.projectExportId;
-      if (!projectExportId) {
-        throw new Error('Không nhận được ID yêu cầu xuất Audio (projectExportId).');
-      }
-
-      // 2. Vòng lặp kiểm tra trạng thái getExportStatus (Polling)
-      let audioUrlResult = null;
-      let attempts = 0;
-      const maxAttempts = 30; // 30 lần * 3 giây = 90 giây tối đa
-
-      while (attempts < maxAttempts) {
-        // Đợi 3 giây trước lần kiểm tra tiếp theo
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        attempts++;
-
-        const statusRes = await fetch('https://api-tts.vclip.io/json-rpc', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${targetKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            method: 'getExportStatus',
-            input: {
-              projectExportId: projectExportId
-            }
-          })
-        });
-
-        if (!statusRes.ok) continue;
-
-        const statusData = await statusRes.json();
-        if (statusData.error) {
-          const statusErrMsg = statusData.error.message || '';
-          if (isCreditError(statusErrMsg)) {
-            return await handleVclipCreditExhausted(targetKey);
-          }
-          throw new Error(statusErrMsg || 'Lỗi kiểm tra tiến trình VClip.');
-        }
-
-        const result = statusData.result;
-        const status = result?.status?.toUpperCase() || '';
-        const url = result?.audioUrl || result?.downloadUrl || result?.url;
-
-        if (url) {
-          audioUrlResult = url;
-          break;
-        }
-
-        if (status === 'FAILED' || status === 'ERROR') {
-          const detail = result?.errorMessage || result?.message || '';
-          if (isCreditError(detail)) {
-            return await handleVclipCreditExhausted(targetKey);
-          }
-          throw new Error('Tiến trình tạo giọng nói trên VClip bị lỗi.');
-        }
-      }
-
-      if (!audioUrlResult) {
-        throw new Error('Hết thời gian chờ tạo Audio trên VClip. Vui lòng thử lại.');
-      }
-
-      // Tải trực tiếp Binary Audio Blob về trình duyệt để tạo Blob URL cục bộ
-      let audioBlob;
-      try {
-        const isLocal = audioUrlResult.startsWith('blob:') || audioUrlResult.startsWith('data:');
-        const requestUrl = isLocal ? audioUrlResult : `/cors-proxy?url=${encodeURIComponent(audioUrlResult)}`;
-        const blobRes = await fetch(requestUrl);
-        if (!blobRes.ok) throw new Error('CORS fetch proxy error');
-        audioBlob = await blobRes.blob();
-      } catch (fErr) {
-        const directRes = await fetch(audioUrlResult);
-        audioBlob = await directRes.blob();
-      }
-
-      const localBlobUrl = URL.createObjectURL(audioBlob);
-      setAudioUrl(localBlobUrl);
-      const filename = `vclip_${vclipVoiceId}.mp3`;
-      setAudioFileName(filename);
-      setIsPlaying(false);
-      setCurrentTime(0);
-
-      // Persist VClip audio binary Blob to IndexedDB
-      await saveAudioToStorage(audioBlob, filename);
-
-      // Đọc thời lượng âm thanh và tự động căn khớp nhịp khoảng lặng từ localBlobUrl
-      const tempAudio = new Audio(localBlobUrl);
-      tempAudio.onloadedmetadata = async () => {
-        await handleGeneratedLongAudioReady(localBlobUrl, tempAudio.duration, 'Đã tạo giọng nói VClip và tự động đồng bộ nhịp phụ đề chuẩn xác thành công!');
-      };
-
-    } catch (err) {
-      alert('Lỗi tạo Voice VClip: ' + err.message);
-    } finally {
-      setIsGeneratingVoice(false);
-    }
+    return handleGenerateSegmentedVoice('vclip', { apiKey: targetKey });
   };
 
   const handleGenerateVoiceAusyncLab = async () => {
-    if (voiceSyncMode === 'segment') {
-      return handleGenerateSegmentedVoice('ausync');
-    }
-    if (!ausyncLabApiKey) {
-      alert('Vui lòng nhập API Key AusyncLab.');
-      return;
-    }
-    if (!ausyncLabVoiceId) {
-      alert('Vui lòng nhập Voice ID AusyncLab.');
-      return;
-    }
-
-    setIsGeneratingVoice(true);
-    try {
-      const combinedText = timelineBlocks.map(b => b.text).join('\n\n').trim();
-      if (!combinedText) {
-        throw new Error('Chưa có kịch bản thoại để tạo giọng đọc.');
-      }
-
-      const startRes = await fetch('https://api.ausynclab.io/api/v1/speech/text-to-speech', {
-        method: 'POST',
-        headers: {
-          'accept': 'application/json',
-          'X-API-Key': ausyncLabApiKey,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          audio_name: `ViCompare ${Date.now()}`,
-          text: combinedText,
-          voice_id: Number.isFinite(Number(ausyncLabVoiceId)) ? Number(ausyncLabVoiceId) : ausyncLabVoiceId,
-          speed: parseFloat(ausyncLabSpeed || '1.0'),
-          model_name: ausyncLabModel || 'myna-2',
-          language: 'vi',
-          callback_url: 'https://vicompare-telegram-bot.qhboypho.workers.dev/api/ausync-callback'
-        })
-      });
-      const startData = await startRes.json().catch(() => ({}));
-      if (!startRes.ok || startData.status >= 400) {
-        throw new Error(startData.message || JSON.stringify(startData) || 'Lỗi kết nối đến API AusyncLab.');
-      }
-
-      const audioId = startData.result?.audio_id || startData.audio_id || startData.result?.id;
-      if (!audioId) {
-        throw new Error('AusyncLab không trả về audio_id.');
-      }
-
-      let audioUrlResult = '';
-      for (let attempts = 0; attempts < 24; attempts += 1) {
-        await new Promise(resolve => setTimeout(resolve, 2500));
-        const statusRes = await fetch(`https://api.ausynclab.io/api/v1/speech/${encodeURIComponent(audioId)}`, {
-          method: 'GET',
-          headers: {
-            'accept': 'application/json',
-            'X-API-Key': ausyncLabApiKey
-          }
-        });
-        if (!statusRes.ok) continue;
-        const statusData = await statusRes.json().catch(() => ({}));
-        const result = statusData.result || statusData;
-        const state = String(result.state || result.status || statusData.status || '').toUpperCase();
-        const url = result.audio_url || result.audioUrl || result.audio_url_stream || result.url || result.download_url;
-        if (url && ['SUCCEED', 'SUCCEEDED', 'SUCCESS', 'COMPLETED', 'DONE', ''].includes(state)) {
-          audioUrlResult = url;
-          break;
-        }
-        if (['FAILED', 'FAIL', 'ERROR'].includes(state)) {
-          throw new Error(result.message || 'Tiến trình tạo giọng nói trên AusyncLab bị lỗi.');
-        }
-      }
-
-      if (!audioUrlResult) {
-        throw new Error('Hết thời gian chờ tạo Audio trên AusyncLab. Vui lòng thử lại.');
-      }
-
-      let audioBlob;
-      try {
-        const requestUrl = `/cors-proxy?url=${encodeURIComponent(audioUrlResult)}`;
-        const blobRes = await fetch(requestUrl);
-        if (!blobRes.ok) throw new Error('CORS fetch proxy error');
-        audioBlob = await blobRes.blob();
-      } catch {
-        const directRes = await fetch(audioUrlResult);
-        audioBlob = await directRes.blob();
-      }
-
-      const localBlobUrl = URL.createObjectURL(audioBlob);
-      setAudioUrl(localBlobUrl);
-      const filename = `ausynclab_${ausyncLabVoiceId}.mp3`;
-      setAudioFileName(filename);
-      setIsPlaying(false);
-      setCurrentTime(0);
-
-      await saveAudioToStorage(audioBlob, filename);
-
-      const tempAudio = new Audio(localBlobUrl);
-      tempAudio.onloadedmetadata = async () => {
-        await handleGeneratedLongAudioReady(localBlobUrl, tempAudio.duration, 'Đã tạo giọng nói AusyncLab và tự động đồng bộ nhịp phụ đề thành công!');
-      };
-    } catch (err) {
-      alert('Lỗi tạo Voice AusyncLab: ' + err.message);
-    } finally {
-      setIsGeneratingVoice(false);
-    }
+    return handleGenerateSegmentedVoice('ausync');
   };
 
   // Cache helper for Canvas drawing
@@ -4800,7 +4286,6 @@ export default function App() {
         if (projectData.subtitleHighlightStyle !== undefined) setSubtitleHighlightStyle(projectData.subtitleHighlightStyle);
         if (projectData.subtitleMaxWidth !== undefined) setSubtitleMaxWidth(projectData.subtitleMaxWidth);
         if (projectData.subtitleMaxLines !== undefined) setSubtitleMaxLines(projectData.subtitleMaxLines);
-        if (projectData.voiceSyncMode !== undefined) setVoiceSyncMode(projectData.voiceSyncMode);
         if (projectData.actionSfxEnabled !== undefined) setActionSfxEnabled(projectData.actionSfxEnabled);
         if (projectData.actionSfxVolume !== undefined) setActionSfxVolume(projectData.actionSfxVolume);
         if (projectData.headerPosition !== undefined) setHeaderPosition(projectData.headerPosition);
@@ -4921,7 +4406,6 @@ export default function App() {
       if (config.useSpeakerBoost !== undefined) setUseSpeakerBoost(config.useSpeakerBoost);
       if (config.silenceThreshold !== undefined) setSilenceThreshold(config.silenceThreshold);
       if (config.minSilenceDuration !== undefined) setMinSilenceDuration(config.minSilenceDuration);
-      if (config.voiceSyncMode !== undefined) setVoiceSyncMode(config.voiceSyncMode);
       if (config.actionSfxEnabled !== undefined) setActionSfxEnabled(config.actionSfxEnabled);
       if (config.actionSfxVolume !== undefined) setActionSfxVolume(config.actionSfxVolume);
       if (config.showSubtitles !== undefined) setShowSubtitles(config.showSubtitles);
@@ -6500,48 +5984,15 @@ export default function App() {
                   <Sliders size={14} /> Cơ chế khớp voice, sub và hành động
                 </h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '0.75rem', alignItems: 'stretch' }}>
-                  <div style={{ display: 'flex', gap: '0.35rem', background: 'rgba(15, 23, 42, 0.95)', padding: '0.25rem', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.35)' }}>
-                    {[
-                      ['segment', 'Chuẩn từng câu'],
-                      ['silence', 'Silence Sync'],
-                      ['manual', 'Tap thủ công']
-                    ].map(([mode, label]) => {
-                      const isSelected = voiceSyncMode === mode;
-                      return (
-                      <label
-                        key={mode}
-                        style={{
-                          flex: 1,
-                          minHeight: '34px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '0.35rem',
-                          padding: '0.45rem 0.35rem',
-                          fontSize: '0.72rem',
-                          borderRadius: '5px',
-                          cursor: 'pointer',
-                          border: isSelected ? '1px solid #a5b4fc' : '1px solid transparent',
-                          background: isSelected ? 'linear-gradient(135deg, #4f46e5, #7c3aed)' : 'rgba(255, 255, 255, 0.04)',
-                          color: isSelected ? '#fff' : '#cbd5e1',
-                          fontWeight: 'bold',
-                          boxShadow: isSelected ? '0 0 0 1px rgba(99, 102, 241, 0.25), 0 8px 18px rgba(79, 70, 229, 0.28)' : 'none',
-                          userSelect: 'none'
-                        }}
-                      >
-                        <input
-                          type="radio"
-                          name="voice-sync-mode"
-                          value={mode}
-                          checked={isSelected}
-                          onChange={() => setVoiceSyncMode(mode)}
-                          style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
-                        />
-                        <span style={{ width: '14px', height: '14px', borderRadius: '50%', border: isSelected ? '4px solid #fff' : '1px solid #64748b', background: isSelected ? '#22c55e' : 'transparent', boxSizing: 'border-box' }} />
-                        {label}
-                      </label>
-                    );
-                    })}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.55rem 0.7rem', borderRadius: '6px', background: 'rgba(79, 70, 229, 0.12)', border: '1px solid rgba(129, 140, 248, 0.35)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                      <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 10px rgba(34, 197, 94, 0.7)', flex: '0 0 auto' }} />
+                      <strong style={{ color: '#e0e7ff', fontSize: '0.78rem', whiteSpace: 'nowrap' }}>Chuẩn từng câu</strong>
+                      <span style={{ color: '#94a3b8', fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        Tạo voice riêng từng dòng, dùng duration thật để khớp sub.
+                      </span>
+                    </div>
+                    <span style={{ color: '#a5b4fc', fontSize: '0.65rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Mặc định</span>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.45rem 0.65rem', alignItems: 'center', padding: '0.45rem 0.65rem', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: '#dbeafe', fontWeight: 'bold', margin: 0 }}>
