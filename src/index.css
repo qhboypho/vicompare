@@ -385,9 +385,15 @@ textarea:focus {
   align-items: end;
 }
 
-.comparison-side-settings {
+.comparison-settings-sides {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(180px, 0.85fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.comparison-side-settings {
+  display: flex;
+  flex-direction: column;
   gap: 0.65rem;
   padding: 0.7rem;
   border: 1px solid rgba(139, 125, 199, 0.12);
@@ -398,7 +404,7 @@ textarea:focus {
 @media (max-width: 980px) {
   .comparison-editor-layout,
   .comparison-settings-top,
-  .comparison-side-settings {
+  .comparison-settings-sides {
     grid-template-columns: 1fr;
   }
 
