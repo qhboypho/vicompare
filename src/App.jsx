@@ -1,15 +1,15 @@
 // src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Play, 
-  Pause, 
-  Upload, 
-  Trash2, 
-  Download, 
-  Save, 
-  RefreshCw, 
-  Plus, 
-  Volume2, 
+import {
+  Play,
+  Pause,
+  Upload,
+  Trash2,
+  Download,
+  Save,
+  RefreshCw,
+  Plus,
+  Volume2,
   VolumeX,
   Sparkles,
   FolderOpen,
@@ -33,7 +33,15 @@ import {
 } from 'lucide-react';
 import { drawFrame } from './utils/canvasRenderer';
 import { exportVideo } from './utils/videoExporter';
-import { decodeAudioBlob, audioBufferToWavBlob, renderSegmentedAudio } from './utils/segmentAudio';
+import {
+  ACTION_SFX_PRESETS,
+  DEFAULT_ACTION_SFX_PRESETS,
+  audioBufferToWavBlob,
+  decodeAudioBlob,
+  normalizeActionSfxPresets,
+  playActionSfxPreview,
+  renderSegmentedAudio
+} from './utils/segmentAudio';
 import { buildActionSfxEvents, buildSegmentTimeline } from './utils/segmentTiming';
 import { saveAudioToStorage, getAudioFromStorage, clearAudioFromStorage, saveImageToStorage, getImageFromStorage, deleteImageFromStorage, saveVideoToStorage, getVideoFromStorage } from './utils/audioStorage';
 import {
@@ -61,6 +69,30 @@ Sự khác nhau là gì?
 Trí tuệ nhân tạo xử lý dữ liệu với tốc độ cực nhanh và chính xác dựa trên các thuật toán cùng mô hình được lập trình sẵn.
 Trí tuệ con người sở hữu sự thấu cảm, ý thức, khả năng tư duy phản biện và sự sáng tạo vượt ra ngoài những quy tắc có sẵn.`;
 
+const DEFAULT_VIDEO_FONT = '"Be Vietnam Pro", Arial, sans-serif';
+
+const VIETNAMESE_FONT_OPTIONS = [
+  { value: '"Be Vietnam Pro", Arial, sans-serif', label: 'Be Vietnam Pro' },
+  { value: '"Noto Sans", Arial, sans-serif', label: 'Noto Sans' },
+  { value: '"Roboto", Arial, sans-serif', label: 'Roboto' },
+  { value: '"Open Sans", Arial, sans-serif', label: 'Open Sans' },
+  { value: '"Montserrat", Arial, sans-serif', label: 'Montserrat' },
+  { value: '"Oswald", Arial, sans-serif', label: 'Oswald' },
+  { value: '"Barlow Condensed", Arial, sans-serif', label: 'Barlow Condensed' },
+  { value: '"Quicksand", Arial, sans-serif', label: 'Quicksand' },
+  { value: '"Nunito", Arial, sans-serif', label: 'Nunito' },
+  { value: '"Noto Serif", Georgia, serif', label: 'Noto Serif' },
+  { value: '"JetBrains Mono", monospace', label: 'JetBrains Mono' },
+  { value: 'Arial, sans-serif', label: 'Arial' }
+];
+
+const ACTION_SFX_TARGETS = [
+  { type: 'point_left', label: 'Chỉ trái' },
+  { type: 'point_right', label: 'Chỉ phải' },
+  { type: 'shrug', label: 'Nhún vai' },
+  { type: 'default', label: 'Đứng im' }
+];
+
 // Safe base64 decoding helper function to prevent InvalidCharacterError crashes
 const safeAtob = (str) => {
   if (!str || typeof atob !== 'function') return '';
@@ -75,6 +107,22 @@ const safeAtob = (str) => {
     console.warn('safeAtob decode skipped:', e);
     return '';
   }
+};
+
+const base64ToBlob = (base64, mimeType = 'audio/mpeg') => {
+  const byteString = safeAtob(String(base64 || '').replace(/^data:[^,]+,/, ''));
+  const bytes = new Uint8Array(byteString.length);
+  for (let i = 0; i < byteString.length; i += 1) {
+    bytes[i] = byteString.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mimeType });
+};
+
+const buildLocalCloneTtsEndpoint = (serverUrl) => {
+  const cleaned = String(serverUrl || '').trim().replace(/\/+$/, '');
+  if (!cleaned) return '';
+  if (/\/(?:tts|synthesize|generate|text-to-speech)$/i.test(cleaned)) return cleaned;
+  return `${cleaned}/tts`;
 };
 
 // A reusable component to render password-type input fields with view eye toggle and copy button
@@ -165,7 +213,7 @@ const parseVclipKeyText = (rawText) => {
   const lines = rawText.split('\n');
   const nowStr = new Date().toISOString().split('T')[0];
   const items = [];
-  
+
   lines.forEach(line => {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) return;
@@ -237,7 +285,7 @@ const getVclipKeyStatusInfo = (item) => {
   const created = new Date(item.createdDate || now);
   const resetDate = new Date(created.getTime() + 30 * 24 * 60 * 60 * 1000);
   const daysLeft = Math.ceil((resetDate - now) / (1000 * 60 * 60 * 24));
-  
+
   const isExpiredPeriodDone = daysLeft <= 0;
   const isUsable = item.status !== 'exhausted' || isExpiredPeriodDone;
 
@@ -327,9 +375,9 @@ const FileUploadDropzone = ({ accept = "image/*", onChange, children, className 
   };
 
   return (
-    <div 
+    <div
       className={`${className} ${isDragOver ? 'drag-over' : ''}`}
-      style={{ 
+      style={{
         ...style,
         position: 'relative',
         transition: 'all 0.2s ease',
@@ -342,11 +390,11 @@ const FileUploadDropzone = ({ accept = "image/*", onChange, children, className 
       onDrop={handleDrop}
     >
       {children}
-      <input 
-        type="file" 
-        accept={accept} 
-        className="file-upload-input" 
-        onChange={onChange} 
+      <input
+        type="file"
+        accept={accept}
+        className="file-upload-input"
+        onChange={onChange}
       />
     </div>
   );
@@ -552,6 +600,11 @@ export default function App() {
     return saved !== null ? parseFloat(saved) : 1.0;
   });
 
+  // Trạng thái Local Clone TTS
+  const [localCloneServerUrl, setLocalCloneServerUrl] = useState(() => localStorage.getItem('localclone_server_url') || '');
+  const [localCloneVoiceId, setLocalCloneVoiceId] = useState(() => localStorage.getItem('localclone_voice_id') || '');
+  const [localCloneApiKey, setLocalCloneApiKey] = useState(() => localStorage.getItem('localclone_api_key') || '');
+
   // Bộ Quản Lý Mẫu Kênh (Channel Profiles / Presets)
   const [channelProfiles, setChannelProfiles] = useState(() => {
     const defaultProfiles = [
@@ -583,11 +636,12 @@ export default function App() {
         subtitleColor: '#FFFFFF',
         subtitleOutlineColor: '#000000',
         subtitleOutlineWidth: 8,
-        subtitleFontFamily: '"Montserrat", Arial, sans-serif',
+        subtitleFontFamily: DEFAULT_VIDEO_FONT,
         subtitleHighlightColor: '#FFFF00',
         subtitleHighlightStyle: 'word-color',
         subtitleMaxWidth: 450,
         subtitleMaxLines: 2,
+        titleFontFamily: DEFAULT_VIDEO_FONT,
         titleOutlineColor: '#000000',
         titleOutlineWidth: 6,
         imageFrameWidth: 290,
@@ -622,11 +676,12 @@ export default function App() {
         subtitleColor: '#FFFFFF',
         subtitleOutlineColor: '#000000',
         subtitleOutlineWidth: 8,
-        subtitleFontFamily: '"Montserrat", Arial, sans-serif',
+        subtitleFontFamily: DEFAULT_VIDEO_FONT,
         subtitleHighlightColor: '#38BDF8',
         subtitleHighlightStyle: 'word-color',
         subtitleMaxWidth: 450,
         subtitleMaxLines: 2,
+        titleFontFamily: DEFAULT_VIDEO_FONT,
         titleOutlineColor: '#000000',
         titleOutlineWidth: 6,
         imageFrameWidth: 290,
@@ -647,11 +702,12 @@ export default function App() {
             subtitleColor: '#FFFFFF',
             subtitleOutlineColor: '#000000',
             subtitleOutlineWidth: 8,
-            subtitleFontFamily: '"Montserrat", Arial, sans-serif',
+            subtitleFontFamily: DEFAULT_VIDEO_FONT,
             subtitleHighlightColor: '#FFFF00',
             subtitleHighlightStyle: 'word-color',
             subtitleMaxWidth: 450,
             subtitleMaxLines: 2,
+            titleFontFamily: DEFAULT_VIDEO_FONT,
             titleOutlineColor: '#000000',
             titleOutlineWidth: 6,
             imageFrameWidth: 290,
@@ -883,11 +939,12 @@ export default function App() {
     updateSubtitleColor(profile.subtitleColor !== undefined ? profile.subtitleColor : '#FFFFFF');
     updateSubtitleOutlineColor(profile.subtitleOutlineColor !== undefined ? profile.subtitleOutlineColor : '#000000');
     updateSubtitleOutlineWidth(profile.subtitleOutlineWidth !== undefined ? profile.subtitleOutlineWidth : 8);
-    updateSubtitleFontFamily(profile.subtitleFontFamily !== undefined ? profile.subtitleFontFamily : '"Montserrat", Arial, sans-serif');
+    updateSubtitleFontFamily(profile.subtitleFontFamily !== undefined ? profile.subtitleFontFamily : DEFAULT_VIDEO_FONT);
     updateSubtitleHighlightColor(profile.subtitleHighlightColor !== undefined ? profile.subtitleHighlightColor : (profile.id === 'ngua-biet-tuot' ? '#38BDF8' : '#FFFF00'));
     updateSubtitleHighlightStyle(profile.subtitleHighlightStyle !== undefined ? profile.subtitleHighlightStyle : 'word-color');
     updateSubtitleMaxWidth(profile.subtitleMaxWidth !== undefined ? profile.subtitleMaxWidth : 450);
     updateSubtitleMaxLines(profile.subtitleMaxLines !== undefined ? profile.subtitleMaxLines : 2);
+    updateTitleFontFamily(profile.titleFontFamily !== undefined ? profile.titleFontFamily : DEFAULT_VIDEO_FONT);
     updateTitleOutlineColor(profile.titleOutlineColor !== undefined ? profile.titleOutlineColor : '#000000');
     updateTitleOutlineWidth(profile.titleOutlineWidth !== undefined ? profile.titleOutlineWidth : 6);
     updateImageFrameWidth(profile.imageFrameWidth !== undefined ? profile.imageFrameWidth : 290);
@@ -902,13 +959,13 @@ export default function App() {
       shrug: isCat ? '/mascot/cat/shrug.png' : '/mascot/shrug.png'
     };
 
-    const posesToApply = profile.mascotPoses && Object.keys(profile.mascotPoses).length > 0 
-      ? profile.mascotPoses 
+    const posesToApply = profile.mascotPoses && Object.keys(profile.mascotPoses).length > 0
+      ? profile.mascotPoses
       : DEFAULT_MASCOT_POSES;
 
     setMascotPoses(posesToApply);
     safeSaveMascotPoses(posesToApply);
-    
+
     let pendingPosesCount = Object.keys(posesToApply).length;
     const checkDone = () => {
       pendingPosesCount--;
@@ -980,6 +1037,7 @@ export default function App() {
       subtitleHighlightStyle,
       subtitleMaxWidth,
       subtitleMaxLines,
+      titleFontFamily,
       titleOutlineColor,
       titleOutlineWidth,
       imageFrameWidth,
@@ -1031,6 +1089,7 @@ export default function App() {
           subtitleHighlightStyle,
           subtitleMaxWidth,
           subtitleMaxLines,
+          titleFontFamily,
           titleOutlineColor,
           titleOutlineWidth,
           imageFrameWidth,
@@ -1069,8 +1128,6 @@ export default function App() {
   // Cấu hình phát hiện khoảng lặng (Silence Detector)
   const [silenceThreshold, setSilenceThreshold] = useState(0.012);
   const [minSilenceDuration, setMinSilenceDuration] = useState(0.15); // Nhạy hơn với các giọng đọc nhanh
-  const [detectedSilencesCount, setDetectedSilencesCount] = useState(null);
-  const [silenceSyncError, setSilenceSyncError] = useState('');
   const [silenceSyncMode, setSilenceSyncMode] = useState(() => {
     return localStorage.getItem('silenceSyncMode') || 'simple';
   });
@@ -1083,6 +1140,16 @@ export default function App() {
     const saved = localStorage.getItem('actionSfxVolume');
     return saved !== null ? parseFloat(saved) : 0.2;
   });
+  const [actionSfxPresets, setActionSfxPresets] = useState(() => normalizeActionSfxPresets(localStorage.getItem('actionSfxPresets')));
+
+  const updateActionSfxPreset = (type, preset) => {
+    setActionSfxPresets(prev => {
+      const next = normalizeActionSfxPresets({ ...prev, [type]: preset });
+      try { localStorage.setItem('actionSfxPresets', JSON.stringify(next)); } catch {}
+      scheduleTelegramCredentialSync({ actionSfxPresets: next });
+      return next;
+    });
+  };
 
   const handleSelectTtsProvider = (provider) => {
     setTtsProvider(provider);
@@ -1100,7 +1167,7 @@ export default function App() {
   const [subtitleY, setSubtitleY] = useState(() => {
     const saved = localStorage.getItem('subtitleY');
     return saved !== null ? parseInt(saved, 10) : 770;
-  }); 
+  });
   const [subtitleColor, setSubtitleColor] = useState(() => localStorage.getItem('subtitleColor') || '#FFFFFF');
   const [subtitleOutlineColor, setSubtitleOutlineColor] = useState(() => localStorage.getItem('subtitleOutlineColor') || '#000000');
   const [subtitleOutlineWidth, setSubtitleOutlineWidth] = useState(() => {
@@ -1111,13 +1178,13 @@ export default function App() {
     const saved = localStorage.getItem('subtitleFontSize');
     return saved !== null ? parseInt(saved, 10) : 38;
   });
-  const [subtitleFontFamily, setSubtitleFontFamily] = useState(() => localStorage.getItem('subtitleFontFamily') || '"Montserrat", Arial, sans-serif');
+  const [subtitleFontFamily, setSubtitleFontFamily] = useState(() => localStorage.getItem('subtitleFontFamily') || DEFAULT_VIDEO_FONT);
   const [subtitleHighlightColor, setSubtitleHighlightColor] = useState(() => localStorage.getItem('subtitleHighlightColor') || '#FFFF00');
   const [subtitleHighlightStyle, setSubtitleHighlightStyle] = useState(() => localStorage.getItem('subtitleHighlightStyle') || 'word-color');
   const [subtitleMaxWidth, setSubtitleMaxWidth] = useState(() => {
     const saved = localStorage.getItem('subtitleMaxWidth');
     return saved !== null ? parseInt(saved, 10) : 450;
-  }); 
+  });
   const [subtitleMaxLines, setSubtitleMaxLines] = useState(() => {
     const saved = localStorage.getItem('subtitleMaxLines');
     return saved !== null ? parseInt(saved, 10) : 2;
@@ -1128,6 +1195,7 @@ export default function App() {
     const saved = localStorage.getItem('titleFontSize');
     return saved !== null ? parseInt(saved, 10) : 36;
   });
+  const [titleFontFamily, setTitleFontFamily] = useState(() => localStorage.getItem('titleFontFamily') || DEFAULT_VIDEO_FONT);
   const [titleOutlineColor, setTitleOutlineColor] = useState(() => localStorage.getItem('titleOutlineColor') || '#000000');
   const [titleOutlineWidth, setTitleOutlineWidth] = useState(() => {
     const saved = localStorage.getItem('titleOutlineWidth');
@@ -1219,6 +1287,11 @@ export default function App() {
     setTitleFontSize(val);
     try { localStorage.setItem('titleFontSize', val.toString()); } catch {}
     updateActiveChannelProps({ titleFontSize: val });
+  };
+  const updateTitleFontFamily = (val) => {
+    setTitleFontFamily(val);
+    try { localStorage.setItem('titleFontFamily', val); } catch {}
+    updateActiveChannelProps({ titleFontFamily: val });
   };
   const updateTitleOutlineColor = (val) => {
     setTitleOutlineColor(val);
@@ -1315,17 +1388,17 @@ export default function App() {
     return saved !== null ? saved === 'true' : true;
   });
   const [ttConnected, setTtConnected] = useState(() => localStorage.getItem('ttConnected') === 'true');
-  
+
   const [activeConnectModal, setActiveConnectModal] = useState(null); // 'facebook' | 'youtube' | 'tiktok' | null
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishingStatus, setPublishingStatus] = useState('');
-  
+
   // Facebook credentials
   const DEFAULT_FB_PAGE_ID = safeAtob(['MTIyMzYzNDg0', 'NzQ5OTI2NA=='].join(''));
   const DEFAULT_FB_TOKEN = '';
   const [fbPageId, setFbPageId] = useState(() => localStorage.getItem('fb_page_id') || DEFAULT_FB_PAGE_ID);
   const [fbAccessToken, setFbAccessToken] = useState(() => localStorage.getItem('fb_access_token') || DEFAULT_FB_TOKEN);
-  
+
   // YouTube credentials
   const DEFAULT_YT_CHANNEL_ID = safeAtob(['VUNZY2o0REFk', 'MUdGVUdVaTJCMnlZRzVn'].join(''));
   const DEFAULT_YT_TOKEN = '';
@@ -1344,7 +1417,7 @@ export default function App() {
   const [ytClientId, setYtClientId] = useState(() => localStorage.getItem('yt_client_id') || DEFAULT_YT_CLIENT_ID);
   const [ytClientSecret, setYtClientSecret] = useState(() => localStorage.getItem('yt_client_secret') || DEFAULT_YT_CLIENT_SECRET);
   const [ytRefreshToken, setYtRefreshToken] = useState(() => localStorage.getItem('yt_refresh_token') || DEFAULT_YT_REFRESH_TOKEN);
-  
+
   // TikTok credentials
   const [ttSessionId, setTtSessionId] = useState(() => localStorage.getItem('tt_session_id') || '');
   const [ttAccessToken, setTtAccessToken] = useState(() => localStorage.getItem('tt_access_token') || '');
@@ -1434,7 +1507,7 @@ export default function App() {
   const [commentAiProvider, setCommentAiProvider] = useState(() => localStorage.getItem('comment_ai_provider') || 'gemini');
   const [commentAiApiKey, setCommentAiApiKey] = useState(() => localStorage.getItem('comment_ai_api_key') || '');
   const [commentSystemPrompt, setCommentSystemPrompt] = useState(() => {
-    return localStorage.getItem('comment_system_prompt') || 
+    return localStorage.getItem('comment_system_prompt') ||
       "Bạn là một trợ lý ảo của trang 'Mèo thông thái' chuyên trả lời bình luận của khán giả trên video ngắn (Reels).\nHãy trả lời một cách tự nhiên, thân thiện, ngắn gọn (tối đa 2 câu), thỉnh thoảng chèn thêm icon ngộ nghĩnh. Tránh các câu trả lời rập khuôn máy móc.\nNếu người dùng hỏi link sản phẩm, hãy hướng dẫn họ xem link mua hàng được đính kèm ở nút giỏ hàng hoặc ở đầu trang Bio cá nhân.";
   });
   const [commentLogs, setCommentLogs] = useState(() => {
@@ -1507,7 +1580,7 @@ export default function App() {
     } catch (err) {
       console.error('Failed to serialize scheduledPosts to localStorage:', err);
     }
-    
+
     // Save AI Bot settings
     localStorage.setItem('bot_enabled', botEnabled.toString());
     localStorage.setItem('comment_ai_provider', commentAiProvider);
@@ -1517,6 +1590,7 @@ export default function App() {
 
     // Save Title Settings
     localStorage.setItem('titleFontSize', titleFontSize.toString());
+    localStorage.setItem('titleFontFamily', titleFontFamily);
     localStorage.setItem('titleOutlineColor', titleOutlineColor);
     localStorage.setItem('titleOutlineWidth', titleOutlineWidth.toString());
 
@@ -1526,18 +1600,18 @@ export default function App() {
     localStorage.setItem('globalImageZoom', globalImageZoom.toString());
     localStorage.setItem('customFilename', customFilename);
   }, [
-    fbConnected, 
-    ytConnected, 
-    ttConnected, 
-    fbPageId, 
-    fbAccessToken, 
-    ytChannelId, 
-    ytAccessToken, 
+    fbConnected,
+    ytConnected,
+    ttConnected,
+    fbPageId,
+    fbAccessToken,
+    ytChannelId,
+    ytAccessToken,
     ytClientId,
     ytClientSecret,
     ytRefreshToken,
-    ttSessionId, 
-    ttAccessToken, 
+    ttSessionId,
+    ttAccessToken,
     ttClientKey,
     ttClientSecret,
     ttRefreshToken,
@@ -1553,6 +1627,7 @@ export default function App() {
     commentSystemPrompt,
     commentLogs,
     titleFontSize,
+    titleFontFamily,
     titleOutlineColor,
     titleOutlineWidth,
     imageFrameWidth,
@@ -1593,14 +1668,14 @@ export default function App() {
         console.error('Lỗi khi lưu backup key xuống ổ cứng:', err);
       }
     };
-    
+
     // Chỉ lưu khi có ít nhất một thông tin kết nối để tránh ghi đè dữ liệu trống lúc khởi tạo
     if (fbPageId || fbAccessToken || ytChannelId || ytAccessToken || ttSessionId || ttAccessToken || ttRefreshToken || commentAiApiKey) {
       const timer = setTimeout(saveToDisk, 1000); // debounce 1s
       return () => clearTimeout(timer);
     }
   }, [
-    fbPageId, fbAccessToken, 
+    fbPageId, fbAccessToken,
     ytChannelId, ytAccessToken, ytClientId, ytClientSecret, ytRefreshToken,
     ttSessionId, ttAccessToken, ttClientKey, ttClientSecret, ttRefreshToken, ttOpenId, ttRedirectUri,
     commentAiApiKey, commentAiProvider
@@ -1618,6 +1693,9 @@ export default function App() {
       ausyncLabModel: localStorage.getItem('ausynclab_model') || ausyncLabModel || 'myna-2',
       ausyncLabSpeed: localStorage.getItem('ausynclab_speed') || ausyncLabSpeed || 1.0,
       ausyncLabLanguage: 'vi',
+      localCloneServerUrl: localStorage.getItem('localclone_server_url') || localCloneServerUrl || '',
+      localCloneVoiceId: localStorage.getItem('localclone_voice_id') || localCloneVoiceId || '',
+      localCloneApiKey: localStorage.getItem('localclone_api_key') || localCloneApiKey || '',
       elevenLabsApiKey: localStorage.getItem('elevenlabs_api_key') || elevenLabsApiKey || '',
       elevenLabsVoiceId: localStorage.getItem('elevenlabs_voice_id') || selectedVoiceId || '',
       selectedVoiceId: localStorage.getItem('elevenlabs_voice_id') || selectedVoiceId || '',
@@ -1748,12 +1826,16 @@ export default function App() {
     ausyncLabModel: ausyncLabModel || 'myna-2',
     ausyncLabSpeed: ausyncLabSpeed || 1.0,
     ausyncLabLanguage: 'vi',
+    localCloneServerUrl: localCloneServerUrl || '',
+    localCloneVoiceId: localCloneVoiceId || '',
+    localCloneApiKey: localCloneApiKey || '',
     elevenLabsApiKey: elevenLabsApiKey || '',
     elevenLabsVoiceId: selectedVoiceId || '',
     selectedVoiceId: selectedVoiceId || '',
     voiceSyncMode: voiceSyncMode || 'segment',
     actionSfxEnabled,
     actionSfxVolume,
+    actionSfxPresets,
     ttSessionId: ttSessionId || '',
     ttAccessToken: ttAccessToken || '',
     ttClientKey: ttClientKey || '',
@@ -1792,8 +1874,8 @@ export default function App() {
   };
 
   useEffect(() => {
-    scheduleTelegramCredentialSync({ voiceSyncMode, actionSfxEnabled, actionSfxVolume });
-  }, [voiceSyncMode, actionSfxEnabled, actionSfxVolume]);
+    scheduleTelegramCredentialSync({ voiceSyncMode, actionSfxEnabled, actionSfxVolume, actionSfxPresets });
+  }, [voiceSyncMode, actionSfxEnabled, actionSfxVolume, actionSfxPresets]);
 
   const normalizeCompareTitle = (value) => cleanTelegramScriptText(value)
     .toLowerCase()
@@ -1852,6 +1934,7 @@ export default function App() {
         audioUrl: inlinePayload.audioUrl || urlParams.get('audioUrl') || '',
         actionSfxEnabled: inlinePayload.actionSfxEnabled,
         actionSfxVolume: inlinePayload.actionSfxVolume,
+        actionSfxPresets: inlinePayload.actionSfxPresets,
         comparisonImages: Array.isArray(inlinePayload.comparisonImages) ? inlinePayload.comparisonImages : []
       };
 
@@ -1878,6 +1961,7 @@ export default function App() {
         const { scriptText, channelId, audioBase64, audioUrl, comparisonImages = [] } = session;
         if (session.actionSfxEnabled !== undefined) setActionSfxEnabled(session.actionSfxEnabled);
         if (session.actionSfxVolume !== undefined) setActionSfxVolume(Number(session.actionSfxVolume) || 0.2);
+        if (session.actionSfxPresets !== undefined) setActionSfxPresets(normalizeActionSfxPresets(session.actionSfxPresets));
         let parsedTelegramScript = null;
         if (channelId) {
           const selectedProfile = channelProfiles.find(profile => profile.id === channelId);
@@ -1896,7 +1980,7 @@ export default function App() {
             setComparisons(comparisonsWithImages);
           }
         }
-        
+
         let localAudioBlobUrl = audioUrl;
         if (audioBase64) {
           try {
@@ -2053,7 +2137,7 @@ export default function App() {
       if (isManual) alert('Thiếu thông tin xác thực Facebook (Page ID / Access Token)!');
       return;
     }
-    
+
     setIsScanning(true);
     let scannedPostsCount = 0;
     let foundCommentsCount = 0;
@@ -2110,7 +2194,7 @@ export default function App() {
 
             console.log(`Found new comment from ${commenterName}: "${commentText}". Generating AI response...`);
             let replyText = '';
-            
+
             if (commentAiProvider === 'gemini') {
               const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key=${trimmedAiApiKey}`, {
                 method: 'POST',
@@ -2123,7 +2207,7 @@ export default function App() {
                   }]
                 })
               });
-              
+
               if (geminiRes.ok) {
                 const geminiData = await geminiRes.json();
                 replyText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
@@ -2148,7 +2232,7 @@ export default function App() {
                   ]
                 })
               });
-              
+
               if (groqRes.ok) {
                 const groqData = await groqRes.json();
                 replyText = groqData.choices?.[0]?.message?.content || '';
@@ -2173,7 +2257,7 @@ export default function App() {
                   ]
                 })
               });
-              
+
               if (openrouterRes.ok) {
                 const openrouterData = await openrouterRes.json();
                 replyText = openrouterData.choices?.[0]?.message?.content || '';
@@ -2198,7 +2282,7 @@ export default function App() {
                   ]
                 })
               });
-              
+
               if (openaiRes.ok) {
                 const openaiData = await openaiRes.json();
                 replyText = openaiData.choices?.[0]?.message?.content || '';
@@ -2255,7 +2339,7 @@ export default function App() {
         } else {
           msg += `- Không phát hiện bình luận mới nào cần trả lời. (Tìm thấy ${foundCommentsCount} bình luận cũ)`;
         }
-        
+
         if (errors.length > 0) {
           msg += `\n\n⚠️ Có ${errors.length} lỗi xảy ra trong quá trình quét:\n` + errors.map(e => `• ${e}`).join('\n');
         }
@@ -2282,23 +2366,23 @@ export default function App() {
 
     return () => clearInterval(intervalId);
   }, [
-    botEnabled, 
-    fbConnected, 
-    commentAiApiKey, 
-    commentAiProvider, 
-    commentSystemPrompt, 
-    scheduledPosts, 
-    fbAccessToken, 
+    botEnabled,
+    fbConnected,
+    commentAiApiKey,
+    commentAiProvider,
+    commentSystemPrompt,
+    scheduledPosts,
+    fbAccessToken,
     fbPageId
   ]);
 
   const publishScheduledPost = async (post) => {
     // Đánh dấu là đang xuất bản để tránh lặp lại tiến trình
     setScheduledPosts(prev => prev.map(p => p.id === post.id ? { ...p, status: 'publishing' } : p));
-    
+
     try {
       console.log(`[Scheduler] Bắt đầu tự động đăng bài hẹn giờ: ${post.id} (${post.headerTitle})`);
-      
+
       // Lấy tệp video từ IndexedDB
       const videoBlob = await getVideoFromStorage(post.id);
       if (!videoBlob) {
@@ -2319,15 +2403,15 @@ export default function App() {
               upload_phase: 'start'
             })
           });
-          
+
           if (!startRes.ok) {
             const errData = await startRes.json();
             throw new Error(`Khởi tạo FB Reel lỗi: ${errData.error?.message || startRes.statusText}`);
           }
-          
+
           const startData = await startRes.json();
           const { video_id, upload_url } = startData;
-          
+
           // 2. Upload file video
           let proxyUploadUrl = upload_url;
           if (upload_url.includes('video-rupload.facebook.com')) {
@@ -2346,12 +2430,12 @@ export default function App() {
             },
             body: videoBlob
           });
-          
+
           if (!uploadRes.ok) {
             const errData = await uploadRes.json();
             throw new Error(`Upload video FB lỗi: ${errData.error?.message || uploadRes.statusText}`);
           }
-          
+
           // 3. Hoàn tất & Xuất bản bài viết
           const finishRes = await fetch(`/fb-api/v21.0/${fbPageId}/video_reels`, {
             method: 'POST',
@@ -2364,7 +2448,7 @@ export default function App() {
               description: post.caption
             })
           });
-          
+
           if (!finishRes.ok) {
             const errData = await finishRes.json();
             throw new Error(`Hoàn tất xuất bản FB lỗi: ${errData.error?.message || finishRes.statusText}`);
@@ -2374,7 +2458,7 @@ export default function App() {
           const fbPostIdValue = finishData.fb_id || finishData.id || video_id;
           fbPostId = fbPostIdValue;
           postIds.facebook = fbPostIdValue;
-          
+
         } else if (platform === 'youtube') {
           let activeToken = ytAccessToken;
           if (ytClientId.trim() && ytClientSecret.trim() && ytRefreshToken.trim()) {
@@ -2605,7 +2689,7 @@ export default function App() {
         try {
           const comps = JSON.parse(savedCompsStr);
           let compsChanged = false;
-          
+
           const updatedComps = await Promise.all(
             comps.map(async (c) => {
               let leftUrl = c.leftImageUrl;
@@ -2680,7 +2764,7 @@ export default function App() {
             };
             localStorage.setItem('mascotPoses', JSON.stringify(newWiseCatPoses));
             setMascotPoses(newWiseCatPoses);
-            
+
             // Clear loaded cache to force refresh
             ['default', 'point_left', 'point_right', 'shrug'].forEach(k => {
               delete loadedImagesRef.current[k];
@@ -2909,6 +2993,43 @@ export default function App() {
     return await fetchAudioBlobWithProxyFallback(audioUrlResult);
   };
 
+  const requestLocalCloneAudioBlob = async (text) => {
+    const endpoint = buildLocalCloneTtsEndpoint(localCloneServerUrl);
+    if (!endpoint) throw new Error('Vui lòng nhập Local Clone Server URL.');
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(localCloneApiKey ? { Authorization: `Bearer ${localCloneApiKey}` } : {})
+      },
+      body: JSON.stringify({
+        text,
+        voiceId: localCloneVoiceId,
+        voice_id: localCloneVoiceId,
+        language: 'vi',
+        format: 'mp3'
+      })
+    });
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(errorText || `Local Clone server lỗi ${response.status}.`);
+    }
+
+    if (contentType.includes('application/json')) {
+      const data = await response.json();
+      const audioUrlResult = data.audioUrl || data.audio_url || data.url || data.downloadUrl || data.download_url;
+      if (audioUrlResult) return await fetchAudioBlobWithProxyFallback(audioUrlResult);
+      const audioBase64 = data.audioBase64 || data.audio_base64 || data.base64 || data.audio;
+      if (audioBase64) return base64ToBlob(audioBase64, data.mimeType || data.mime_type || 'audio/mpeg');
+      throw new Error('Local Clone server không trả về audioUrl hoặc audioBase64.');
+    }
+
+    return await response.blob();
+  };
+
   const requestSegmentAudioBlob = async (provider, text, options = {}) => {
     if (provider === 'eleven') return requestElevenLabsAudioBlob(text);
     if (provider === 'lucylab') {
@@ -2935,6 +3056,7 @@ export default function App() {
       });
     }
     if (provider === 'ausync') return requestAusyncLabAudioBlob(text);
+    if (provider === 'localclone') return requestLocalCloneAudioBlob(text);
     throw new Error('Provider TTS không hợp lệ.');
   };
 
@@ -2950,6 +3072,9 @@ export default function App() {
     }
     if (provider === 'ausync' && (!ausyncLabApiKey || !ausyncLabVoiceId)) {
       throw new Error('Vui lòng nhập API Key và Voice ID AusyncLab.');
+    }
+    if (provider === 'localclone' && !localCloneServerUrl) {
+      throw new Error('Vui lòng nhập Local Clone Server URL.');
     }
   };
 
@@ -2982,7 +3107,8 @@ export default function App() {
         audioBuffers,
         timelineBlocks: timed.blocks,
         actionEvents,
-        sfxVolume: actionSfxVolume
+        sfxVolume: actionSfxVolume,
+        actionSfxPresets
       });
       const mergedBlob = audioBufferToWavBlob(mergedBuffer);
       const localBlobUrl = URL.createObjectURL(mergedBlob);
@@ -3064,11 +3190,11 @@ export default function App() {
       const newVoiceId = data.voice_id;
 
       alert(`Đã clone giọng nói "${cloneVoiceName}" thành công!`);
-      
+
       // Reset form
       setCloneVoiceName('');
       setCloneSampleFile(null);
-      
+
       // Nạp lại danh sách giọng và tự động chọn giọng vừa tạo
       await fetchVoices(elevenLabsApiKey);
       if (newVoiceId) {
@@ -3250,6 +3376,24 @@ export default function App() {
     scheduleTelegramCredentialSync({ ausyncLabModel: model });
   };
 
+  const handleSaveLocalCloneServerUrl = (url) => {
+    setLocalCloneServerUrl(url);
+    localStorage.setItem('localclone_server_url', url);
+    scheduleTelegramCredentialSync({ localCloneServerUrl: url });
+  };
+
+  const handleSaveLocalCloneVoiceId = (id) => {
+    setLocalCloneVoiceId(id);
+    localStorage.setItem('localclone_voice_id', id);
+    scheduleTelegramCredentialSync({ localCloneVoiceId: id });
+  };
+
+  const handleSaveLocalCloneApiKey = (key) => {
+    setLocalCloneApiKey(key);
+    localStorage.setItem('localclone_api_key', key);
+    scheduleTelegramCredentialSync({ localCloneApiKey: key });
+  };
+
   // Tải danh sách giọng đọc từ LucyLab
   const fetchLucyLabVoices = async (keyToUse) => {
     const key = keyToUse || lucyLabApiKey;
@@ -3315,9 +3459,27 @@ export default function App() {
     return handleGenerateSegmentedVoice('ausync');
   };
 
+  const handleGenerateVoiceLocalClone = async () => {
+    return handleGenerateSegmentedVoice('localclone');
+  };
+
   // Cache helper for Canvas drawing
   const cacheImage = (key, url) => {
     if (!url) return;
+    if (url.startsWith('idb:')) {
+      getImageFromStorage(url.slice(4)).then(blob => {
+        if (!blob) {
+          console.warn(`Image not found in IndexedDB: ${url}`);
+          return;
+        }
+        const objectUrl = URL.createObjectURL(blob);
+        cacheImage(key, objectUrl);
+      }).catch(err => {
+        console.warn(`Failed to restore image from IndexedDB: ${url}`, err);
+      });
+      return;
+    }
+
     const img = new Image();
     // Only use crossOrigin anonymous for external http/https URLs
     if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -3412,6 +3574,10 @@ export default function App() {
     localStorage.setItem('voiceSyncMode', voiceSyncMode);
     localStorage.setItem('actionSfxEnabled', actionSfxEnabled.toString());
     localStorage.setItem('actionSfxVolume', actionSfxVolume.toString());
+    localStorage.setItem('actionSfxPresets', JSON.stringify(actionSfxPresets));
+    localStorage.setItem('localclone_server_url', localCloneServerUrl);
+    localStorage.setItem('localclone_voice_id', localCloneVoiceId);
+    localStorage.setItem('localclone_api_key', localCloneApiKey);
     localStorage.setItem('mascotPoses', JSON.stringify(getPersistedMascotPoses()));
     localStorage.setItem('mascotScale', mascotScale.toString());
     if (headerLogoUrl && headerLogoUrl.startsWith('blob:')) {
@@ -3424,6 +3590,7 @@ export default function App() {
     }
     localStorage.setItem('logoFileName', logoFileName);
     localStorage.setItem('titleFontSize', titleFontSize.toString());
+    localStorage.setItem('titleFontFamily', titleFontFamily);
     localStorage.setItem('titleOutlineColor', titleOutlineColor);
     localStorage.setItem('titleOutlineWidth', titleOutlineWidth.toString());
     localStorage.setItem('imageFrameWidth', imageFrameWidth.toString());
@@ -3451,6 +3618,10 @@ export default function App() {
     voiceSyncMode,
     actionSfxEnabled,
     actionSfxVolume,
+    actionSfxPresets,
+    localCloneServerUrl,
+    localCloneVoiceId,
+    localCloneApiKey,
     mascotPoses,
     mascotScale,
     mascotChromaKey,
@@ -3459,6 +3630,7 @@ export default function App() {
     headerLogoUrl,
     logoFileName,
     titleFontSize,
+    titleFontFamily,
     titleOutlineColor,
     titleOutlineWidth,
     imageFrameWidth,
@@ -3508,6 +3680,7 @@ export default function App() {
       mascotChromaThreshold,
       mascotWhiteBacking,
       titleFontSize,
+      titleFontFamily,
       titleOutlineColor,
       titleOutlineWidth,
       imageFrameWidth,
@@ -3521,13 +3694,13 @@ export default function App() {
   useEffect(() => {
     triggerCanvasRedraw();
   }, [
-    currentTime, 
-    timelineBlocks, 
-    comparisons, 
-    headerTitle, 
+    currentTime,
+    timelineBlocks,
+    comparisons,
+    headerTitle,
     headerTitleColor,
     headerTitleFontSize,
-    headerLogoUrl, 
+    headerLogoUrl,
     bgColor,
     showSubtitles,
     subtitleY,
@@ -3547,6 +3720,7 @@ export default function App() {
     mascotChromaThreshold,
     mascotWhiteBacking,
     titleFontSize,
+    titleFontFamily,
     titleOutlineColor,
     titleOutlineWidth,
     imageFrameWidth,
@@ -3566,11 +3740,11 @@ export default function App() {
       // 1. Chuỗi số (e.g. 365 -> "ba trăm sáu mươi lăm" = 5 âm tiết; 2026 -> 7 âm tiết)
       if (/^\d+[%]?$/.test(cleanWord)) {
         weight += Math.max(1, cleanWord.length * 1.6);
-      } 
+      }
       // 2. Từ viết tắt in hoa (e.g. API -> "a-pê-i", USB, HTML)
       else if (/^[A-Z0-9]{2,5}$/.test(cleanWord)) {
         weight += cleanWord.length * 1.4;
-      } 
+      }
       // 3. Mỗi từ thường = 1.0 âm tiết chuẩn (tiếng Việt hay từ tên riêng Alaska, Husky, Windows...)
       else {
         weight += 1.0;
@@ -3603,7 +3777,6 @@ export default function App() {
     const sourceBlocks = Array.isArray(baseBlocks) && baseBlocks.length > 0 ? baseBlocks : timelineBlocks;
     if (!sourceBlocks.length) return;
     setIsProcessingAudio(true);
-    setSilenceSyncError('');
     try {
       const isLocal = targetUrl.startsWith('blob:') || targetUrl.startsWith('data:');
       const requestUrl = isLocal ? targetUrl : `/cors-proxy?url=${encodeURIComponent(targetUrl)}`;
@@ -3611,16 +3784,16 @@ export default function App() {
       const arrayBuffer = await response.arrayBuffer();
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-      
+
       const rawData = audioBuffer.getChannelData(0); // Lấy kênh trái
       const sampleRate = audioBuffer.sampleRate;
       const audioDuration = (targetDuration && targetDuration !== Infinity && !isNaN(targetDuration)) ? targetDuration : audioBuffer.duration;
-      
+
       // 1. Chia khung đo năng lượng RMS
       const isSimple = silenceSyncMode === 'simple';
       const windowSize = Math.floor(sampleRate * (isSimple ? 0.05 : 0.03)); // Simple: 50ms, DP: 30ms
       const stepSize = Math.floor(sampleRate * (isSimple ? 0.025 : 0.015));  // Simple: 25ms, DP: 15ms
-      
+
       const rmsValues = [];
       let minRms = Infinity;
       let maxRms = 0;
@@ -3684,8 +3857,6 @@ export default function App() {
         }
       });
 
-      setDetectedSilencesCount(cleanSilences.length);
-
       const updated = sourceBlocks.map(block => ({ ...block }));
       const totalWeight = sourceBlocks.reduce((sum, b) => sum + getSpokenWeight(b.text), 0);
       const neededCount = sourceBlocks.length - 1;
@@ -3742,9 +3913,7 @@ export default function App() {
       setCurrentTime(0);
     } catch (err) {
       console.error('Lỗi khi khớp nhịp khoảng lặng:', err);
-      setSilenceSyncError(err.message || 'Lỗi không xác định khi giải mã âm thanh (CORS / Lỗi file)');
-      setDetectedSilencesCount(0);
-      
+
       // Dự phòng
       const totalWeight = sourceBlocks.reduce((sum, b) => sum + getSpokenWeight(b.text), 0);
       if (totalWeight > 0) {
@@ -3763,7 +3932,7 @@ export default function App() {
       setIsProcessingAudio(false);
     }
   };
- 
+
   // Wrapper để gọi thủ công từ UI
   const handleAutoSyncSilence = async () => {
     if (!audioUrl) {
@@ -3777,20 +3946,20 @@ export default function App() {
   // Đánh dấu chuyển câu thủ công (Tap-to-Time)
   const handleTapSync = () => {
     if (!isPlaying) return;
-    
+
     // Tìm câu phụ đề đang chạy tại currentTime
     const activeIdx = timelineBlocks.findIndex(
       b => currentTime >= b.start && currentTime <= b.end
     );
-    
+
     if (activeIdx !== -1 && activeIdx < timelineBlocks.length - 1) {
       const t = parseFloat(currentTime.toFixed(2));
       const updated = [...timelineBlocks];
-      
+
       // Đặt điểm kết thúc câu hiện tại và bắt đầu câu sau bằng thời điểm hiện tại
       updated[activeIdx].end = t;
       updated[activeIdx + 1].start = t;
-      
+
       setTimelineBlocks(updated);
     }
   };
@@ -3799,13 +3968,13 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (
-        document.activeElement.tagName === 'INPUT' || 
+        document.activeElement.tagName === 'INPUT' ||
         document.activeElement.tagName === 'TEXTAREA' ||
         document.activeElement.tagName === 'SELECT'
       ) {
         return;
       }
-      
+
       if (e.key === '[') {
         e.preventDefault();
         handleTapSync();
@@ -3814,7 +3983,7 @@ export default function App() {
         handlePlayToggle();
       }
     };
-    
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isPlaying, currentTime, timelineBlocks]);
@@ -3967,7 +4136,7 @@ export default function App() {
     setDuration(estimatedTotal);
     setCurrentTime(0);
     setIsPlaying(false);
-    
+
     // Auto switch to timeline beats tab to let user review
     setActiveTab('timeline');
     if (shouldNotify) {
@@ -4058,7 +4227,7 @@ export default function App() {
         const updatedPoses = { ...prev, [poseKey]: url };
         const persistedPoses = { ...getPersistedMascotPoses(prev), [poseKey]: storedUrl };
         localStorage.setItem('mascotPoses', JSON.stringify(persistedPoses));
-        
+
         // Auto update active channel profile in channelProfiles array
         setChannelProfiles(prevProfiles => {
           const updated = prevProfiles.map(p => {
@@ -4114,7 +4283,7 @@ export default function App() {
             const r = data[i];
             const g = data[i + 1];
             const b = data[i + 2];
-            
+
             // White-key thresholding with transparency falloff
             const minColor = Math.min(r, g, b);
             if (minColor > 215) {
@@ -4130,7 +4299,7 @@ export default function App() {
           const dbKey = getMascotStorageKey(activeChannelId, posesKeys[idx]);
           persistedPoses[posesKeys[idx]] = `idb:${dbKey}`;
           fetch(dataUrl).then(r => r.blob()).then(blob => saveImageToStorage(dbKey, blob)).catch(() => {});
-          
+
           // Cache the new image data URL
           cacheImage(posesKeys[idx], dataUrl);
         }
@@ -4164,7 +4333,7 @@ export default function App() {
       const url = URL.createObjectURL(file);
       const dbKey = getLogoStorageKey(activeChannelId, file.name);
       const storedLogoUrl = `idb:${dbKey}`;
-      setHeaderLogoUrl(url);
+      setHeaderLogoUrl(storedLogoUrl);
       setLogoFileName(file.name);
       localStorage.setItem('headerLogoUrl', storedLogoUrl);
       localStorage.setItem('logoFileName', file.name);
@@ -4181,7 +4350,7 @@ export default function App() {
         return updated;
       });
 
-      cacheImage(url, url);
+      cacheImage(storedLogoUrl, url);
       saveImageToStorage(dbKey, file);
     }
   };
@@ -4221,7 +4390,7 @@ export default function App() {
       return block;
     });
     setTimelineBlocks(updated.sort((a, b) => a.start - b.start));
-    
+
     const maxEnd = Math.max(...updated.map(b => b.end), 5);
     if (maxEnd > duration) setDuration(maxEnd);
   };
@@ -4296,12 +4465,28 @@ export default function App() {
       logoFileName,
       mascotPoses,
       mascotScale,
+      actionSfxEnabled,
+      actionSfxVolume,
+      actionSfxPresets,
       titleFontSize,
+      titleFontFamily,
       titleOutlineColor,
       titleOutlineWidth,
       imageFrameWidth,
       imageFrameHeight,
       globalImageZoom,
+      ttsProvider,
+      selectedVoiceId,
+      vclipVoiceId,
+      vclipSpeed,
+      lucyLabVoiceId,
+      lucyLabSpeed,
+      ausyncLabVoiceId,
+      ausyncLabModel,
+      ausyncLabSpeed,
+      localCloneServerUrl,
+      localCloneVoiceId,
+      localCloneApiKey,
       ytClientId,
       ytClientSecret,
       ytRefreshToken,
@@ -4355,10 +4540,12 @@ export default function App() {
         if (projectData.subtitleMaxLines !== undefined) setSubtitleMaxLines(projectData.subtitleMaxLines);
         if (projectData.actionSfxEnabled !== undefined) setActionSfxEnabled(projectData.actionSfxEnabled);
         if (projectData.actionSfxVolume !== undefined) setActionSfxVolume(projectData.actionSfxVolume);
+        if (projectData.actionSfxPresets !== undefined) setActionSfxPresets(normalizeActionSfxPresets(projectData.actionSfxPresets));
         if (projectData.headerPosition !== undefined) setHeaderPosition(projectData.headerPosition);
 
         // Cấu hình tiêu đề cột tùy biến
         if (projectData.titleFontSize !== undefined) setTitleFontSize(projectData.titleFontSize);
+        if (projectData.titleFontFamily !== undefined) setTitleFontFamily(projectData.titleFontFamily);
         if (projectData.titleOutlineColor !== undefined) setTitleOutlineColor(projectData.titleOutlineColor);
         if (projectData.titleOutlineWidth !== undefined) setTitleOutlineWidth(projectData.titleOutlineWidth);
 
@@ -4462,6 +4649,21 @@ export default function App() {
         localStorage.setItem('ausynclab_model', config.ausyncLabModel);
         ttsCredentialOverrides.ausyncLabModel = config.ausyncLabModel;
       }
+      if (config.localCloneServerUrl !== undefined) {
+        setLocalCloneServerUrl(config.localCloneServerUrl);
+        localStorage.setItem('localclone_server_url', config.localCloneServerUrl);
+        ttsCredentialOverrides.localCloneServerUrl = config.localCloneServerUrl;
+      }
+      if (config.localCloneVoiceId !== undefined) {
+        setLocalCloneVoiceId(config.localCloneVoiceId);
+        localStorage.setItem('localclone_voice_id', config.localCloneVoiceId);
+        ttsCredentialOverrides.localCloneVoiceId = config.localCloneVoiceId;
+      }
+      if (config.localCloneApiKey !== undefined) {
+        setLocalCloneApiKey(config.localCloneApiKey);
+        localStorage.setItem('localclone_api_key', config.localCloneApiKey);
+        ttsCredentialOverrides.localCloneApiKey = config.localCloneApiKey;
+      }
       if (Object.keys(ttsCredentialOverrides).length > 0) {
         scheduleTelegramCredentialSync(ttsCredentialOverrides);
       }
@@ -4475,6 +4677,7 @@ export default function App() {
       if (config.minSilenceDuration !== undefined) setMinSilenceDuration(config.minSilenceDuration);
       if (config.actionSfxEnabled !== undefined) setActionSfxEnabled(config.actionSfxEnabled);
       if (config.actionSfxVolume !== undefined) setActionSfxVolume(config.actionSfxVolume);
+      if (config.actionSfxPresets !== undefined) setActionSfxPresets(normalizeActionSfxPresets(config.actionSfxPresets));
       if (config.showSubtitles !== undefined) setShowSubtitles(config.showSubtitles);
       if (config.subtitleY !== undefined) setSubtitleY(config.subtitleY);
       if (config.subtitleColor !== undefined) setSubtitleColor(config.subtitleColor);
@@ -4487,6 +4690,7 @@ export default function App() {
       if (config.subtitleMaxWidth !== undefined) setSubtitleMaxWidth(config.subtitleMaxWidth);
       if (config.subtitleMaxLines !== undefined) setSubtitleMaxLines(config.subtitleMaxLines);
       if (config.titleFontSize !== undefined) setTitleFontSize(config.titleFontSize);
+      if (config.titleFontFamily !== undefined) setTitleFontFamily(config.titleFontFamily);
       if (config.titleOutlineColor !== undefined) setTitleOutlineColor(config.titleOutlineColor);
       if (config.titleOutlineWidth !== undefined) setTitleOutlineWidth(config.titleOutlineWidth);
       if (config.imageFrameWidth !== undefined) setImageFrameWidth(config.imageFrameWidth);
@@ -4603,11 +4807,11 @@ export default function App() {
 
       await exportVideo({
         canvas: canvasEl,
-        state: { 
-          headerTitle, 
-          headerLogoUrl, 
-          bgColor, 
-          comparisons, 
+        state: {
+          headerTitle,
+          headerLogoUrl,
+          bgColor,
+          comparisons,
           timelineBlocks,
           showSubtitles,
           subtitleY,
@@ -4629,6 +4833,7 @@ export default function App() {
           mascotChromaThreshold,
           mascotWhiteBacking,
           titleFontSize,
+          titleFontFamily,
           titleOutlineColor,
           titleOutlineWidth,
           imageFrameWidth,
@@ -5116,7 +5321,7 @@ export default function App() {
       alert('Vui lòng nhập Video/Reel ID.');
       return;
     }
-    
+
     // Tạo bài đăng dummy với ID thủ công để bot theo dõi bình luận
     const dummyPost = {
       id: `manual-${Date.now()}`,
@@ -5130,7 +5335,7 @@ export default function App() {
       postId: manualVideoId.trim(),
       postIds: { facebook: manualVideoId.trim() }
     };
-    
+
     setScheduledPosts(prev => [dummyPost, ...prev]);
     setManualVideoId('');
     alert(`Đã thêm Video ID: ${manualVideoId.trim()} vào danh sách theo dõi bình luận!`);
@@ -5214,6 +5419,7 @@ export default function App() {
         voiceSyncMode,
         actionSfxEnabled,
         actionSfxVolume,
+        actionSfxPresets,
         showSubtitles,
         subtitleY,
         subtitleColor,
@@ -5226,6 +5432,7 @@ export default function App() {
         subtitleMaxWidth,
         subtitleMaxLines,
         titleFontSize,
+        titleFontFamily,
         titleOutlineColor,
         titleOutlineWidth,
         imageFrameWidth,
@@ -5278,19 +5485,19 @@ export default function App() {
               upload_phase: 'start'
             })
           });
-          
+
           if (!startRes.ok) {
             const errData = await startRes.json();
             throw new Error(`Khởi tạo FB Reel lỗi: ${errData.error?.message || startRes.statusText}`);
           }
-          
+
           const startData = await startRes.json();
           const { video_id, upload_url } = startData;
-          
+
           // 2. Fetch binary video blob từ URL cục bộ
           setPublishingStatus('Đang chuẩn bị file video...');
           const videoBlob = await fetch(exportedVideoUrl).then(r => r.blob());
-          
+
           // 3. Upload file video nhị phân lên Meta Server thông qua Proxy phù hợp để tránh CORS
           setPublishingStatus('Đang truyền tải video lên server Facebook...');
           let proxyUploadUrl = upload_url;
@@ -5310,12 +5517,12 @@ export default function App() {
             },
             body: videoBlob
           });
-          
+
           if (!uploadRes.ok) {
             const errData = await uploadRes.json();
             throw new Error(`Upload video FB lỗi: ${errData.error?.message || uploadRes.statusText}`);
           }
-          
+
           // 4. Hoàn tất & Xuất bản bài viết (gọi qua proxy /fb-api)
           setPublishingStatus('Đang xuất bản Reels lên Fanpage...');
           const finishRes = await fetch(`/fb-api/v21.0/${accountPageId}/video_reels`, {
@@ -5329,7 +5536,7 @@ export default function App() {
               description: publishCaption
             })
           });
-          
+
           if (!finishRes.ok) {
             const errData = await finishRes.json();
             throw new Error(`Hoàn tất xuất bản FB lỗi: ${errData.error?.message || finishRes.statusText}`);
@@ -5469,10 +5676,10 @@ export default function App() {
       }
       const data = await res.json();
       console.log('FB Reel Status Check:', data);
-      
+
       const videoStatus = data.status?.video_status;
       const progress = data.status?.processing_progress;
-      
+
       let statusTextVi = 'Chưa xác định';
       if (videoStatus === 'ready') statusTextVi = 'Sẵn sàng (Đã đăng thành công!)';
       else if (videoStatus === 'processing') statusTextVi = `Đang xử lý ngầm (Đang encode... ${progress !== undefined ? progress + '%' : ''})`;
@@ -5498,25 +5705,25 @@ export default function App() {
     const accounts = getPlatformAccounts(platform);
     const checkedAccounts = getCheckedSocialAccounts(platform);
     return (
-      <div style={{ 
-        background: '#0b0f19', 
-        border: connected ? `1.5px solid ${color}` : '1px solid var(--border-light)', 
-        borderRadius: '8px', 
-        padding: '0.65rem', 
+      <div style={{
+        background: '#0b0f19',
+        border: connected ? `1.5px solid ${color}` : '1px solid var(--border-light)',
+        borderRadius: '8px',
+        padding: '0.65rem',
         boxShadow: connected ? `0 0 10px ${color}26` : 'none',
         transition: 'all 0.3s ease',
         minWidth: 0
       }}>
         <div style={{ display: 'grid', gridTemplateColumns: '30px 1fr', alignItems: 'center', gap: '0.5rem', marginBottom: '0.45rem', minWidth: 0 }}>
-          <div style={{ 
-            width: '30px', 
-            height: '30px', 
-            borderRadius: '50%', 
-            background: platform === 'tiktok' ? '#010101' : color, 
+          <div style={{
+            width: '30px',
+            height: '30px',
+            borderRadius: '50%',
+            background: platform === 'tiktok' ? '#010101' : color,
             border: platform === 'tiktok' ? `1.5px solid ${color}` : 'none',
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             color: '#ffffff',
             fontWeight: 'bold',
             fontSize: '0.95rem'
@@ -5578,8 +5785,8 @@ export default function App() {
           </div>
         )}
 
-        <button 
-          className="btn btn-primary btn-sm" 
+        <button
+          className="btn btn-primary btn-sm"
           onClick={() => openAddSocialAccount(platform)}
           style={{ width: '100%', padding: '0.26rem', fontSize: '0.66rem' }}
         >
@@ -5602,16 +5809,16 @@ export default function App() {
           <button className="btn btn-secondary btn-sm" onClick={handleSaveProject}>
             <Save size={14} /> Lưu dự án
           </button>
-          
+
           <div className="file-upload-wrapper" style={{ width: 'auto' }}>
             <button className="btn btn-secondary btn-sm">
               <FolderOpen size={14} /> Mở dự án
             </button>
-            <input 
-              type="file" 
-              accept=".json" 
-              className="file-upload-input" 
-              onChange={handleLoadProject} 
+            <input
+              type="file"
+              accept=".json"
+              className="file-upload-input"
+              onChange={handleLoadProject}
             />
           </div>
 
@@ -5623,7 +5830,7 @@ export default function App() {
 
       {/* Main 3-Column Grid */}
       <div className="workspace-grid">
-        
+
         {/* Left Column: Canvas Preview Player */}
         <section className="preview-panel">
           <div className="canvas-container">
@@ -5632,13 +5839,13 @@ export default function App() {
 
           <div className="player-controls">
             <div className="slider-container" style={{ padding: '0 0.2rem' }}>
-              <input 
-                type="range" 
-                min={0} 
-                max={duration} 
-                step={0.05} 
-                value={currentTime} 
-                onChange={handleTimelineScrub} 
+              <input
+                type="range"
+                min={0}
+                max={duration}
+                step={0.05}
+                value={currentTime}
+                onChange={handleTimelineScrub}
                 className="timeline-slider"
               />
             </div>
@@ -5655,14 +5862,14 @@ export default function App() {
 
               <div className="volume-container" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
                 <Volume2 size={14} style={{ color: 'var(--text-secondary)' }} />
-                <input 
-                  type="range" 
-                  min={0} 
-                  max={1} 
-                  step={0.05} 
-                  value={volume} 
-                  onChange={(e) => setVolume(parseFloat(e.target.value))} 
-                  className="volume-slider" 
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={volume}
+                  onChange={(e) => setVolume(parseFloat(e.target.value))}
+                  className="volume-slider"
                   style={{ width: '60px', cursor: 'pointer' }}
                 />
               </div>
@@ -5678,10 +5885,10 @@ export default function App() {
           {exportedVideoUrl && (
             <div className="glass-card" style={{ width: '100%', maxWidth: '290px', display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'center' }}>
               <span style={{ fontSize: '0.8rem', color: 'var(--accent-green)', fontWeight: 'bold' }}>✓ Dựng Video Thành Công!</span>
-              <a 
-                href={exportedVideoUrl} 
-                download={`${customFilename || 'video_so_sanh'}.${exportedExt}`} 
-                className="btn btn-primary btn-sm" 
+              <a
+                href={exportedVideoUrl}
+                download={`${customFilename || 'video_so_sanh'}.${exportedExt}`}
+                className="btn btn-primary btn-sm"
                 style={{ width: '100%' }}
               >
                 <Download size={14} /> Tải Video Về Máy
@@ -5693,32 +5900,32 @@ export default function App() {
         {/* Middle Column: Multi-tab Settings (Comparisons, Timelines, TTS) */}
         <section className="editor-panel">
           <nav className="tabs-header">
-            <button 
-              className={`tab-btn ${activeTab === 'content' ? 'active' : ''}`} 
+            <button
+              className={`tab-btn ${activeTab === 'content' ? 'active' : ''}`}
               onClick={() => setActiveTab('content')}
             >
               Nội dung so sánh
             </button>
-            <button 
-              className={`tab-btn ${activeTab === 'timeline' ? 'active' : ''}`} 
+            <button
+              className={`tab-btn ${activeTab === 'timeline' ? 'active' : ''}`}
               onClick={() => setActiveTab('timeline')}
             >
               Pose & nhịp sub
             </button>
-            <button 
-              className={`tab-btn ${activeTab === 'tts' ? 'active' : ''}`} 
+            <button
+              className={`tab-btn ${activeTab === 'tts' ? 'active' : ''}`}
               onClick={() => setActiveTab('tts')}
             >
               Tạo Voice AI
             </button>
-            <button 
-              className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`} 
+            <button
+              className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
               onClick={() => setActiveTab('settings')}
             >
               Cài đặt & Giao diện
             </button>
-            <button 
-              className={`tab-btn ${activeTab === 'publish' ? 'active' : ''}`} 
+            <button
+              className={`tab-btn ${activeTab === 'publish' ? 'active' : ''}`}
               onClick={() => setActiveTab('publish')}
               style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
             >
@@ -5903,9 +6110,9 @@ export default function App() {
                   <h2 className="card-title" style={{ margin: 0 }}>Cấu hình nhịp phụ đề</h2>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     {audioUrl && (
-                      <button 
-                        className="btn btn-secondary btn-sm" 
-                        onClick={handleAutoSyncSilence} 
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={handleAutoSyncSilence}
                         disabled={isProcessingAudio}
                         style={{ border: '1px solid var(--accent-indigo)', color: 'var(--accent-indigo)' }}
                       >
@@ -5918,7 +6125,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '75px 75px 1fr 115px 105px 105px 35px', gap: '0.5rem', padding: '0.25rem 0.5rem', borderBottom: '1px solid var(--border-light)', fontSize: '0.7rem', fontWeight: 'bold', color: 'var(--text-secondary)' }}>
+                <div className="timeline-header-row" style={{ display: 'grid', gridTemplateColumns: '75px 75px 1fr 115px 105px 105px 35px', gap: '0.5rem', padding: '0.25rem 0.5rem', borderBottom: '1px solid var(--border-light)', fontSize: '0.7rem', fontWeight: 'bold', color: 'var(--text-secondary)' }}>
                   <div>BẮT ĐẦU</div>
                   <div>KẾT THÚC</div>
                   <div>TEXT PHỤ ĐỀ</div>
@@ -5934,35 +6141,35 @@ export default function App() {
                     return (
                       <div key={block.id} className={`timeline-item ${isActive ? 'active' : ''}`}>
                         <div>
-                          <input 
-                            type="number" 
-                            step="0.1" 
-                            value={block.start} 
-                            onChange={(e) => handleUpdateTimelineBlock(block.id, 'start', e.target.value)} 
-                            className="timeline-time-input" 
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={block.start}
+                            onChange={(e) => handleUpdateTimelineBlock(block.id, 'start', e.target.value)}
+                            className="timeline-time-input"
                           />
                         </div>
                         <div>
-                          <input 
-                            type="number" 
-                            step="0.1" 
-                            value={block.end} 
-                            onChange={(e) => handleUpdateTimelineBlock(block.id, 'end', e.target.value)} 
-                            className="timeline-time-input" 
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={block.end}
+                            onChange={(e) => handleUpdateTimelineBlock(block.id, 'end', e.target.value)}
+                            className="timeline-time-input"
                           />
                         </div>
                         <div>
-                          <input 
-                            type="text" 
-                            value={block.text} 
-                            onChange={(e) => handleUpdateTimelineBlock(block.id, 'text', e.target.value)} 
-                            className="timeline-text-input" 
+                          <input
+                            type="text"
+                            value={block.text}
+                            onChange={(e) => handleUpdateTimelineBlock(block.id, 'text', e.target.value)}
+                            className="timeline-text-input"
                           />
                         </div>
                         <div>
-                          <select 
-                            value={block.pose} 
-                            onChange={(e) => handleUpdateTimelineBlock(block.id, 'pose', e.target.value)} 
+                          <select
+                            value={block.pose}
+                            onChange={(e) => handleUpdateTimelineBlock(block.id, 'pose', e.target.value)}
                             className="timeline-select"
                           >
                             <option value="default">Đứng im</option>
@@ -5972,9 +6179,9 @@ export default function App() {
                           </select>
                         </div>
                         <div>
-                          <select 
-                            value={block.highlight} 
-                            onChange={(e) => handleUpdateTimelineBlock(block.id, 'highlight', e.target.value)} 
+                          <select
+                            value={block.highlight}
+                            onChange={(e) => handleUpdateTimelineBlock(block.id, 'highlight', e.target.value)}
                             className="timeline-select"
                           >
                             <option value="none">Không sáng</option>
@@ -5994,6 +6201,7 @@ export default function App() {
                             <option value="point_left">Chỉ trái</option>
                             <option value="point_right">Chỉ phải</option>
                             <option value="shrug">Nhún vai</option>
+                            <option value="default">Đứng im</option>
                           </select>
                         </div>
                         <div style={{ textAlign: 'center' }}>
@@ -6013,34 +6221,41 @@ export default function App() {
           {activeTab === 'tts' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {/* Sub-tab selection */}
-              <div style={{ display: 'flex', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.05)', padding: '0.25rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
-                <button 
+              <div className="tts-provider-tabs" style={{ display: 'flex', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.05)', padding: '0.25rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                <button
                   className={`tab-btn ${ttsProvider === 'elevenlabs' ? 'active' : ''}`}
                   onClick={() => handleSelectTtsProvider('elevenlabs')}
                   style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'elevenlabs' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
                 >
                   ElevenLabs
                 </button>
-                <button 
+                <button
                   className={`tab-btn ${ttsProvider === 'vclip' ? 'active' : ''}`}
                   onClick={() => handleSelectTtsProvider('vclip')}
                   style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'vclip' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
                 >
                   VClip TTS
                 </button>
-                <button 
+                <button
                   className={`tab-btn ${ttsProvider === 'lucylab' ? 'active' : ''}`}
                   onClick={() => handleSelectTtsProvider('lucylab')}
                   style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'lucylab' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
                 >
                   LucyLab TTS
                 </button>
-                <button 
+                <button
                   className={`tab-btn ${ttsProvider === 'ausynclab' ? 'active' : ''}`}
                   onClick={() => handleSelectTtsProvider('ausynclab')}
                   style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'ausynclab' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
                 >
                   AusyncLab TTS
+                </button>
+                <button
+                  className={`tab-btn ${ttsProvider === 'localclone' ? 'active' : ''}`}
+                  onClick={() => handleSelectTtsProvider('localclone')}
+                  style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'localclone' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
+                >
+                  Local Clone
                 </button>
               </div>
 
@@ -6048,8 +6263,8 @@ export default function App() {
                 <h3 style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--accent-indigo)', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                   <Sliders size={14} /> Khớp voice, sub và hành động
                 </h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '0.75rem', alignItems: 'stretch' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.55rem 0.7rem', borderRadius: '6px', background: 'rgba(55, 230, 196, 0.1)', border: '1px solid rgba(55, 230, 196, 0.28)' }}>
+                <div className="voice-sync-card-body" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '0.75rem', alignItems: 'stretch' }}>
+                  <div className="voice-sync-summary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.55rem 0.7rem', borderRadius: '6px', background: 'rgba(55, 230, 196, 0.1)', border: '1px solid rgba(55, 230, 196, 0.28)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
                       <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'var(--accent-cyan)', boxShadow: '0 0 10px rgba(55, 230, 196, 0.7)', flex: '0 0 auto' }} />
                       <strong style={{ color: 'var(--text-primary)', fontSize: '0.78rem', whiteSpace: 'nowrap' }}>Chuẩn từng câu</strong>
@@ -6059,7 +6274,7 @@ export default function App() {
                     </div>
                     <span style={{ color: 'var(--accent-cyan)', fontSize: '0.65rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Đang áp dụng</span>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.45rem 0.65rem', alignItems: 'center', padding: '0.45rem 0.65rem', borderRadius: '6px', background: 'rgba(9, 7, 19, 0.62)', border: '1px solid rgba(139, 125, 199, 0.18)' }}>
+                  <div className="voice-sync-toggle" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.45rem 0.65rem', alignItems: 'center', padding: '0.45rem 0.65rem', borderRadius: '6px', background: 'rgba(9, 7, 19, 0.62)', border: '1px solid rgba(139, 125, 199, 0.18)' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--text-primary)', fontWeight: 'bold', margin: 0 }}>
                       <input
                         type="checkbox"
@@ -6080,8 +6295,51 @@ export default function App() {
                     />
                   </div>
                 </div>
+                <div className="action-sfx-preset-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.55rem', marginTop: '0.65rem' }}>
+                  {ACTION_SFX_TARGETS.map(target => (
+                    <div
+                      key={target.type}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '72px minmax(0, 1fr) 34px',
+                        gap: '0.45rem',
+                        alignItems: 'center',
+                        padding: '0.45rem',
+                        borderRadius: '6px',
+                        background: 'rgba(15, 12, 29, 0.74)',
+                        border: '1px solid rgba(139, 125, 199, 0.18)'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', fontWeight: 800, textTransform: 'uppercase' }}>{target.label}</span>
+                      <select
+                        value={actionSfxPresets[target.type] || DEFAULT_ACTION_SFX_PRESETS[target.type]}
+                        onChange={(e) => updateActionSfxPreset(target.type, e.target.value)}
+                        disabled={!actionSfxEnabled}
+                        style={{ minWidth: 0, height: '30px', fontSize: '0.72rem' }}
+                      >
+                        {ACTION_SFX_PRESETS.map(preset => (
+                          <option key={preset.id} value={preset.id}>{preset.label}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={!actionSfxEnabled}
+                        title={`Nghe thử ${target.label}`}
+                        onClick={() => playActionSfxPreview({
+                          type: target.type,
+                          preset: actionSfxPresets[target.type] || DEFAULT_ACTION_SFX_PRESETS[target.type],
+                          volume: Math.max(0.12, actionSfxVolume)
+                        })}
+                        style={{ width: '30px', height: '30px', padding: 0, display: 'grid', placeItems: 'center' }}
+                      >
+                        <Play size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.55rem', marginBottom: 0 }}>
-                  Hệ thống luôn dùng voice từng câu để lấy duration thật cho sub; các pose Chỉ Trái, Chỉ Phải, Nhún vai sẽ tự chèn tiếng động nhẹ vào file audio render.
+                  Hệ thống luôn dùng voice từng câu để lấy duration thật cho sub; các pose Chỉ Trái, Chỉ Phải, Nhún vai sẽ tự chèn tiếng động nhẹ vào file audio render. Đứng im chỉ phát SFX khi từng dòng timeline chọn rõ “Đứng im”.
                 </p>
               </div>
 
@@ -6089,15 +6347,15 @@ export default function App() {
               {ttsProvider === 'elevenlabs' && (
                 <div className="glass-card" style={{ marginTop: 0 }}>
                   <h2 className="card-title">Trình tạo giọng nói ElevenLabs</h2>
-                  
+
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     <div className="form-group">
                       <label>ElevenLabs API Key</label>
                       <div className="tts-input-row">
-                        <ApiKeyInput 
-                          value={elevenLabsApiKey} 
+                        <ApiKeyInput
+                          value={elevenLabsApiKey}
                           onChange={(e) => handleSaveApiKey(e.target.value)}
-                          placeholder="Nhập xi-api-key từ Website Reset hoặc elevenlabs.io" 
+                          placeholder="Nhập xi-api-key từ Website Reset hoặc elevenlabs.io"
                         />
                         <button className="btn btn-secondary btn-sm" onClick={() => fetchVoices(elevenLabsApiKey)}>
                           Tải giọng đọc
@@ -6107,8 +6365,8 @@ export default function App() {
 
                     <div className="form-group">
                       <label>Chọn Giọng Đọc (Voice)</label>
-                      <select 
-                        value={selectedVoiceId} 
+                      <select
+                        value={selectedVoiceId}
                         onChange={(e) => handleSaveElevenLabsVoiceId(e.target.value)}
                         disabled={voices.length === 0}
                       >
@@ -6124,8 +6382,8 @@ export default function App() {
 
                     <div className="form-group">
                       <label>Chọn Mô hình (Model)</label>
-                      <select 
-                        value={selectedModelId} 
+                      <select
+                        value={selectedModelId}
                         onChange={(e) => setSelectedModelId(e.target.value)}
                       >
                         <option value="eleven_v3">Eleven v3 (Mới nhất - Biểu cảm cao & Cực kỳ chuẩn tiếng Việt)</option>
@@ -6137,49 +6395,49 @@ export default function App() {
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', padding: '0.75rem', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
                       <div className="form-group" style={{ margin: 0 }}>
                         <label style={{ fontSize: '0.75rem' }}>Độ ổn định (Stability: {stability * 100}%)</label>
-                        <input 
-                          type="range" 
-                          min="0" 
-                          max="1" 
-                          step="0.05" 
-                          value={stability} 
-                          onChange={(e) => setStability(parseFloat(e.target.value))} 
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={stability}
+                          onChange={(e) => setStability(parseFloat(e.target.value))}
                         />
                         <span style={{ fontSize: '0.65rem', color: '#888' }}>Thấp = diễn cảm hơn | Cao = đều giọng</span>
                       </div>
 
                       <div className="form-group" style={{ margin: 0 }}>
                         <label style={{ fontSize: '0.75rem' }}>Độ giống giọng gốc ({similarityBoost * 100}%)</label>
-                        <input 
-                          type="range" 
-                          min="0" 
-                          max="1" 
-                          step="0.05" 
-                          value={similarityBoost} 
-                          onChange={(e) => setSimilarityBoost(parseFloat(e.target.value))} 
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={similarityBoost}
+                          onChange={(e) => setSimilarityBoost(parseFloat(e.target.value))}
                         />
                         <span style={{ fontSize: '0.65rem', color: '#888' }}>Cao = cực kỳ giống | Thấp = tự nhiên hơn</span>
                       </div>
 
                       <div className="form-group" style={{ margin: 0, marginTop: '0.5rem' }}>
                         <label style={{ fontSize: '0.75rem' }}>Độ cường điệu (Style: {styleExaggeration * 100}%)</label>
-                        <input 
-                          type="range" 
-                          min="0" 
-                          max="1" 
-                          step="0.05" 
-                          value={styleExaggeration} 
-                          onChange={(e) => setStyleExaggeration(parseFloat(e.target.value))} 
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={styleExaggeration}
+                          onChange={(e) => setStyleExaggeration(parseFloat(e.target.value))}
                         />
                         <span style={{ fontSize: '0.65rem', color: '#888' }}>Độ cường điệu hóa phong cách nói</span>
                       </div>
 
                       <div className="form-group" style={{ margin: 0, marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', height: '100%' }}>
-                        <input 
-                          type="checkbox" 
+                        <input
+                          type="checkbox"
                           id="speaker_boost_chk"
-                          checked={useSpeakerBoost} 
-                          onChange={(e) => setUseSpeakerBoost(e.target.checked)} 
+                          checked={useSpeakerBoost}
+                          onChange={(e) => setUseSpeakerBoost(e.target.checked)}
                           style={{ width: '16px', height: '16px', cursor: 'pointer', margin: 0 }}
                         />
                         <label htmlFor="speaker_boost_chk" style={{ fontSize: '0.75rem', cursor: 'pointer', userSelect: 'none', margin: 0 }}>Tăng cường giọng đọc (Speaker Boost)</label>
@@ -6188,7 +6446,7 @@ export default function App() {
 
                     <div className="form-group">
                       <label>Xem trước Kịch bản gửi đi</label>
-                      <textarea 
+                      <textarea
                         value={timelineBlocks.map(b => b.text).join('\n\n')}
                         readOnly
                         rows={8}
@@ -6197,9 +6455,9 @@ export default function App() {
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      <button 
-                        className="btn btn-primary" 
-                        onClick={handleGenerateVoice} 
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleGenerateVoice}
                         disabled={isGeneratingVoice || isProcessingAudio || !elevenLabsApiKey || voices.length === 0}
                         style={{ width: '100%', padding: '0.75rem' }}
                       >
@@ -6219,8 +6477,8 @@ export default function App() {
                       </button>
 
                       {audioUrl && (
-                        <button 
-                          className="btn btn-secondary" 
+                        <button
+                          className="btn btn-secondary"
                           onClick={handleAutoSyncSilence}
                           disabled={isGeneratingVoice || isProcessingAudio}
                           style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--accent-indigo)', color: 'var(--accent-indigo)' }}
@@ -6246,9 +6504,9 @@ export default function App() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0.75rem', background: 'rgba(99, 102, 241, 0.05)', borderRadius: '8px', border: '1px dashed rgba(99, 102, 241, 0.2)' }}>
                         <div className="form-group" style={{ margin: 0 }}>
                           <label style={{ fontSize: '0.75rem', color: '#ccc' }}>Tên giọng nói Clone</label>
-                          <input 
-                            type="text" 
-                            value={cloneVoiceName} 
+                          <input
+                            type="text"
+                            value={cloneVoiceName}
                             onChange={(e) => setCloneVoiceName(e.target.value)}
                             placeholder="Ví dụ: Giọng MC Nam Việt Nam"
                             style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem' }}
@@ -6258,8 +6516,8 @@ export default function App() {
                         <div className="form-group" style={{ margin: 0 }}>
                           <label style={{ fontSize: '0.75rem', color: '#ccc' }}>Tải lên File Âm thanh Mẫu</label>
                           <div className="file-upload-wrapper">
-                            <FileUploadDropzone 
-                              accept="audio/mp3,audio/wav,audio/mpeg,audio/x-wav" 
+                            <FileUploadDropzone
+                              accept="audio/mp3,audio/wav,audio/mpeg,audio/x-wav"
                               onChange={(e) => setCloneSampleFile(e.target.files[0])}
                             >
                               <div className="file-upload-btn" style={{ padding: '0.4rem', fontSize: '0.8rem' }}>
@@ -6270,7 +6528,7 @@ export default function App() {
                           {cloneSampleFile && (
                             <div style={{ fontSize: '0.7rem', color: 'var(--accent-green)', marginTop: '0.2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <span>✓ {cloneSampleFile.name} ({(cloneSampleFile.size / 1024 / 1024).toFixed(2)} MB)</span>
-                              <button 
+                              <button
                                 style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', textDecoration: 'underline', fontSize: '0.7rem' }}
                                 onClick={() => setCloneSampleFile(null)}
                               >
@@ -6280,8 +6538,8 @@ export default function App() {
                           )}
                         </div>
 
-                        <button 
-                          className="btn btn-secondary" 
+                        <button
+                          className="btn btn-secondary"
                           onClick={handleCloneVoice}
                           disabled={isCloningVoice || !elevenLabsApiKey || !cloneVoiceName || !cloneSampleFile}
                           style={{ padding: '0.6rem', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.25rem', background: 'var(--accent-indigo)', color: 'white', border: 'none' }}
@@ -6306,13 +6564,13 @@ export default function App() {
               {ttsProvider === 'vclip' && (
                 <div className="glass-card" style={{ marginTop: 0 }}>
                   <h2 className="card-title">Trình tạo giọng nói VClip TTS</h2>
-                  
+
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     <div className="form-group">
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
                         <label style={{ margin: 0 }}>VClip API Key</label>
-                        <button 
-                          type="button" 
+                        <button
+                          type="button"
                           className="btn btn-secondary btn-sm"
                           onClick={() => setShowVclipKeyModal(true)}
                           style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', padding: '0.25rem 0.55rem', background: 'rgba(99, 102, 241, 0.15)', border: '1px solid var(--accent-indigo)', color: '#818cf8', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
@@ -6320,10 +6578,10 @@ export default function App() {
                           <Key size={13} /> Danh sách Key ({activeUsableKeyCount}/{vclipKeyItems.length})
                         </button>
                       </div>
-                      <ApiKeyInput 
-                        value={vclipApiKey} 
+                      <ApiKeyInput
+                        value={vclipApiKey}
                         onChange={(e) => handleSaveVclipApiKey(e.target.value)}
-                        placeholder="Nhập API Key VClip (sk_live_...)" 
+                        placeholder="Nhập API Key VClip (sk_live_...)"
                       />
                       {vclipKeyItems.length > 0 && (
                         <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginTop: '0.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -6337,31 +6595,31 @@ export default function App() {
 
                     <div className="form-group">
                       <label>ID Giọng nói VClip (userVoiceId)</label>
-                      <input 
-                        type="text" 
-                        value={vclipVoiceId} 
+                      <input
+                        type="text"
+                        value={vclipVoiceId}
                         onChange={(e) => handleSaveVclipVoiceId(e.target.value)}
-                        placeholder="Nhập ID giọng đọc tự tạo lấy từ vclip.io" 
+                        placeholder="Nhập ID giọng đọc tự tạo lấy từ vclip.io"
                         style={{ padding: '0.5rem', fontSize: '0.8rem' }}
                       />
                     </div>
 
                     <div className="form-group">
                       <label>Tốc độ đọc VClip ({vclipSpeed}x)</label>
-                      <input 
-                        type="range" 
-                        min="0.5" 
-                        max="2.0" 
-                        step="0.1" 
-                        value={vclipSpeed} 
-                        onChange={(e) => setVclipSpeed(parseFloat(e.target.value))} 
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="2.0"
+                        step="0.1"
+                        value={vclipSpeed}
+                        onChange={(e) => setVclipSpeed(parseFloat(e.target.value))}
                       />
                       <span style={{ fontSize: '0.65rem', color: '#888' }}>Mặc định là 1.0 (Phạm vi từ 0.5 - 2.0)</span>
                     </div>
 
                     <div className="form-group">
                       <label>Xem trước Kịch bản thoại gửi đi</label>
-                      <textarea 
+                      <textarea
                         value={timelineBlocks.map(b => b.text).join('\n\n')}
                         readOnly
                         rows={8}
@@ -6370,9 +6628,9 @@ export default function App() {
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      <button 
-                        className="btn btn-primary" 
-                        onClick={handleGenerateVoiceVClip} 
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleGenerateVoiceVClip}
                         disabled={isGeneratingVoice || isProcessingAudio || !vclipApiKey || !vclipVoiceId}
                         style={{ width: '100%', padding: '0.75rem' }}
                       >
@@ -6392,8 +6650,8 @@ export default function App() {
                       </button>
 
                       {audioUrl && (
-                        <button 
-                          className="btn btn-secondary" 
+                        <button
+                          className="btn btn-secondary"
                           onClick={handleAutoSyncSilence}
                           disabled={isGeneratingVoice || isProcessingAudio}
                           style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--accent-indigo)', color: 'var(--accent-indigo)' }}
@@ -6414,15 +6672,15 @@ export default function App() {
               {ttsProvider === 'lucylab' && (
                 <div className="glass-card" style={{ marginTop: 0 }}>
                   <h2 className="card-title">Trình tạo giọng nói LucyLab (LucyAI / ViVibe)</h2>
-                  
+
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     <div className="form-group">
                       <label>LucyLab API Key</label>
                       <div className="tts-input-row">
-                        <ApiKeyInput 
-                          value={lucyLabApiKey} 
+                        <ApiKeyInput
+                          value={lucyLabApiKey}
                           onChange={(e) => handleSaveLucyLabApiKey(e.target.value)}
-                          placeholder="Nhập API Key LucyLab (sk_live_...)" 
+                          placeholder="Nhập API Key LucyLab (sk_live_...)"
                         />
                         <button className="btn btn-secondary btn-sm" onClick={() => fetchLucyLabVoices(lucyLabApiKey)} disabled={isLoadingLucyLabVoices}>
                           {isLoadingLucyLabVoices ? 'Đang tải...' : 'Tải giọng đọc'}
@@ -6433,8 +6691,8 @@ export default function App() {
                     {lucyLabVoices.length > 0 && (
                       <div className="form-group">
                         <label>Chọn Giọng đọc trong Tài khoản</label>
-                        <select 
-                          value={lucyLabVoiceId} 
+                        <select
+                          value={lucyLabVoiceId}
                           onChange={(e) => handleSaveLucyLabVoiceId(e.target.value)}
                           style={{ padding: '0.5rem', fontSize: '0.8rem' }}
                         >
@@ -6447,11 +6705,11 @@ export default function App() {
 
                     <div className="form-group">
                       <label>ID Giọng nói LucyLab (userVoiceId)</label>
-                      <input 
-                        type="text" 
-                        value={lucyLabVoiceId} 
+                      <input
+                        type="text"
+                        value={lucyLabVoiceId}
                         onChange={(e) => handleSaveLucyLabVoiceId(e.target.value)}
-                        placeholder="Nhập ID giọng đọc từ vivibe.app / lucylab.io" 
+                        placeholder="Nhập ID giọng đọc từ vivibe.app / lucylab.io"
                         style={{ padding: '0.5rem', fontSize: '0.8rem' }}
                       />
                     </div>
@@ -6461,17 +6719,17 @@ export default function App() {
                         <span>Tốc độ đọc LucyLab</span>
                         <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{lucyLabSpeed}x</span>
                       </label>
-                      <input 
-                        type="range" 
-                        min="0.5" 
-                        max="1.5" 
-                        step="0.05" 
-                        value={lucyLabSpeed} 
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="1.5"
+                        step="0.05"
+                        value={lucyLabSpeed}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value);
                           setLucyLabSpeed(val);
                           localStorage.setItem('lucyLabSpeed', val.toString());
-                        }} 
+                        }}
                         style={{ cursor: 'pointer', height: '6px' }}
                       />
                       <div style={{ display: 'flex', gap: '0.3rem', marginTop: '0.4rem' }}>
@@ -6481,7 +6739,7 @@ export default function App() {
                           { label: '🎙️ 0.9x (Vừa)', val: 0.9 },
                           { label: '⚡ 1.0x (Gốc)', val: 1.0 }
                         ].map(p => (
-                          <button 
+                          <button
                             key={p.val}
                             type="button"
                             onClick={() => {
@@ -6507,7 +6765,7 @@ export default function App() {
 
                     <div className="form-group">
                       <label>Xem trước Kịch bản thoại gửi đi</label>
-                      <textarea 
+                      <textarea
                         value={timelineBlocks.map(b => b.text).join('\n\n')}
                         readOnly
                         rows={8}
@@ -6516,9 +6774,9 @@ export default function App() {
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      <button 
-                        className="btn btn-primary" 
-                        onClick={handleGenerateVoiceLucyLab} 
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleGenerateVoiceLucyLab}
                         disabled={isGeneratingVoice || isProcessingAudio || !lucyLabApiKey || !lucyLabVoiceId}
                         style={{ width: '100%', padding: '0.75rem' }}
                       >
@@ -6538,8 +6796,8 @@ export default function App() {
                       </button>
 
                       {audioUrl && (
-                        <button 
-                          className="btn btn-secondary" 
+                        <button
+                          className="btn btn-secondary"
                           onClick={handleAutoSyncSilence}
                           disabled={isGeneratingVoice || isProcessingAudio}
                           style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--accent-indigo)', color: 'var(--accent-indigo)' }}
@@ -6560,24 +6818,24 @@ export default function App() {
               {ttsProvider === 'ausynclab' && (
                 <div className="glass-card" style={{ marginTop: 0 }}>
                   <h2 className="card-title">Trình tạo giọng nói AusyncLab TTS</h2>
-                  
+
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     <div className="form-group">
                       <label>AusyncLab API Key</label>
-                      <ApiKeyInput 
-                        value={ausyncLabApiKey} 
+                      <ApiKeyInput
+                        value={ausyncLabApiKey}
                         onChange={(e) => handleSaveAusyncLabApiKey(e.target.value)}
-                        placeholder="Nhập API Key AusyncLab" 
+                        placeholder="Nhập API Key AusyncLab"
                       />
                     </div>
 
                     <div className="form-group">
                       <label>Voice ID AusyncLab</label>
-                      <input 
-                        type="text" 
-                        value={ausyncLabVoiceId} 
+                      <input
+                        type="text"
+                        value={ausyncLabVoiceId}
                         onChange={(e) => handleSaveAusyncLabVoiceId(e.target.value)}
-                        placeholder="Nhập Voice ID lấy từ ausynclab.io" 
+                        placeholder="Nhập Voice ID lấy từ ausynclab.io"
                         style={{ padding: '0.5rem', fontSize: '0.8rem' }}
                       />
                     </div>
@@ -6601,25 +6859,25 @@ export default function App() {
                         <span>Tốc độ đọc AusyncLab</span>
                         <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{ausyncLabSpeed}x</span>
                       </label>
-                      <input 
-                        type="range" 
-                        min="0.75" 
-                        max="1.25" 
-                        step="0.05" 
-                        value={ausyncLabSpeed} 
+                      <input
+                        type="range"
+                        min="0.75"
+                        max="1.25"
+                        step="0.05"
+                        value={ausyncLabSpeed}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value);
                           setAusyncLabSpeed(val);
                           localStorage.setItem('ausynclab_speed', val.toString());
                           scheduleTelegramCredentialSync({ ausyncLabSpeed: val });
-                        }} 
+                        }}
                       />
                       <span style={{ fontSize: '0.65rem', color: '#888' }}>Phạm vi theo AusyncLab: 0.75 - 1.25</span>
                     </div>
 
                     <div className="form-group">
                       <label>Xem trước Kịch bản thoại gửi đi</label>
-                      <textarea 
+                      <textarea
                         value={timelineBlocks.map(b => b.text).join('\n\n')}
                         readOnly
                         rows={8}
@@ -6628,9 +6886,9 @@ export default function App() {
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      <button 
-                        className="btn btn-primary" 
-                        onClick={handleGenerateVoiceAusyncLab} 
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleGenerateVoiceAusyncLab}
                         disabled={isGeneratingVoice || isProcessingAudio || !ausyncLabApiKey || !ausyncLabVoiceId}
                         style={{ width: '100%', padding: '0.75rem' }}
                       >
@@ -6650,8 +6908,8 @@ export default function App() {
                       </button>
 
                       {audioUrl && (
-                        <button 
-                          className="btn btn-secondary" 
+                        <button
+                          className="btn btn-secondary"
                           onClick={handleAutoSyncSilence}
                           disabled={isGeneratingVoice || isProcessingAudio}
                           style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--accent-indigo)', color: 'var(--accent-indigo)' }}
@@ -6664,105 +6922,97 @@ export default function App() {
                 </div>
               )}
 
-              {/* Cấu hình đồng bộ nhịp phụ đề (Silence Sync) */}
-              {audioUrl && (
+              {/* 5. Local Clone UI */}
+              {ttsProvider === 'localclone' && (
                 <div className="glass-card" style={{ marginTop: 0 }}>
-                  <h3 style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--accent-indigo)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                    <Sliders size={14} /> Cấu hình đồng bộ nhịp phụ đề (Silence Sync)
-                  </h3>
-                  <p style={{ fontSize: '0.7rem', color: '#a0aec0', marginBottom: '0.75rem', lineHeight: '1.4' }}>
-                    Nếu phụ đề chạy lệch nhịp so với giọng nói (đặc biệt là giọng đọc nhanh), hãy điều chỉnh hai thông số bên dưới rồi bấm nút <strong>Cập nhật lại nhịp</strong> để căn chỉnh lại ngay lập tức mà không cần tạo lại giọng đọc.
-                  </p>
+                  <h2 className="card-title">Trình tạo giọng nói Local Clone</h2>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', padding: '0.75rem', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)', marginBottom: '0.75rem' }}>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: '0.75rem', color: '#ccc', display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                        <span>Ngưỡng khoảng lặng (Threshold)</span>
-                        <span style={{ color: 'var(--accent-indigo)', fontWeight: 'bold' }}>{silenceThreshold}</span>
-                      </label>
-                      <input 
-                        type="range" 
-                        min="0.001" 
-                        max="0.05" 
-                        step="0.001" 
-                        value={silenceThreshold} 
-                        onChange={(e) => setSilenceThreshold(parseFloat(e.target.value))} 
-                        style={{ height: '6px', cursor: 'pointer' }}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <div className="form-group">
+                      <label>Local Voice Server URL</label>
+                      <input
+                        type="text"
+                        value={localCloneServerUrl}
+                        onChange={(e) => handleSaveLocalCloneServerUrl(e.target.value)}
+                        placeholder="Ví dụ: https://voice-server.trycloudflare.com hoặc http://127.0.0.1:7860"
+                        style={{ padding: '0.5rem', fontSize: '0.8rem' }}
                       />
-                      <span style={{ fontSize: '0.6rem', color: '#777', marginTop: '0.2rem', display: 'block' }}>Tăng nếu giọng nói đọc nhanh/nhỏ; giảm nếu bị nhiễu âm.</span>
+                      <span style={{ fontSize: '0.65rem', color: '#888' }}>
+                        Tool sẽ gọi POST /tts nếu URL chưa trỏ sẵn tới endpoint tạo giọng.
+                      </span>
                     </div>
 
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: '0.75rem', color: '#ccc', display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                        <span>Độ dài nghỉ tối thiểu</span>
-                        <span style={{ color: 'var(--accent-indigo)', fontWeight: 'bold' }}>{minSilenceDuration}s</span>
-                      </label>
-                      <input 
-                        type="range" 
-                        min="0.05" 
-                        max="1.0" 
-                        step="0.05" 
-                        value={minSilenceDuration} 
-                        onChange={(e) => setMinSilenceDuration(parseFloat(e.target.value))} 
-                        style={{ height: '6px', cursor: 'pointer' }}
+                    <div className="form-group">
+                      <label>Token Server (nếu có)</label>
+                      <ApiKeyInput
+                        value={localCloneApiKey}
+                        onChange={(e) => handleSaveLocalCloneApiKey(e.target.value)}
+                        placeholder="Bearer token/API key của server local, có thể bỏ trống"
                       />
-                      <span style={{ fontSize: '0.6rem', color: '#777', marginTop: '0.2rem', display: 'block' }}>Giảm (e.g. 0.08s - 0.15s) nếu người đọc nói nhanh, nuốt chữ.</span>
                     </div>
-                  </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginBottom: '0.75rem' }}>
-                    <label style={{ fontSize: '0.75rem', color: '#ccc' }}>Thuật toán căn khớp phụ đề</label>
-                    <div style={{ display: 'flex', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.2rem', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                      <button 
-                        type="button"
-                        onClick={() => { setSilenceSyncMode('simple'); localStorage.setItem('silenceSyncMode', 'simple'); }}
-                        style={{ flex: 1, padding: '0.35rem', fontSize: '0.7rem', borderRadius: '4px', cursor: 'pointer', border: 'none', background: silenceSyncMode === 'simple' ? 'var(--accent-indigo)' : 'none', color: '#fff', fontWeight: 'bold' }}
-                      >
-                        Tuần tự đơn giản (Khuyên dùng VClip/ElevenLabs)
-                      </button>
-                      <button 
-                        type="button"
-                        onClick={() => { setSilenceSyncMode('dp'); localStorage.setItem('silenceSyncMode', 'dp'); }}
-                        style={{ flex: 1, padding: '0.35rem', fontSize: '0.7rem', borderRadius: '4px', cursor: 'pointer', border: 'none', background: silenceSyncMode === 'dp' ? 'var(--accent-indigo)' : 'none', color: '#fff', fontWeight: 'bold' }}
-                      >
-                        Quy hoạch động DP (Khuyên dùng LucyLab)
-                      </button>
+                    <div className="form-group">
+                      <label>Voice ID / Tên giọng clone</label>
+                      <input
+                        type="text"
+                        value={localCloneVoiceId}
+                        onChange={(e) => handleSaveLocalCloneVoiceId(e.target.value)}
+                        placeholder="Ví dụ: giong_nu_chinh hoặc speaker_01"
+                        style={{ padding: '0.5rem', fontSize: '0.8rem' }}
+                      />
                     </div>
-                  </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: '#cbd5e1', background: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.15)', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
-                    <span>
-                      Trạng thái phát hiện: <strong style={{ color: 'var(--accent-green)' }}>{detectedSilencesCount !== null ? `${detectedSilencesCount} khoảng nghỉ` : 'Chưa phân tích'}</strong>
-                    </span>
-                    <button 
-                      className="btn btn-primary btn-sm" 
-                      onClick={() => runSilenceSyncWithUrl(audioUrl, duration)}
-                    >
-                      Khớp nhịp ngay
-                    </button>
-                  </div>
+                    <div className="form-group">
+                      <label>Xem trước Kịch bản thoại gửi đi</label>
+                      <textarea
+                        value={timelineBlocks.map(b => b.text).join('\n\n')}
+                        readOnly
+                        rows={8}
+                        style={{ background: '#0b0f19', color: '#94a3b8', fontStyle: 'italic', fontSize: '0.8rem', resize: 'none' }}
+                      />
+                    </div>
 
-                  <div className="form-group">
-                    <label>Logo kênh (Upload)</label>
-                    <FileUploadDropzone accept="image/*" onChange={handleLogoUpload}>
-                      <div className="file-upload-btn">
-                        <Upload size={14} /> Tải logo
-                      </div>
-                    </FileUploadDropzone>
-                    {logoFileName && <span className="file-upload-preview">✓ {logoFileName}</span>}
-                  </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleGenerateVoiceLocalClone}
+                        disabled={isGeneratingVoice || isProcessingAudio || !localCloneServerUrl}
+                        style={{ width: '100%', padding: '0.75rem' }}
+                      >
+                        {isGeneratingVoice ? (
+                          <>
+                            <span className="spinner" style={{ marginRight: '0.5rem' }}></span> Đang gọi Local Clone server tạo giọng...
+                          </>
+                        ) : isProcessingAudio ? (
+                          <>
+                            <span className="spinner" style={{ marginRight: '0.5rem' }}></span> Đang phân tích khoảng lặng khớp nhịp...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={16} /> Sinh giọng đọc Local Clone & Tự động khớp nhịp
+                          </>
+                        )}
+                      </button>
 
-                  <div className="form-group">
-                    <label>Hoặc Upload Audio sẵn có</label>
-                    <FileUploadDropzone accept="audio/*,video/mp4" onChange={handleAudioUpload}>
-                      <div className="file-upload-btn">
-                        <Upload size={14} /> Audio/MP4 VO
-                      </div>
-                    </FileUploadDropzone>
-                    {audioFileName && <span className="file-upload-preview">✓ {audioFileName}</span>}
+                      {audioUrl && (
+                        <button
+                          className="btn btn-secondary"
+                          onClick={handleAutoSyncSilence}
+                          disabled={isGeneratingVoice || isProcessingAudio}
+                          style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--accent-indigo)', color: 'var(--accent-indigo)' }}
+                        >
+                          {isProcessingAudio ? 'Đang phân tích...' : 'Chạy lại Tự động khớp nhịp (Silence Sync)'}
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ fontSize: '0.7rem', color: '#a0aec0', marginTop: '0.2rem', fontStyle: 'italic', textAlign: 'center', lineHeight: '1.4' }}>
+                      * Telegram đang chạy trên prd thì Server URL phải là HTTPS public tunnel như Cloudflare Tunnel/ngrok. Nếu dùng 127.0.0.1 thì chỉ web tool local gọi được.
+                    </div>
                   </div>
                 </div>
               )}
+
             </div>
           )}
 
@@ -6775,8 +7025,8 @@ export default function App() {
                   <h2 className="card-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-indigo)' }}>
                     <Sparkles size={18} /> Bộ Quản Lý Mẫu Kênh (Channel Presets)
                   </h2>
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     className="btn btn-primary btn-sm"
                     onClick={handleSaveNewChannelProfile}
                     style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
@@ -6793,7 +7043,7 @@ export default function App() {
                   {channelProfiles.map(p => {
                     const isActive = p.id === activeChannelId;
                     return (
-                      <div 
+                      <div
                         key={p.id}
                         onClick={() => handleApplyChannelProfile(p)}
                         style={{
@@ -6821,8 +7071,8 @@ export default function App() {
 
                 {/* Channel Actions Footer */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.5rem', borderTop: '1px dashed rgba(255,255,255,0.1)', fontSize: '0.75rem' }}>
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     className="btn btn-secondary btn-sm"
                     onClick={handleUpdateCurrentChannelProfile}
                     style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
@@ -6831,8 +7081,8 @@ export default function App() {
                   </button>
 
                   {channelProfiles.length > 1 && (
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       onClick={() => handleDeleteChannelProfile(activeChannelId)}
                       style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.75rem', textDecoration: 'underline' }}
                     >
@@ -6848,19 +7098,19 @@ export default function App() {
                 <div className="form-grid">
                   <div className="form-group">
                     <label>Tiêu đề kênh</label>
-                    <input 
-                      type="text" 
-                      value={headerTitle} 
-                      onChange={(e) => updateHeaderTitle(e.target.value)} 
+                    <input
+                      type="text"
+                      value={headerTitle}
+                      onChange={(e) => updateHeaderTitle(e.target.value)}
                     />
                   </div>
 
                   <div className="form-group">
                     <label>Tên tệp tin khi xuất (Không dấu & cách)</label>
-                    <input 
-                      type="text" 
-                      value={customFilename} 
-                      onChange={(e) => setCustomFilename(e.target.value.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, ''))} 
+                    <input
+                      type="text"
+                      value={customFilename}
+                      onChange={(e) => setCustomFilename(e.target.value.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, ''))}
                       placeholder="so_sanh_meo_thong_thai"
                     />
                   </div>
@@ -6868,16 +7118,16 @@ export default function App() {
                   <div className="form-group">
                     <label>Màu nền Video</label>
                     <div style={{ display: 'flex', gap: '0.25rem' }}>
-                      <input 
-                        type="text" 
-                        value={bgColor} 
-                        onChange={(e) => updateBgColor(e.target.value)} 
+                      <input
+                        type="text"
+                        value={bgColor}
+                        onChange={(e) => updateBgColor(e.target.value)}
                         style={{ flex: 1 }}
                       />
-                      <input 
-                        type="color" 
-                        value={bgColor.startsWith('#') ? bgColor : '#FAF6F0'} 
-                        onChange={(e) => updateBgColor(e.target.value)} 
+                      <input
+                        type="color"
+                        value={bgColor.startsWith('#') ? bgColor : '#FAF6F0'}
+                        onChange={(e) => updateBgColor(e.target.value)}
                         style={{ width: '32px', height: '32px', padding: 0, cursor: 'pointer' }}
                       />
                     </div>
@@ -6889,7 +7139,7 @@ export default function App() {
                       <Palette size={16} /> Chọn Theme Nhanh cho Video (Quick Theme Presets)
                     </label>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
-                      <button 
+                      <button
                         type="button"
                         className="btn"
                         onClick={() => applyThemePreset('light')}
@@ -6912,7 +7162,7 @@ export default function App() {
                         <span style={{ fontSize: '0.9rem' }}>☀️</span> Theme Sáng Trắng Kem
                       </button>
 
-                      <button 
+                      <button
                         type="button"
                         className="btn"
                         onClick={() => applyThemePreset('dark-contrast')}
@@ -6935,7 +7185,7 @@ export default function App() {
                         <span style={{ fontSize: '0.9rem' }}>🌙</span> Theme Tối High-Contrast
                       </button>
 
-                      <button 
+                      <button
                         type="button"
                         className="btn"
                         onClick={() => applyThemePreset('dark-neon')}
@@ -6958,7 +7208,7 @@ export default function App() {
                         <span style={{ fontSize: '0.9rem' }}>⚡</span> Theme Tối Neon Cyber
                       </button>
 
-                      <button 
+                      <button
                         type="button"
                         className="btn"
                         onClick={() => applyThemePreset('dark-gold')}
@@ -6981,7 +7231,7 @@ export default function App() {
                         <span style={{ fontSize: '0.9rem' }}>👑</span> Theme Tối Hoàng Gia Gold
                       </button>
 
-                      <button 
+                      <button
                         type="button"
                         className="btn"
                         onClick={() => applyThemePreset('dark-gradient')}
@@ -7053,8 +7303,8 @@ export default function App() {
 
                   <div className="form-group">
                     <label>Vị trí Logo & Tiêu đề kênh</label>
-                    <select 
-                      value={headerPosition} 
+                    <select
+                      value={headerPosition}
                       onChange={(e) => updateHeaderPosition(e.target.value)}
                     >
                       <option value="top-center">Giữa trên cùng (Mặc định)</option>
@@ -7069,16 +7319,16 @@ export default function App() {
                   <div className="form-group">
                     <label>Màu chữ Tiêu đề Kênh</label>
                     <div style={{ display: 'flex', gap: '0.25rem' }}>
-                      <input 
-                        type="text" 
-                        value={headerTitleColor} 
-                        onChange={(e) => updateHeaderTitleColor(e.target.value)} 
+                      <input
+                        type="text"
+                        value={headerTitleColor}
+                        onChange={(e) => updateHeaderTitleColor(e.target.value)}
                         style={{ flex: 1 }}
                       />
-                      <input 
-                        type="color" 
-                        value={headerTitleColor.startsWith('#') ? headerTitleColor : '#FFFFFF'} 
-                        onChange={(e) => updateHeaderTitleColor(e.target.value)} 
+                      <input
+                        type="color"
+                        value={headerTitleColor.startsWith('#') ? headerTitleColor : '#FFFFFF'}
+                        onChange={(e) => updateHeaderTitleColor(e.target.value)}
                         style={{ width: '32px', height: '32px', padding: 0, cursor: 'pointer' }}
                       />
                     </div>
@@ -7089,13 +7339,13 @@ export default function App() {
                       <span>Cỡ chữ Tiêu đề Kênh (Font size)</span>
                       <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{headerTitleFontSize}px</span>
                     </label>
-                    <input 
-                      type="range" 
-                      min="14" 
-                      max="50" 
-                      step="1" 
-                      value={headerTitleFontSize} 
-                      onChange={(e) => updateHeaderTitleFontSize(parseInt(e.target.value, 10))} 
+                    <input
+                      type="range"
+                      min="14"
+                      max="50"
+                      step="1"
+                      value={headerTitleFontSize}
+                      onChange={(e) => updateHeaderTitleFontSize(parseInt(e.target.value, 10))}
                       style={{ cursor: 'pointer', height: '6px' }}
                     />
                     <span style={{ fontSize: '0.65rem', color: '#888', marginTop: '0.2rem', display: 'block' }}>Mặc định 28px. Điều chỉnh phù hợp với độ dài tên kênh của bạn.</span>
@@ -7107,8 +7357,8 @@ export default function App() {
               <div className="glass-card">
                 <h2 className="card-title">Cấu hình Mascot từ Sprite Sheet</h2>
                 <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.75rem', lineHeight: '1.4' }}>
-                  Tải lên một hình ảnh duy nhất chứa chuỗi 4 tư thế Mascot xếp liền nhau theo chiều ngang trên nền trắng. 
-                  Thứ tự từ trái sang phải: 
+                  Tải lên một hình ảnh duy nhất chứa chuỗi 4 tư thế Mascot xếp liền nhau theo chiều ngang trên nền trắng.
+                  Thứ tự từ trái sang phải:
                   <strong style={{ color: 'var(--primary)' }}> 1. Đứng im ➔ 2. Chỉ trái ➔ 3. Chỉ phải ➔ 4. Nhún vai (đọc câu hỏi)</strong>.
                   Hệ thống sẽ tự động phân tách, xóa nền trắng thành trong suốt mịn màng và đồng bộ vào video.
                 </p>
@@ -7128,13 +7378,13 @@ export default function App() {
                     <span>Kích thước Mascot</span>
                     <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{mascotScale}%</span>
                   </label>
-                  <input 
-                    type="range" 
-                    min="50" 
-                    max="180" 
-                    step="5" 
-                    value={mascotScale} 
-                    onChange={(e) => updateMascotScale(parseInt(e.target.value, 10))} 
+                  <input
+                    type="range"
+                    min="50"
+                    max="180"
+                    step="5"
+                    value={mascotScale}
+                    onChange={(e) => updateMascotScale(parseInt(e.target.value, 10))}
                     style={{ cursor: 'pointer', height: '6px' }}
                   />
                   <span style={{ fontSize: '0.6rem', color: '#777', marginTop: '0.2rem', display: 'block' }}>Mặc định 100%. Điều chỉnh để Mascot cân đối với chiều rộng khung hình.</span>
@@ -7145,13 +7395,13 @@ export default function App() {
                     <span>Vị trí đứng lên / xuống của Mascot (Y-Position)</span>
                     <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{mascotY}px</span>
                   </label>
-                  <input 
-                    type="range" 
-                    min="600" 
-                    max="1480" 
-                    step="5" 
-                    value={mascotY} 
-                    onChange={(e) => updateMascotY(parseInt(e.target.value, 10))} 
+                  <input
+                    type="range"
+                    min="600"
+                    max="1480"
+                    step="5"
+                    value={mascotY}
+                    onChange={(e) => updateMascotY(parseInt(e.target.value, 10))}
                     style={{ cursor: 'pointer', height: '6px' }}
                   />
                   <span style={{ fontSize: '0.6rem', color: '#777', marginTop: '0.2rem', display: 'block' }}>Mặc định 1280px. Tăng lên (tối đa 1480px) để kéo chân Mascot chạm sát mép đáy dưới cùng video.</span>
@@ -7162,8 +7412,8 @@ export default function App() {
                   <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--accent-indigo)', display: 'flex', alignItems: 'center', gap: '0.3rem', marginBottom: '0.4rem' }}>
                     <Sparkles size={14} /> Chế độ Tách phông nền Mascot (Background Removal & Chroma Key)
                   </label>
-                  <select 
-                    value={mascotChromaKey} 
+                  <select
+                    value={mascotChromaKey}
                     onChange={(e) => updateMascotChromaKey(e.target.value)}
                     style={{ padding: '0.5rem', fontSize: '0.8rem', marginBottom: '0.5rem' }}
                   >
@@ -7174,8 +7424,8 @@ export default function App() {
                   </select>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.1)', marginTop: '0.5rem' }}>
-                    <input 
-                      type="checkbox" 
+                    <input
+                      type="checkbox"
                       id="mascot_white_backing_chk"
                       checked={mascotWhiteBacking}
                       onChange={(e) => updateMascotWhiteBacking(e.target.checked)}
@@ -7195,13 +7445,13 @@ export default function App() {
                         <span>Độ nhạy tách nền Trắng (Threshold)</span>
                         <span style={{ color: 'var(--accent-indigo)', fontWeight: 'bold' }}>{mascotChromaThreshold}</span>
                       </label>
-                      <input 
-                        type="range" 
-                        min="180" 
-                        max="255" 
-                        step="1" 
-                        value={mascotChromaThreshold} 
-                        onChange={(e) => updateMascotChromaThreshold(parseInt(e.target.value, 10))} 
+                      <input
+                        type="range"
+                        min="180"
+                        max="255"
+                        step="1"
+                        value={mascotChromaThreshold}
+                        onChange={(e) => updateMascotChromaThreshold(parseInt(e.target.value, 10))}
                         style={{ cursor: 'pointer', height: '6px', width: '100%' }}
                       />
                       <span style={{ fontSize: '0.65rem', color: '#888', display: 'block', marginTop: '0.2rem', lineHeight: '1.3' }}>
@@ -7216,159 +7466,12 @@ export default function App() {
               <div className="glass-card">
                 <h2 className="card-title">Tùy biến Giao diện Phụ đề & Theme Video</h2>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  {/* Bộ chọn Theme Nhanh cho Video (Quick Theme Presets) */}
-                  <div className="form-group" style={{ padding: '0.75rem', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.1)', margin: 0 }}>
-                    <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--accent-indigo)', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.6rem' }}>
-                      <Palette size={16} /> Chọn Theme Nhanh cho Video (Quick Presets)
-                    </label>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
-                      <button 
-                        type="button"
-                        className="btn"
-                        onClick={() => applyThemePreset('light')}
-                        style={{
-                          padding: '0.5rem 0.6rem',
-                          borderRadius: '8px',
-                          border: bgColor === '#FAF6F0' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
-                          background: '#FAF6F0',
-                          color: '#1e293b',
-                          fontWeight: 'bold',
-                          fontSize: '0.75rem',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          boxShadow: bgColor === '#FAF6F0' ? '0 0 10px rgba(99, 102, 241, 0.4)' : 'none'
-                        }}
-                      >
-                        <span style={{ fontSize: '0.9rem' }}>☀️</span> Theme Sáng Trắng Kem
-                      </button>
-
-                      <button 
-                        type="button"
-                        className="btn"
-                        onClick={() => applyThemePreset('dark-contrast')}
-                        style={{
-                          padding: '0.5rem 0.6rem',
-                          borderRadius: '8px',
-                          border: bgColor === '#0B0F19' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
-                          background: '#0B0F19',
-                          color: '#38BDF8',
-                          fontWeight: 'bold',
-                          fontSize: '0.75rem',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          boxShadow: bgColor === '#0B0F19' ? '0 0 10px rgba(56, 189, 248, 0.4)' : 'none'
-                        }}
-                      >
-                        <span style={{ fontSize: '0.9rem' }}>🌙</span> Theme Tối High-Contrast
-                      </button>
-
-                      <button 
-                        type="button"
-                        className="btn"
-                        onClick={() => applyThemePreset('dark-neon')}
-                        style={{
-                          padding: '0.5rem 0.6rem',
-                          borderRadius: '8px',
-                          border: bgColor === '#070614' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
-                          background: '#070614',
-                          color: '#00FFCC',
-                          fontWeight: 'bold',
-                          fontSize: '0.75rem',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          boxShadow: bgColor === '#070614' ? '0 0 10px rgba(0, 255, 204, 0.4)' : 'none'
-                        }}
-                      >
-                        <span style={{ fontSize: '0.9rem' }}>⚡</span> Theme Tối Neon Cyber
-                      </button>
-
-                      <button 
-                        type="button"
-                        className="btn"
-                        onClick={() => applyThemePreset('dark-gold')}
-                        style={{
-                          padding: '0.5rem 0.6rem',
-                          borderRadius: '8px',
-                          border: bgColor === '#121212' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
-                          background: '#121212',
-                          color: '#FBBF24',
-                          fontWeight: 'bold',
-                          fontSize: '0.75rem',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          boxShadow: bgColor === '#121212' ? '0 0 10px rgba(251, 191, 36, 0.4)' : 'none'
-                        }}
-                      >
-                        <span style={{ fontSize: '0.9rem' }}>👑</span> Theme Tối Hoàng Gia Gold
-                      </button>
-
-                      <button 
-                        type="button"
-                        className="btn"
-                        onClick={() => applyThemePreset('dark-gradient')}
-                        style={{
-                          gridColumn: 'span 2',
-                          padding: '0.5rem 0.6rem',
-                          borderRadius: '8px',
-                          border: bgColor === 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)' ? '2px solid var(--accent-indigo)' : '1px solid rgba(255, 255, 255, 0.12)',
-                          background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)',
-                          color: '#F43F5E',
-                          fontWeight: 'bold',
-                          fontSize: '0.75rem',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          boxShadow: bgColor === 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)' ? '0 0 10px rgba(244, 63, 94, 0.4)' : 'none'
-                        }}
-                      >
-                        <span style={{ fontSize: '0.9rem' }}>🌌</span> Theme Gradient Biển Đêm Sang Trọng
-                      </button>
-
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={() => applyThemePreset('hyperframes')}
-                        style={{
-                          gridColumn: 'span 2',
-                          padding: '0.55rem 0.65rem',
-                          borderRadius: '8px',
-                          border: bgColor === HYPERFRAMES_VIDEO_BG ? '2px solid #37E6C4' : '1px solid rgba(55, 230, 196, 0.28)',
-                          background: HYPERFRAMES_VIDEO_BG,
-                          color: '#37E6C4',
-                          fontWeight: 'bold',
-                          fontSize: '0.75rem',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          boxShadow: bgColor === HYPERFRAMES_VIDEO_BG ? '0 0 14px rgba(55, 230, 196, 0.38)' : 'none'
-                        }}
-                      >
-                        <span style={{ color: '#FF4FA3', fontSize: '0.9rem' }}>✦</span> Theme Hyperframes Neon
-                      </button>
-                    </div>
-                  </div>
                   {/* Toggle display */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0b0f19', padding: '0.6rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-light)' }}>
                     <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Hiển thị phụ đề trên Video</span>
-                    <input 
-                      type="checkbox" 
-                      checked={showSubtitles} 
+                    <input
+                      type="checkbox"
+                      checked={showSubtitles}
                       onChange={(e) => setShowSubtitles(e.target.checked)}
                       style={{ width: '18px', height: '18px', cursor: 'pointer', margin: 0 }}
                     />
@@ -7383,13 +7486,13 @@ export default function App() {
                             <span>Vị trí đứng của phụ đề (Y)</span>
                             <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{subtitleY}px</span>
                           </label>
-                          <input 
-                            type="range" 
-                            min="650" 
-                            max="950" 
-                            step="5" 
-                            value={subtitleY} 
-                            onChange={(e) => updateSubtitleY(parseInt(e.target.value, 10))} 
+                          <input
+                            type="range"
+                            min="650"
+                            max="950"
+                            step="5"
+                            value={subtitleY}
+                            onChange={(e) => updateSubtitleY(parseInt(e.target.value, 10))}
                             style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                           />
                           <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mặc định 770px. Tăng để dịch chữ xuống thấp tránh đè hình ảnh so sánh.</span>
@@ -7400,13 +7503,13 @@ export default function App() {
                             <span>Cỡ chữ phụ đề</span>
                             <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{subtitleFontSize}px</span>
                           </label>
-                          <input 
-                            type="range" 
-                            min="24" 
-                            max="60" 
-                            step="1" 
-                            value={subtitleFontSize} 
-                            onChange={(e) => updateSubtitleFontSize(parseInt(e.target.value, 10))} 
+                          <input
+                            type="range"
+                            min="24"
+                            max="60"
+                            step="1"
+                            value={subtitleFontSize}
+                            onChange={(e) => updateSubtitleFontSize(parseInt(e.target.value, 10))}
                             style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                           />
                         </div>
@@ -7417,36 +7520,35 @@ export default function App() {
                             <span>Độ dày viền chữ</span>
                             <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{subtitleOutlineWidth}px</span>
                           </label>
-                          <input 
-                            type="range" 
-                            min="0" 
-                            max="12" 
-                            step="1" 
-                            value={subtitleOutlineWidth} 
-                            onChange={(e) => updateSubtitleOutlineWidth(parseInt(e.target.value, 10))} 
+                          <input
+                            type="range"
+                            min="0"
+                            max="12"
+                            step="1"
+                            value={subtitleOutlineWidth}
+                            onChange={(e) => updateSubtitleOutlineWidth(parseInt(e.target.value, 10))}
                             style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                           />
                         </div>
 
                         <div className="form-group">
                           <label>Font chữ</label>
-                          <select 
-                            value={subtitleFontFamily} 
+                          <select
+                            value={subtitleFontFamily}
                             onChange={(e) => updateSubtitleFontFamily(e.target.value)}
                             style={{ marginTop: '0.25rem' }}
                           >
-                            <option value='"Montserrat", Arial, sans-serif'>Montserrat (Modern)</option>
-                            <option value='Arial, sans-serif'>Arial (Clean)</option>
-                            <option value='"Impact", sans-serif'>Impact (Meme Bold)</option>
-                            <option value='"Outfit", sans-serif'>Outfit (Stylish)</option>
+                            {VIETNAMESE_FONT_OPTIONS.map(font => (
+                              <option key={font.value} value={font.value}>{font.label}</option>
+                            ))}
                           </select>
                         </div>
 
                         {/* Highlight Style & Colors */}
                         <div className="form-group">
                           <label>Kiểu hiệu ứng Highlight</label>
-                          <select 
-                            value={subtitleHighlightStyle} 
+                          <select
+                            value={subtitleHighlightStyle}
                             onChange={(e) => updateSubtitleHighlightStyle(e.target.value)}
                             style={{ marginTop: '0.25rem' }}
                           >
@@ -7462,13 +7564,13 @@ export default function App() {
                             <span>Độ rộng vùng phụ đề</span>
                             <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{subtitleMaxWidth}px</span>
                           </label>
-                          <input 
-                            type="range" 
-                            min="300" 
-                            max="650" 
-                            step="10" 
-                            value={subtitleMaxWidth} 
-                            onChange={(e) => updateSubtitleMaxWidth(parseInt(e.target.value, 10))} 
+                          <input
+                            type="range"
+                            min="300"
+                            max="650"
+                            step="10"
+                            value={subtitleMaxWidth}
+                            onChange={(e) => updateSubtitleMaxWidth(parseInt(e.target.value, 10))}
                             style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                           />
                           <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mức khuyến nghị: 400px - 480px để giữ chữ gọn gàng.</span>
@@ -7476,8 +7578,8 @@ export default function App() {
 
                         <div className="form-group">
                           <label>Số dòng tối đa hiển thị cùng lúc</label>
-                          <select 
-                            value={subtitleMaxLines} 
+                          <select
+                            value={subtitleMaxLines}
                             onChange={(e) => updateSubtitleMaxLines(parseInt(e.target.value, 10))}
                             style={{ marginTop: '0.25rem' }}
                           >
@@ -7492,30 +7594,30 @@ export default function App() {
                           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
                             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', background: '#0b0f19', padding: '0.25rem', borderRadius: '4px', border: '1px solid var(--border-light)' }}>
                               <span style={{ fontSize: '0.6rem', color: '#94a3b8' }}>Màu chữ</span>
-                              <input 
-                                type="color" 
-                                value={subtitleColor} 
-                                onChange={(e) => updateSubtitleColor(e.target.value)} 
+                              <input
+                                type="color"
+                                value={subtitleColor}
+                                onChange={(e) => updateSubtitleColor(e.target.value)}
                                 style={{ width: '100%', height: '24px', cursor: 'pointer', border: 'none', background: 'none', padding: 0 }}
                               />
                             </div>
-                            
+
                             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', background: '#0b0f19', padding: '0.25rem', borderRadius: '4px', border: '1px solid var(--border-light)' }}>
                               <span style={{ fontSize: '0.6rem', color: '#94a3b8' }}>Màu viền</span>
-                              <input 
-                                type="color" 
-                                value={subtitleOutlineColor} 
-                                onChange={(e) => updateSubtitleOutlineColor(e.target.value)} 
+                              <input
+                                type="color"
+                                value={subtitleOutlineColor}
+                                onChange={(e) => updateSubtitleOutlineColor(e.target.value)}
                                 style={{ width: '100%', height: '24px', cursor: 'pointer', border: 'none', background: 'none', padding: 0 }}
                               />
                             </div>
 
                             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', background: '#0b0f19', padding: '0.25rem', borderRadius: '4px', border: '1px solid var(--border-light)' }}>
                               <span style={{ fontSize: '0.6rem', color: '#94a3b8' }}>Highlight</span>
-                              <input 
-                                type="color" 
-                                value={subtitleHighlightColor} 
-                                onChange={(e) => updateSubtitleHighlightColor(e.target.value)} 
+                              <input
+                                type="color"
+                                value={subtitleHighlightColor}
+                                onChange={(e) => updateSubtitleHighlightColor(e.target.value)}
                                 style={{ width: '100%', height: '24px', cursor: 'pointer', border: 'none', background: 'none', padding: 0 }}
                               />
                             </div>
@@ -7538,16 +7640,29 @@ export default function App() {
                         <span>Cỡ chữ tiêu đề</span>
                         <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{titleFontSize}px</span>
                       </label>
-                      <input 
-                        type="range" 
-                        min="20" 
-                        max="60" 
-                        step="1" 
-                        value={titleFontSize} 
-                        onChange={(e) => updateTitleFontSize(parseInt(e.target.value, 10))} 
+                      <input
+                        type="range"
+                        min="20"
+                        max="60"
+                        step="1"
+                        value={titleFontSize}
+                        onChange={(e) => updateTitleFontSize(parseInt(e.target.value, 10))}
                         style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                       />
                       <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mặc định 36px. Áp dụng khi hai bên ở kích thước mặc định.</span>
+                    </div>
+
+                    <div className="form-group">
+                      <label>Font chữ tiêu đề</label>
+                      <select
+                        value={titleFontFamily}
+                        onChange={(e) => updateTitleFontFamily(e.target.value)}
+                        style={{ marginTop: '0.25rem' }}
+                      >
+                        {VIETNAMESE_FONT_OPTIONS.map(font => (
+                          <option key={font.value} value={font.value}>{font.label}</option>
+                        ))}
+                      </select>
                     </div>
 
                     {/* Title Outline Width */}
@@ -7556,13 +7671,13 @@ export default function App() {
                         <span>Độ dày viền chữ tiêu đề</span>
                         <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{titleOutlineWidth}px</span>
                       </label>
-                      <input 
-                        type="range" 
-                        min="0" 
-                        max="12" 
-                        step="1" 
-                        value={titleOutlineWidth} 
-                        onChange={(e) => updateTitleOutlineWidth(parseInt(e.target.value, 10))} 
+                      <input
+                        type="range"
+                        min="0"
+                        max="12"
+                        step="1"
+                        value={titleOutlineWidth}
+                        onChange={(e) => updateTitleOutlineWidth(parseInt(e.target.value, 10))}
                         style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                       />
                     </div>
@@ -7572,16 +7687,16 @@ export default function App() {
                       <label>Màu viền chữ tiêu đề</label>
                       <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
                         <div style={{ flex: 1, display: 'flex', gap: '0.5rem', alignItems: 'center', background: '#0b0f19', padding: '0.35rem 0.5rem', borderRadius: '4px', border: '1px solid var(--border-light)' }}>
-                          <input 
-                            type="color" 
-                            value={titleOutlineColor} 
-                            onChange={(e) => updateTitleOutlineColor(e.target.value)} 
+                          <input
+                            type="color"
+                            value={titleOutlineColor}
+                            onChange={(e) => updateTitleOutlineColor(e.target.value)}
                             style={{ width: '28px', height: '24px', cursor: 'pointer', border: 'none', background: 'none', padding: 0 }}
                           />
-                          <input 
-                            type="text" 
-                            value={titleOutlineColor} 
-                            onChange={(e) => updateTitleOutlineColor(e.target.value)} 
+                          <input
+                            type="text"
+                            value={titleOutlineColor}
+                            onChange={(e) => updateTitleOutlineColor(e.target.value)}
                             style={{ flex: 1, border: 'none', background: 'none', padding: 0, fontSize: '0.75rem', color: '#fff', outline: 'none' }}
                           />
                         </div>
@@ -7598,7 +7713,7 @@ export default function App() {
                   <p style={{ fontSize: '0.72rem', color: '#94a3b8', lineHeight: '1.4', margin: 0 }}>
                     Điều chỉnh kích thước của hai khung ảnh bên Trái và bên Phải trên video. Hệ thống sẽ tự động căn giữa và bo góc trong suốt (overflow hidden) để ảnh không bao giờ tràn ra ngoài.
                   </p>
-                  
+
                   <div className="form-grid">
                     {/* Frame Width */}
                     <div className="form-group">
@@ -7606,13 +7721,13 @@ export default function App() {
                         <span>Chiều rộng khung ảnh</span>
                         <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{imageFrameWidth}px</span>
                       </label>
-                      <input 
-                        type="range" 
-                        min="150" 
-                        max="350" 
-                        step="5" 
-                        value={imageFrameWidth} 
-                        onChange={(e) => updateImageFrameWidth(parseInt(e.target.value, 10))} 
+                      <input
+                        type="range"
+                        min="150"
+                        max="350"
+                        step="5"
+                        value={imageFrameWidth}
+                        onChange={(e) => updateImageFrameWidth(parseInt(e.target.value, 10))}
                         style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                       />
                       <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mặc định 290px. Cả hai khung sẽ tự căn giữa 2 bên nửa màn hình.</span>
@@ -7624,13 +7739,13 @@ export default function App() {
                         <span>Chiều cao khung ảnh</span>
                         <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{imageFrameHeight}px</span>
                       </label>
-                      <input 
-                        type="range" 
-                        min="200" 
-                        max="500" 
-                        step="5" 
-                        value={imageFrameHeight} 
-                        onChange={(e) => updateImageFrameHeight(parseInt(e.target.value, 10))} 
+                      <input
+                        type="range"
+                        min="200"
+                        max="500"
+                        step="5"
+                        value={imageFrameHeight}
+                        onChange={(e) => updateImageFrameHeight(parseInt(e.target.value, 10))}
                         style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                       />
                       <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mặc định 390px.</span>
@@ -7642,13 +7757,13 @@ export default function App() {
                         <span>Độ phóng to ảnh trong khung (Zoom)</span>
                         <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{globalImageZoom}%</span>
                       </label>
-                      <input 
-                        type="range" 
-                        min="50" 
-                        max="250" 
-                        step="5" 
-                        value={globalImageZoom} 
-                        onChange={(e) => updateGlobalImageZoom(parseInt(e.target.value, 10))} 
+                      <input
+                        type="range"
+                        min="50"
+                        max="250"
+                        step="5"
+                        value={globalImageZoom}
+                        onChange={(e) => updateGlobalImageZoom(parseInt(e.target.value, 10))}
                         style={{ cursor: 'pointer', marginTop: '0.25rem' }}
                       />
                       <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mặc định 100%. Áp dụng cho tất cả hình so sánh.</span>
@@ -7707,8 +7822,8 @@ export default function App() {
                     )}
                   </div>
                 </div>
-                
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+
+                <div className="social-platform-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
                   {renderSocialPlatformCard({ platform: 'facebook', title: 'Facebook Reels', color: '#1877f2', icon: 'f', connected: fbConnected, emptyText: 'Chưa liên kết tài khoản' })}
                   {renderSocialPlatformCard({ platform: 'youtube', title: 'YouTube Shorts', color: '#ff0000', icon: '▶', connected: ytConnected, emptyText: 'Chưa liên kết tài khoản' })}
                   {renderSocialPlatformCard({ platform: 'tiktok', title: 'TikTok Video', color: '#00f2fe', icon: '♪', connected: ttConnected, emptyText: 'Chưa liên kết tài khoản' })}
@@ -7718,25 +7833,25 @@ export default function App() {
               {/* Campaign / Posting Setup */}
               <div className="glass-card">
                 <h2 className="card-title">Cấu hình bài viết & Lịch đăng</h2>
-                
-                <div className="form-grid" style={{ gridTemplateColumns: '1.2fr 1fr' }}>
+
+                <div className="form-grid publish-config-grid" style={{ gridTemplateColumns: '1.2fr 1fr' }}>
                   {/* Left block: Video selection and caption */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                     <div className="form-group">
                       <label>Video đăng bài</label>
-                      <div style={{ 
-                        background: '#0b0f19', 
-                        padding: '0.75rem', 
-                        borderRadius: '6px', 
+                      <div style={{
+                        background: '#0b0f19',
+                        padding: '0.75rem',
+                        borderRadius: '6px',
                         border: '1px solid var(--border-light)',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '0.75rem'
                       }}>
-                        <div style={{ 
-                          width: '45px', 
-                          height: '80px', 
-                          background: '#1e293b', 
+                        <div style={{
+                          width: '45px',
+                          height: '80px',
+                          background: '#1e293b',
                           borderRadius: '4px',
                           display: 'flex',
                           alignItems: 'center',
@@ -7767,7 +7882,7 @@ export default function App() {
                         <span>Nội dung mô tả (Caption)</span>
                         <span style={{ color: '#64748b' }}>{publishCaption.length} ký tự</span>
                       </label>
-                      <textarea 
+                      <textarea
                         value={publishCaption}
                         onChange={(e) => setPublishCaption(e.target.value)}
                         placeholder="Nhập caption mô tả video, hashtag..."
@@ -7776,14 +7891,14 @@ export default function App() {
                       {/* Short hashtags helper */}
                       <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.35rem' }}>
                         {['#sosanh', '#khampha', '#shorts', '#reels', '#tiktok'].map(tag => (
-                          <span 
-                            key={tag} 
+                          <span
+                            key={tag}
                             onClick={() => setPublishCaption(prev => prev + (prev ? ' ' : '') + tag)}
-                            style={{ 
-                              fontSize: '0.65rem', 
-                              background: 'var(--border-light)', 
-                              padding: '0.2rem 0.4rem', 
-                              borderRadius: '4px', 
+                            style={{
+                              fontSize: '0.65rem',
+                              background: 'var(--border-light)',
+                              padding: '0.2rem 0.4rem',
+                              borderRadius: '4px',
                               cursor: 'pointer',
                               border: '1px solid rgba(255,255,255,0.05)',
                               transition: 'all 0.2s'
@@ -7799,32 +7914,32 @@ export default function App() {
                   </div>
 
                   {/* Right block: Platform select & timing */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', borderLeft: '1px solid rgba(255,255,255,0.05)', paddingLeft: '1rem' }}>
+                  <div className="publish-target-panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', borderLeft: '1px solid rgba(255,255,255,0.05)', paddingLeft: '1rem' }}>
                     <div className="form-group">
                       <label>Nền tảng đích</label>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.25rem' }}>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer' }}>
-                          <input 
-                            type="checkbox" 
-                            checked={publishPlatforms.facebook} 
+                          <input
+                            type="checkbox"
+                            checked={publishPlatforms.facebook}
                             onChange={(e) => setPublishPlatforms({ ...publishPlatforms, facebook: e.target.checked })}
                             style={{ width: '15px', height: '15px', margin: 0 }}
                           />
                           Facebook Reels
                         </label>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer' }}>
-                          <input 
-                            type="checkbox" 
-                            checked={publishPlatforms.youtube} 
+                          <input
+                            type="checkbox"
+                            checked={publishPlatforms.youtube}
                             onChange={(e) => setPublishPlatforms({ ...publishPlatforms, youtube: e.target.checked })}
                             style={{ width: '15px', height: '15px', margin: 0 }}
                           />
                           YouTube Shorts
                         </label>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer' }}>
-                          <input 
-                            type="checkbox" 
-                            checked={publishPlatforms.tiktok} 
+                          <input
+                            type="checkbox"
+                            checked={publishPlatforms.tiktok}
                             onChange={(e) => setPublishPlatforms({ ...publishPlatforms, tiktok: e.target.checked })}
                             style={{ width: '15px', height: '15px', margin: 0 }}
                           />
@@ -7836,14 +7951,14 @@ export default function App() {
                     <div className="form-group">
                       <label>Chế độ đăng</label>
                       <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
-                        <button 
+                        <button
                           className={`btn btn-sm ${publishMode === 'now' ? 'btn-primary' : 'btn-secondary'}`}
                           onClick={() => setPublishMode('now')}
                           style={{ flex: 1, padding: '0.4rem' }}
                         >
                           Đăng ngay
                         </button>
-                        <button 
+                        <button
                           className={`btn btn-sm ${publishMode === 'schedule' ? 'btn-primary' : 'btn-secondary'}`}
                           onClick={() => setPublishMode('schedule')}
                           style={{ flex: 1, padding: '0.4rem' }}
@@ -7856,16 +7971,16 @@ export default function App() {
                     {publishMode === 'schedule' && (
                       <div className="form-group" style={{ animation: 'fadeIn 0.3s ease' }}>
                         <label>Chọn Ngày & Giờ đăng bài</label>
-                        <input 
-                          type="datetime-local" 
+                        <input
+                          type="datetime-local"
                           value={scheduleDate}
                           onChange={(e) => setScheduleDate(e.target.value)}
-                          style={{ 
-                            padding: '0.4rem', 
-                            fontSize: '0.8rem', 
-                            background: '#0b0f19', 
-                            color: '#fff', 
-                            border: '1px solid var(--border-light)', 
+                          style={{
+                            padding: '0.4rem',
+                            fontSize: '0.8rem',
+                            background: '#0b0f19',
+                            color: '#fff',
+                            border: '1px solid var(--border-light)',
                             borderRadius: '4px',
                             cursor: 'pointer'
                           }}
@@ -7873,8 +7988,8 @@ export default function App() {
                       </div>
                     )}
 
-                    <button 
-                      className="btn btn-primary" 
+                    <button
+                      className="btn btn-primary"
                       onClick={handleAddSchedule}
                       style={{ marginTop: 'auto', padding: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
                     >
@@ -7924,11 +8039,11 @@ export default function App() {
                                   };
                                   const c = colors[plat] || { bg: '#222', text: '#fff' };
                                   return (
-                                    <span key={plat} style={{ 
-                                      background: c.bg, 
-                                      color: c.text, 
-                                      padding: '0.1rem 0.35rem', 
-                                      borderRadius: '4px', 
+                                    <span key={plat} style={{
+                                      background: c.bg,
+                                      color: c.text,
+                                      padding: '0.1rem 0.35rem',
+                                      borderRadius: '4px',
                                       fontSize: '0.6rem',
                                       fontWeight: 'bold',
                                       textTransform: 'uppercase'
@@ -7966,18 +8081,18 @@ export default function App() {
                             <td style={{ padding: '0.5rem 0.75rem', textAlign: 'center' }}>
                               <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'center' }}>
                                 {post.projectConfig && (
-                                  <button 
-                                    className="btn btn-secondary btn-sm" 
-                                    style={{ padding: '0.2rem', height: '22px', border: '1px solid var(--accent-indigo)', color: 'var(--accent-indigo)', background: 'rgba(99, 102, 241, 0.05)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} 
+                                  <button
+                                    className="btn btn-secondary btn-sm"
+                                    style={{ padding: '0.2rem', height: '22px', border: '1px solid var(--accent-indigo)', color: 'var(--accent-indigo)', background: 'rgba(99, 102, 241, 0.05)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                                     onClick={() => handleLoadProjectConfig(post.projectConfig)}
                                     title="Tải cấu hình vào Workflow"
                                   >
                                     <FolderOpen size={12} />
                                   </button>
                                 )}
-                                <button 
-                                  className="btn btn-danger btn-sm" 
-                                  style={{ padding: '0.2rem', height: '22px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} 
+                                <button
+                                  className="btn btn-danger btn-sm"
+                                  style={{ padding: '0.2rem', height: '22px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                                   onClick={() => handleDeleteSchedule(post.id)}
                                   title="Xóa bài đăng"
                                 >
@@ -7995,19 +8110,19 @@ export default function App() {
 
               {/* AI Comment Responder Dashboard */}
               <div className="glass-card" style={{ marginTop: '1rem', border: botEnabled ? '1.5px solid var(--accent-green)' : '1px solid var(--border-light)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <div className="ai-responder-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <div style={{ 
-                      width: '10px', 
-                      height: '10px', 
-                      borderRadius: '50%', 
+                    <div style={{
+                      width: '10px',
+                      height: '10px',
+                      borderRadius: '50%',
                       background: botEnabled ? 'var(--accent-green)' : '#64748b',
                       boxShadow: botEnabled ? '0 0 8px var(--accent-green)' : 'none',
                       animation: botEnabled ? 'pulse 1.5s infinite' : 'none'
                     }} />
                     <h2 className="card-title" style={{ margin: 0 }}>Trợ lý Phản hồi Bình luận AI (AI Responder)</h2>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div className="ai-responder-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
@@ -8019,9 +8134,9 @@ export default function App() {
                       {isScanning ? 'Đang quét...' : 'Quét bình luận ngay'}
                     </button>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={botEnabled} 
+                      <input
+                        type="checkbox"
+                        checked={botEnabled}
                         onChange={(e) => setBotEnabled(e.target.checked)}
                         style={{ width: '16px', height: '16px', cursor: 'pointer' }}
                       />
@@ -8030,21 +8145,21 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="form-grid" style={{ gridTemplateColumns: '1.2fr 1fr', gap: '1rem' }}>
+                <div className="form-grid ai-responder-grid" style={{ gridTemplateColumns: '1.2fr 1fr', gap: '1rem' }}>
                   {/* Cấu hình Prompt và API Key */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                     <div className="form-group">
                       <label>Nhà cung cấp AI & API Key</label>
-                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
-                        <select 
-                          value={commentAiProvider} 
+                      <div className="comment-ai-key-row" style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
+                        <select
+                          value={commentAiProvider}
                           onChange={(e) => setCommentAiProvider(e.target.value)}
-                          style={{ 
-                            padding: '0.4rem', 
-                            fontSize: '0.8rem', 
-                            background: '#0b0f19', 
-                            color: '#fff', 
-                            border: '1px solid var(--border-light)', 
+                          style={{
+                            padding: '0.4rem',
+                            fontSize: '0.8rem',
+                            background: '#0b0f19',
+                            color: '#fff',
+                            border: '1px solid var(--border-light)',
                             borderRadius: '4px',
                             width: '120px'
                           }}
@@ -8054,17 +8169,17 @@ export default function App() {
                           <option value="openrouter">OpenRouter (Free Llama)</option>
                           <option value="openai">OpenAI GPT</option>
                         </select>
-                        <ApiKeyInput 
+                        <ApiKeyInput
                           placeholder={`Nhập API Key ${commentAiProvider === 'gemini' ? 'Gemini' : 'OpenAI'}...`}
                           value={commentAiApiKey}
                           onChange={(e) => setCommentAiApiKey(e.target.value)}
-                          style={{ 
-                            padding: '0.4rem', 
-                            fontSize: '0.8rem', 
-                            background: '#0b0f19', 
-                            color: '#fff', 
-                            border: '1px solid var(--border-light)', 
-                            borderRadius: '4px' 
+                          style={{
+                            padding: '0.4rem',
+                            fontSize: '0.8rem',
+                            background: '#0b0f19',
+                            color: '#fff',
+                            border: '1px solid var(--border-light)',
+                            borderRadius: '4px'
                           }}
                         />
                       </div>
@@ -8072,15 +8187,15 @@ export default function App() {
 
                     <div className="form-group">
                       <label>Hướng dẫn AI (System Prompt) - Trả lời phản hồi thông minh</label>
-                      <textarea 
+                      <textarea
                         value={commentSystemPrompt}
                         onChange={(e) => setCommentSystemPrompt(e.target.value)}
                         placeholder="Hướng dẫn AI cách trả lời bình luận..."
-                        style={{ 
-                          width: '100%', 
-                          height: '90px', 
-                          marginTop: '0.25rem', 
-                          fontSize: '0.75rem', 
+                        style={{
+                          width: '100%',
+                          height: '90px',
+                          marginTop: '0.25rem',
+                          fontSize: '0.75rem',
                           resize: 'none',
                           lineHeight: '1.4'
                         }}
@@ -8089,23 +8204,23 @@ export default function App() {
 
                     <div className="form-group" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem', marginTop: '0.25rem' }}>
                       <label>Theo dõi bình luận trên Video ID khác (Thủ công)</label>
-                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
-                        <input 
-                          type="text" 
+                      <div className="manual-video-row" style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
+                        <input
+                          type="text"
                           placeholder="Dán ID Video Facebook cần theo dõi..."
                           value={manualVideoId}
                           onChange={(e) => setManualVideoId(e.target.value)}
-                          style={{ 
-                            flex: 1, 
-                            padding: '0.4rem', 
-                            fontSize: '0.8rem', 
-                            background: '#0b0f19', 
-                            color: '#fff', 
-                            border: '1px solid var(--border-light)', 
-                            borderRadius: '4px' 
+                          style={{
+                            flex: 1,
+                            padding: '0.4rem',
+                            fontSize: '0.8rem',
+                            background: '#0b0f19',
+                            color: '#fff',
+                            border: '1px solid var(--border-light)',
+                            borderRadius: '4px'
                           }}
                         />
-                        <button 
+                        <button
                           className="btn btn-sm btn-primary"
                           onClick={handleAddManualVideo}
                           style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem' }}
@@ -8120,13 +8235,13 @@ export default function App() {
                   </div>
 
                   {/* Lịch sử hoạt động / Logs */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderLeft: '1px solid rgba(255,255,255,0.05)', paddingLeft: '1rem' }}>
+                  <div className="ai-responder-log-panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderLeft: '1px solid rgba(255,255,255,0.05)', paddingLeft: '1rem' }}>
                     <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Lịch sử phản hồi ({commentLogs.length})</label>
-                    <div style={{ 
-                      flex: 1, 
-                      background: '#0b0f19', 
-                      borderRadius: '6px', 
-                      border: '1px solid var(--border-light)', 
+                    <div style={{
+                      flex: 1,
+                      background: '#0b0f19',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-light)',
                       padding: '0.5rem',
                       height: '160px',
                       overflowY: 'auto',
@@ -8140,9 +8255,9 @@ export default function App() {
                         </div>
                       ) : (
                         commentLogs.map((log) => (
-                          <div key={log.id} style={{ 
-                            background: 'rgba(255,255,255,0.02)', 
-                            padding: '0.4rem 0.5rem', 
+                          <div key={log.id} style={{
+                            background: 'rgba(255,255,255,0.02)',
+                            padding: '0.4rem 0.5rem',
                             borderRadius: '4px',
                             border: '1px solid rgba(255,255,255,0.03)',
                             fontSize: '0.7rem',
@@ -8163,8 +8278,8 @@ export default function App() {
                       )}
                     </div>
                     {commentLogs.length > 0 && (
-                      <button 
-                        className="btn btn-sm btn-secondary" 
+                      <button
+                        className="btn btn-sm btn-secondary"
                         onClick={() => setCommentLogs([])}
                         style={{ alignSelf: 'flex-end', fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}
                       >
@@ -8186,16 +8301,16 @@ export default function App() {
             <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
               Mỗi dòng đại diện cho một nhịp nói của video. Nhập đoạn hội thoại ChatGPT/Gemini sinh ra vào đây và bấm nút bên dưới.
             </p>
-            
-            <textarea 
-              value={scriptText} 
-              onChange={(e) => setScriptText(e.target.value)} 
+
+            <textarea
+              value={scriptText}
+              onChange={(e) => setScriptText(e.target.value)}
               placeholder="Paste dialogue script here..."
               style={{ flex: 1, resize: 'none', lineHeight: '1.5', fontFamily: 'monospace' }}
             />
 
-            <button 
-              className="btn btn-primary" 
+            <button
+              className="btn btn-primary"
               onClick={handleParseScript}
               style={{ width: '100%', padding: '0.6rem' }}
             >
@@ -8210,30 +8325,30 @@ export default function App() {
       {isExporting && (
         <div className="render-overlay">
           <div className="render-progress-card-flex">
-            
+
             {/* Left Column: Progress details and Mute button */}
             <div className="render-progress-left">
               <h2 className="render-title">ĐANG XUẤT BẢN VIDEO</h2>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
                 Hệ thống đang vẽ hình ảnh, nhân vật hoạt hình và ghép luồng âm thanh. Vui lòng giữ tab này mở...
               </p>
-              
+
               <div className="progress-bar-bg" style={{ marginTop: '0.5rem' }}>
                 <div className="progress-bar-fill" style={{ width: `${exportProgress}%` }}></div>
               </div>
-              
+
               <div className="progress-text" style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--primary)' }}>
                 {exportProgress}% Hoàn thành
               </div>
 
               {/* Volume toggle control */}
-              <button 
+              <button
                 onClick={handleToggleExportMute}
                 className="btn btn-secondary"
-                style={{ 
-                  alignSelf: 'center', 
-                  marginTop: '0.75rem', 
-                  padding: '0.5rem 1rem', 
+                style={{
+                  alignSelf: 'center',
+                  marginTop: '0.75rem',
+                  padding: '0.5rem 1rem',
                   gap: '0.4rem',
                   borderRadius: '20px',
                   fontSize: '0.8rem'
@@ -8265,7 +8380,7 @@ export default function App() {
             <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', textTransform: 'capitalize' }}>
               <Share2 size={16} /> {editingSocialAccountId ? 'Sửa' : 'Thêm'} kết nối {activeConnectModal}
             </h2>
-            
+
             <form onSubmit={
               activeConnectModal === 'facebook' ? handleSaveFbCredentials :
               activeConnectModal === 'youtube' ? handleSaveYtCredentials :
@@ -8273,11 +8388,11 @@ export default function App() {
             } style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div className="form-group">
                 <label>Tên hiển thị</label>
-                <input 
-                  type="text" 
-                  placeholder="Ví dụ: Mèo thông thái, @namhuuhoc.official..." 
-                  value={socialDisplayName} 
-                  onChange={(e) => setSocialDisplayName(e.target.value)} 
+                <input
+                  type="text"
+                  placeholder="Ví dụ: Mèo thông thái, @namhuuhoc.official..."
+                  value={socialDisplayName}
+                  onChange={(e) => setSocialDisplayName(e.target.value)}
                   style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
                 />
               </div>
@@ -8286,21 +8401,21 @@ export default function App() {
                 <>
                   <div className="form-group">
                     <label>Page ID</label>
-                    <input 
-                      type="text" 
-                      placeholder="Nhập Facebook Page ID..." 
-                      value={fbPageId} 
-                      onChange={(e) => setFbPageId(e.target.value)} 
+                    <input
+                      type="text"
+                      placeholder="Nhập Facebook Page ID..."
+                      value={fbPageId}
+                      onChange={(e) => setFbPageId(e.target.value)}
                       style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
                       required
                     />
                   </div>
                   <div className="form-group">
                     <label>Page Access Token</label>
-                    <ApiKeyInput 
-                      placeholder="EAAW..." 
-                      value={fbAccessToken} 
-                      onChange={(e) => setFbAccessToken(e.target.value)} 
+                    <ApiKeyInput
+                      placeholder="EAAW..."
+                      value={fbAccessToken}
+                      onChange={(e) => setFbAccessToken(e.target.value)}
                       style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
                       required
                     />
@@ -8312,22 +8427,22 @@ export default function App() {
                 <>
                   <div className="form-group">
                     <label>Channel ID</label>
-                    <input 
-                      type="text" 
-                      placeholder="UC..." 
-                      value={ytChannelId} 
-                      onChange={(e) => setYtChannelId(e.target.value)} 
+                    <input
+                      type="text"
+                      placeholder="UC..."
+                      value={ytChannelId}
+                      onChange={(e) => setYtChannelId(e.target.value)}
                       style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
                       required
                     />
                   </div>
-                  
+
                   <div className="form-group">
                     <label>API Key / OAuth Access Token (1 giờ)</label>
-                    <ApiKeyInput 
-                      placeholder="ya29... (Bỏ trống nếu dùng tự động làm mới ở dưới)" 
-                      value={ytAccessToken} 
-                      onChange={(e) => setYtAccessToken(e.target.value)} 
+                    <ApiKeyInput
+                      placeholder="ya29... (Bỏ trống nếu dùng tự động làm mới ở dưới)"
+                      value={ytAccessToken}
+                      onChange={(e) => setYtAccessToken(e.target.value)}
                       style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
                     />
                   </div>
@@ -8340,31 +8455,31 @@ export default function App() {
 
                     <div className="form-group">
                       <label>OAuth Client ID</label>
-                      <input 
-                        type="text" 
-                        placeholder="Nhập Client ID của bạn..." 
-                        value={ytClientId} 
-                        onChange={(e) => setYtClientId(e.target.value)} 
+                      <input
+                        type="text"
+                        placeholder="Nhập Client ID của bạn..."
+                        value={ytClientId}
+                        onChange={(e) => setYtClientId(e.target.value)}
                         style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
                       />
                     </div>
 
                     <div className="form-group">
                       <label>OAuth Client Secret</label>
-                      <ApiKeyInput 
-                        placeholder="Nhập Client Secret..." 
-                        value={ytClientSecret} 
-                        onChange={(e) => setYtClientSecret(e.target.value)} 
+                      <ApiKeyInput
+                        placeholder="Nhập Client Secret..."
+                        value={ytClientSecret}
+                        onChange={(e) => setYtClientSecret(e.target.value)}
                         style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
                       />
                     </div>
 
                     <div className="form-group">
                       <label>OAuth Refresh Token</label>
-                      <ApiKeyInput 
-                        placeholder="Mã 1//... lấy từ Google Playground" 
-                        value={ytRefreshToken} 
-                        onChange={(e) => setYtRefreshToken(e.target.value)} 
+                      <ApiKeyInput
+                        placeholder="Mã 1//... lấy từ Google Playground"
+                        value={ytRefreshToken}
+                        onChange={(e) => setYtRefreshToken(e.target.value)}
                         style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
                       />
                     </div>
@@ -8376,20 +8491,20 @@ export default function App() {
                 <>
                   <div className="form-group">
                     <label>Account name / Open ID</label>
-                    <input 
-                      type="text" 
-                      placeholder="@tenkenh hoặc open_id sau OAuth" 
-                      value={ttSessionId} 
-                      onChange={(e) => setTtSessionId(e.target.value)} 
+                    <input
+                      type="text"
+                      placeholder="@tenkenh hoặc open_id sau OAuth"
+                      value={ttSessionId}
+                      onChange={(e) => setTtSessionId(e.target.value)}
                       style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
                     />
                   </div>
                   <div className="form-group">
                     <label>User Access Token</label>
-                    <ApiKeyInput 
-                      placeholder="act.... (tự sinh từ OAuth hoặc paste thủ công)" 
-                      value={ttAccessToken} 
-                      onChange={(e) => setTtAccessToken(e.target.value)} 
+                    <ApiKeyInput
+                      placeholder="act.... (tự sinh từ OAuth hoặc paste thủ công)"
+                      value={ttAccessToken}
+                      onChange={(e) => setTtAccessToken(e.target.value)}
                       style={{ padding: '0.45rem', fontSize: '0.8rem', background: '#0b0f19', border: '1px solid var(--border-light)', color: '#fff', borderRadius: '4px' }}
                     />
                   </div>
@@ -8477,9 +8592,9 @@ export default function App() {
               )}
 
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-                <button 
-                  type="button" 
-                  className="btn btn-secondary" 
+                <button
+                  type="button"
+                  className="btn btn-secondary"
                   onClick={() => {
                     setEditingSocialAccountId('');
                     setActiveConnectModal(null);
@@ -8488,8 +8603,8 @@ export default function App() {
                 >
                   Hủy bỏ
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="btn btn-primary"
                   style={{ flex: 1, padding: '0.5rem' }}
                 >
@@ -8513,7 +8628,7 @@ export default function App() {
             <h2 className="render-title" style={{ color: 'var(--primary)', letterSpacing: '1px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontSize: '0.95rem' }}>
               <Clock style={{ animation: 'spin 1.5s linear infinite' }} size={18} /> ĐANG XUẤT BẢN VIDEO LÊN MXH
             </h2>
-            
+
             <div style={{ margin: '1.5rem auto 1rem', display: 'flex', justifyContent: 'center' }}>
               <svg style={{ width: '42px', height: '42px', color: 'var(--primary)', animation: 'spin 1s linear infinite' }} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle style={{ opacity: 0.2 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -8582,7 +8697,7 @@ export default function App() {
                       const isSelected = item.key === vclipApiKey;
 
                       return (
-                        <div 
+                        <div
                           key={idx}
                           style={{
                             display: 'flex',
@@ -8609,7 +8724,7 @@ export default function App() {
                               )}
                             </div>
                             <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>
-                              Ngày tạo: {item.createdDate} | 
+                              Ngày tạo: {item.createdDate} |
                               {info.isUsable ? (
                                 <span style={{ color: '#34d399', marginLeft: '0.3rem', fontWeight: 'bold' }}>🟢 Sẵn sàng (Còn Credit)</span>
                               ) : (
@@ -8648,16 +8763,16 @@ export default function App() {
               </div>
 
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-                <button 
-                  type="button" 
-                  className="btn btn-secondary" 
+                <button
+                  type="button"
+                  className="btn btn-secondary"
                   onClick={() => setShowVclipKeyModal(false)}
                   style={{ flex: 1, padding: '0.5rem' }}
                 >
                   Đóng
                 </button>
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   className="btn btn-primary"
                   onClick={handleSaveVclipKeyModal}
                   style={{ flex: 1, padding: '0.5rem' }}

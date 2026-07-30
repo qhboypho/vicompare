@@ -116,6 +116,47 @@ describe("Telegram TTS config resolution", () => {
       /Chưa đồng bộ Voice ID AusyncLab/
     );
   });
+
+  it("uses synced Local Clone server settings without hardcoded voice", () => {
+    const config = resolveTtsConfig("tts_local", {
+      localCloneServerUrl: "https://voice.example.com",
+      localCloneVoiceId: "custom-vietnamese-voice",
+      localCloneApiKey: "local-token"
+    }, {});
+
+    assert.equal(config.serverUrl, "https://voice.example.com");
+    assert.equal(config.endpoint, "https://voice.example.com/tts");
+    assert.equal(config.voiceId, "custom-vietnamese-voice");
+    assert.equal(config.apiKey, "local-token");
+  });
+
+  it("requires a Local Clone server URL", () => {
+    assert.throws(
+      () => resolveTtsConfig("tts_local", {}, {}),
+      /Chưa đồng bộ Local Clone Server URL/
+    );
+  });
+
+  it("blocks localhost Local Clone URLs for production Telegram by default", () => {
+    assert.throws(
+      () => resolveTtsConfig("tts_local", {
+        localCloneServerUrl: "http://127.0.0.1:7860",
+        localCloneVoiceId: "voice-a"
+      }, {}),
+      /không gọi được Local Clone URL nội bộ/
+    );
+  });
+
+  it("allows localhost Local Clone URLs when explicitly enabled", () => {
+    const config = resolveTtsConfig("tts_local", {
+      localCloneServerUrl: "http://127.0.0.1:7860",
+      localCloneVoiceId: "voice-a"
+    }, {
+      ALLOW_LOCAL_CLONE_PRIVATE_URL: "true"
+    });
+
+    assert.equal(config.endpoint, "http://127.0.0.1:7860/tts");
+  });
 });
 
 describe("voice list candidate picking", () => {
@@ -217,6 +258,7 @@ Rottweiler mạnh mẽ.
       voiceSyncMode: "segment",
       actionSfxEnabled: true,
       actionSfxVolume: 0.35,
+      actionSfxPresets: { point_left: "capcut_swoosh_pop", point_right: "camera_tick" },
       comparisonImages: [{
         leftTitle: "Chó Doberman",
         rightTitle: "Chó Rottweiler",
@@ -239,6 +281,7 @@ Rottweiler mạnh mẽ.
     assert.equal(decoded.voiceSyncMode, "segment");
     assert.equal(decoded.actionSfxEnabled, true);
     assert.equal(decoded.actionSfxVolume, 0.35);
+    assert.deepEqual(decoded.actionSfxPresets, { point_left: "capcut_swoosh_pop", point_right: "camera_tick" });
     assert.equal(decoded.scriptText, "Đây là Chó Doberman.\nĐây là Chó Rottweiler.");
     assert.equal(decoded.comparisonImages[0].leftImageUrl, "https://upload.wikimedia.org/doberman.jpg");
   });

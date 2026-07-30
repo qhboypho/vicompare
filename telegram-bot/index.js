@@ -32,6 +32,39 @@ function firstFilledString(values, { rejectLegacyLucyDefault = false } = {}) {
   return "";
 }
 
+function buildLocalCloneTtsEndpoint(serverUrl) {
+  const cleaned = cleanString(serverUrl).replace(/\/+$/, "");
+  if (!cleaned) return "";
+  if (/\/(?:tts|synthesize|generate|text-to-speech)$/i.test(cleaned)) return cleaned;
+  return `${cleaned}/tts`;
+}
+
+function isLocalNetworkUrl(rawUrl) {
+  try {
+    const hostname = new URL(rawUrl).hostname.toLowerCase();
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "0.0.0.0" ||
+      hostname.startsWith("192.168.") ||
+      hostname.startsWith("10.") ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function base64ToArrayBuffer(base64) {
+  const clean = cleanString(base64).replace(/^data:[^,]+,/, "");
+  const binary = atob(clean);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
 export function mergeSyncedCredentials(existing = {}, incoming = {}) {
   const next = existing && typeof existing === "object" && !Array.isArray(existing) ? { ...existing } : {};
   const source = incoming && typeof incoming === "object" && !Array.isArray(incoming) ? incoming : {};
@@ -178,6 +211,15 @@ function resolveSyncedVoiceId(engineType, syncedCreds = {}) {
     ]);
   }
 
+  if (engineType === "tts_local") {
+    return firstFilledString([
+      syncedCreds.localCloneVoiceId,
+      syncedCreds.localVoiceId,
+      syncedCreds.local_clone_voice_id,
+      syncedCreds.local_voice_id
+    ]);
+  }
+
   return "";
 }
 
@@ -245,6 +287,39 @@ export function resolveTtsConfig(engineType, syncedCreds = {}, env = {}) {
     };
   }
 
+  if (engineType === "tts_local") {
+    const serverUrl = firstFilledString([
+      syncedCreds.localCloneServerUrl,
+      syncedCreds.localVoiceServerUrl,
+      syncedCreds.local_clone_server_url,
+      syncedCreds.local_voice_server_url,
+      env.LOCAL_CLONE_SERVER_URL,
+      env.LOCAL_VOICE_SERVER_URL
+    ]);
+    if (!serverUrl) {
+      throw new Error("Chưa đồng bộ Local Clone Server URL từ Web Tool. Vui lòng nhập URL server/tunnel ở Web Tool prd rồi đồng bộ lại Telegram.");
+    }
+    if (isLocalNetworkUrl(serverUrl) && env.ALLOW_LOCAL_CLONE_PRIVATE_URL !== "true") {
+      throw new Error("Telegram bot prd không gọi được Local Clone URL nội bộ/127.0.0.1. Hãy bật Cloudflare Tunnel/ngrok và nhập URL HTTPS public vào Web Tool.");
+    }
+
+    return {
+      apiKey: firstFilledString([
+        syncedCreds.localCloneApiKey,
+        syncedCreds.localVoiceApiKey,
+        syncedCreds.local_clone_api_key,
+        syncedCreds.local_voice_api_key,
+        env.LOCAL_CLONE_API_KEY,
+        env.LOCAL_VOICE_API_KEY
+      ]),
+      voiceId: resolveSyncedVoiceId(engineType, syncedCreds),
+      serverUrl,
+      endpoint: buildLocalCloneTtsEndpoint(serverUrl),
+      fileName: "local_clone_voice.mp3",
+      speed: 1.0
+    };
+  }
+
   throw new Error("Động cơ TTS không được hỗ trợ.");
 }
 
@@ -262,6 +337,57 @@ export function readExportResult(result = {}) {
   const completed = Boolean(audioUrl) || ["completed", "complete", "success", "succeeded"].includes(state);
 
   return { state, audioUrl, failed, completed };
+}
+
+async function requestLocalCloneAudioBuffer(ttsConfig, text) {
+  const response = await fetch(ttsConfig.endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(ttsConfig.apiKey ? { Authorization: `Bearer ${ttsConfig.apiKey}` } : {})
+    },
+    body: JSON.stringify({
+      text: String(text || "").trim(),
+      voiceId: ttsConfig.voiceId,
+      voice_id: ttsConfig.voiceId,
+      language: "vi",
+      format: "mp3"
+    })
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(`Local Clone server lỗi ${response.status}: ${errorText || response.statusText}`);
+  }
+
+  if (contentType.includes("application/json")) {
+    const data = await response.json();
+    const audioUrl = firstFilledString([
+      data.audioUrl,
+      data.audio_url,
+      data.url,
+      data.downloadUrl,
+      data.download_url
+    ]);
+    if (audioUrl) {
+      const audioRes = await fetch(audioUrl);
+      if (!audioRes.ok) throw new Error(`Local Clone audioUrl tải lỗi ${audioRes.status}.`);
+      return await audioRes.arrayBuffer();
+    }
+
+    const audioBase64 = firstFilledString([
+      data.audioBase64,
+      data.audio_base64,
+      data.base64,
+      data.audio
+    ]);
+    if (audioBase64) return base64ToArrayBuffer(audioBase64);
+
+    throw new Error("Local Clone server không trả về audioUrl hoặc audioBase64.");
+  }
+
+  return await response.arrayBuffer();
 }
 
 export function extractComparisonPairs(scriptText) {
@@ -827,6 +953,7 @@ export function buildWebAppUrls({
   voiceSyncMode = "segment",
   actionSfxEnabled = true,
   actionSfxVolume = 0.2,
+  actionSfxPresets = null,
   comparisonImages = [],
   includeInlinePayload = false
 }) {
@@ -840,6 +967,7 @@ export function buildWebAppUrls({
         voiceSyncMode,
         actionSfxEnabled,
         actionSfxVolume,
+        actionSfxPresets,
         comparisonImages,
         createdAt: new Date(0).toISOString()
       }
@@ -934,7 +1062,9 @@ export default {
         hasElevenLabsApiKey: false,
         elevenLabsVoiceId: "",
         hasAusyncLabApiKey: false,
-        ausyncLabVoiceId: ""
+        ausyncLabVoiceId: "",
+        hasLocalCloneServerUrl: false,
+        localCloneVoiceId: ""
       };
 
       if (env.VICOMPARE_KV) {
@@ -948,6 +1078,8 @@ export default {
         status.elevenLabsVoiceId = resolveSyncedVoiceId("tts_eleven", credentials);
         status.hasAusyncLabApiKey = Boolean(cleanString(credentials.ausyncLabApiKey || credentials.ausyncApiKey));
         status.ausyncLabVoiceId = resolveSyncedVoiceId("tts_ausync", credentials);
+        status.hasLocalCloneServerUrl = Boolean(cleanString(credentials.localCloneServerUrl || credentials.localVoiceServerUrl));
+        status.localCloneVoiceId = resolveSyncedVoiceId("tts_local", credentials);
       }
 
       return new Response(JSON.stringify(status), {
@@ -1615,6 +1747,9 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         ],
         [
           { text: "🎙️ AusyncLab", callback_data: `tts_ausync|${channelId}` }
+        ],
+        [
+          { text: "🎙️ Local Clone", callback_data: `tts_local|${channelId}` }
         ]
       ]
     };
@@ -1797,6 +1932,10 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         const audioRes = await fetch(audioUrlResult);
         audioBuffer = await audioRes.arrayBuffer();
         fileName = ttsConfig.fileName;
+      } else if (engineType === "tts_local") {
+        const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
+        audioBuffer = await requestLocalCloneAudioBuffer(ttsConfig, scriptText);
+        fileName = ttsConfig.fileName;
       }
 
       if (audioBuffer) {
@@ -1827,6 +1966,7 @@ async function handleCallbackQuery(callbackQuery, token, env) {
           voiceSyncMode: syncedCreds.voiceSyncMode || "segment",
           actionSfxEnabled: syncedCreds.actionSfxEnabled !== false,
           actionSfxVolume: Number.isFinite(Number(syncedCreds.actionSfxVolume)) ? Number(syncedCreds.actionSfxVolume) : 0.2,
+          actionSfxPresets: syncedCreds.actionSfxPresets || null,
           comparisonImages,
           createdAt: new Date().toISOString()
         };
@@ -1855,6 +1995,7 @@ async function handleCallbackQuery(callbackQuery, token, env) {
           voiceSyncMode: syncedCreds.voiceSyncMode || "segment",
           actionSfxEnabled: syncedCreds.actionSfxEnabled !== false,
           actionSfxVolume: Number.isFinite(Number(syncedCreds.actionSfxVolume)) ? Number(syncedCreds.actionSfxVolume) : 0.2,
+          actionSfxPresets: syncedCreds.actionSfxPresets || null,
           comparisonImages,
           includeInlinePayload: !sessionSaved
         });

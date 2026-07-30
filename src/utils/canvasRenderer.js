@@ -41,6 +41,11 @@ function wrapText(ctx, text, maxWidth) {
   return lines;
 }
 
+function getCanvasFontFamily(fontFamily, fallback = '"Be Vietnam Pro", Arial, sans-serif') {
+  const value = typeof fontFamily === 'string' && fontFamily.trim() ? fontFamily.trim() : fallback;
+  return value.includes(',') ? value : `"${value.replace(/"/g, '\\"')}", Arial, sans-serif`;
+}
+
 /**
  * Helper to capitalize the first letter of a string
  */
@@ -478,6 +483,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
   // Draw Labels dynamically matching their respective panel zoom with auto-fitting font size to prevent overlapping
   const baseFontSize = state.titleFontSize || 36;
+  const titleFontFamily = getCanvasFontFamily(state.titleFontFamily);
   const outlineColor = state.titleOutlineColor || '#000000';
   const outlineW = state.titleOutlineWidth !== undefined ? state.titleOutlineWidth : 6;
 
@@ -486,14 +492,14 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     const baseSize = Math.round(baseFontSize * scale);
     const maxW = panelW * 1.02;
     
-    ctx.font = `900 ${baseSize}px "Montserrat", Arial, sans-serif`;
+    ctx.font = `900 ${baseSize}px ${titleFontFamily}`;
     let actualFontSize = baseSize;
     const measuredW = ctx.measureText(titleText).width;
     if (measuredW > maxW && measuredW > 0) {
       actualFontSize = Math.max(16, Math.floor(baseSize * (maxW / measuredW)));
     }
 
-    ctx.font = `900 ${actualFontSize}px "Montserrat", Arial, sans-serif`;
+    ctx.font = `900 ${actualFontSize}px ${titleFontFamily}`;
     ctx.textBaseline = 'alphabetic';
     ctx.strokeStyle = outlineColor;
     ctx.lineWidth = Math.round(outlineW * scale);
@@ -659,7 +665,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     const maxSubWidth = state.subtitleMaxWidth !== undefined ? state.subtitleMaxWidth : 450;
     
     const fontSize = state.subtitleFontSize || 38;
-    const fontFamily = state.subtitleFontFamily || '"Montserrat", Arial, sans-serif';
+    const fontFamily = getCanvasFontFamily(state.subtitleFontFamily);
     const lineHeight = fontSize + 12;
     
     ctx.font = '900 ' + fontSize + 'px ' + fontFamily;
