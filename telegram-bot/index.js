@@ -14,6 +14,7 @@ const corsHeaders = {
 };
 
 const WORKER_PUBLIC_BASE_URL = "https://vicompare-telegram-bot.qhboypho.workers.dev";
+const IMAGE_SEARCH_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
 export const LEGACY_LUCYLAB_DEFAULT_VOICE_ID = "67e37e5c5ffbc46fa2e75e11";
 
@@ -29,6 +30,24 @@ function firstFilledString(values, { rejectLegacyLucyDefault = false } = {}) {
     return candidate;
   }
   return "";
+}
+
+export function mergeSyncedCredentials(existing = {}, incoming = {}) {
+  const next = existing && typeof existing === "object" && !Array.isArray(existing) ? { ...existing } : {};
+  const source = incoming && typeof incoming === "object" && !Array.isArray(incoming) ? incoming : {};
+
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === "string") {
+      const candidate = cleanString(value);
+      if (!candidate) continue;
+      if (key === "vclipVoiceId" && candidate === LEGACY_LUCYLAB_DEFAULT_VOICE_ID) continue;
+      next[key] = candidate;
+    } else if (value !== undefined && value !== null) {
+      next[key] = value;
+    }
+  }
+
+  return next;
 }
 
 export function cleanTelegramScriptText(text) {
@@ -48,7 +67,8 @@ export function cleanTelegramScriptText(text) {
     if (
       /^👇\s*\*{0,2}Bước\s+1\/2\b/i.test(line) ||
       /^📺\s*\*{0,2}Kênh đã chọn\b/i.test(line) ||
-      /^👇\s*\*{0,2}Bước\s+2\/2\b/i.test(line)
+      /^👇\s*\*{0,2}Bước\s+2\/2\b/i.test(line) ||
+      /^📸\s*/i.test(line)
     ) {
       break;
     }
@@ -100,14 +120,77 @@ export function resolveTtsApiKey(engineType, syncedCreds = {}, env = {}) {
     return apiKey;
   }
 
+  if (engineType === "tts_ausync") {
+    const apiKey = firstFilledString([
+      syncedCreds.ausyncLabApiKey,
+      syncedCreds.ausyncApiKey,
+      syncedCreds.ausynclab_api_key,
+      syncedCreds.ausync_api_key,
+      env.DEFAULT_AUSYNC_KEY,
+      env.AUSYNC_KEY,
+      env.AUSYNCLAB_API_KEY
+    ]);
+    if (!apiKey) throw new Error("Chưa cấu hình API Key AusyncLab!");
+    return apiKey;
+  }
+
   throw new Error("Động cơ TTS không được hỗ trợ.");
 }
 
-export function resolveTtsConfig(engineType, syncedCreds = {}, env = {}, fetchedVoice = null) {
+function resolveSyncedVoiceId(engineType, syncedCreds = {}) {
   if (engineType === "tts_eleven") {
+    return firstFilledString([
+      syncedCreds.elevenLabsVoiceId,
+      syncedCreds.elevenlabsVoiceId,
+      syncedCreds.elevenVoiceId,
+      syncedCreds.selectedVoiceId,
+      syncedCreds.eleven_labs_voice_id,
+      syncedCreds.eleven_voice_id
+    ]);
+  }
+
+  if (engineType === "tts_lucy") {
+    return firstFilledString([
+      syncedCreds.lucyLabVoiceId,
+      syncedCreds.lucylabVoiceId,
+      syncedCreds.lucyVoiceId,
+      syncedCreds.lucy_lab_voice_id,
+      syncedCreds.lucy_voice_id
+    ]);
+  }
+
+  if (engineType === "tts_vclip") {
+    return firstFilledString([
+      syncedCreds.vclipVoiceId,
+      syncedCreds.vclipUserVoiceId,
+      syncedCreds.vclip_voice_id,
+      syncedCreds.vclip_user_voice_id
+    ], { rejectLegacyLucyDefault: true });
+  }
+
+  if (engineType === "tts_ausync") {
+    return firstFilledString([
+      syncedCreds.ausyncLabVoiceId,
+      syncedCreds.ausyncVoiceId,
+      syncedCreds.ausynclabVoiceId,
+      syncedCreds.ausync_lab_voice_id,
+      syncedCreds.ausync_voice_id
+    ]);
+  }
+
+  return "";
+}
+
+export function resolveTtsConfig(engineType, syncedCreds = {}, env = {}) {
+  if (engineType === "tts_eleven") {
+    const voiceId = resolveSyncedVoiceId(engineType, syncedCreds);
+    if (!voiceId) {
+      throw new Error("Chưa đồng bộ Voice ID ElevenLabs từ Web Tool. Vui lòng chọn/lưu giọng ElevenLabs trên Web Tool prd rồi đồng bộ lại Telegram.");
+    }
+
     return {
       apiKey: resolveTtsApiKey(engineType, syncedCreds, env),
-      voiceId: "21m00Tcm4TlvDq8ikWAM",
+      voiceId,
       host: "api.elevenlabs.io",
       fileName: "elevenlabs_voice.mp3",
       speed: 1.0
@@ -115,16 +198,10 @@ export function resolveTtsConfig(engineType, syncedCreds = {}, env = {}, fetched
   }
 
   if (engineType === "tts_lucy") {
-    const voiceId = firstFilledString([
-      syncedCreds.lucyLabVoiceId,
-      env.DEFAULT_LUCY_VOICE_ID,
-      env.LUCY_VOICE_ID,
-      env.LUCY_USER_VOICE_ID,
-      env.USER_VOICE_ID,
-      env.DEFAULT_VOICE_ID,
-      fetchedVoice,
-      LEGACY_LUCYLAB_DEFAULT_VOICE_ID
-    ]);
+    const voiceId = resolveSyncedVoiceId(engineType, syncedCreds);
+    if (!voiceId) {
+      throw new Error("Chưa đồng bộ Voice ID LucyLab từ Web Tool. Vui lòng chọn/lưu giọng LucyLab trên Web Tool prd rồi đồng bộ lại Telegram.");
+    }
 
     return {
       apiKey: resolveTtsApiKey(engineType, syncedCreds, env),
@@ -136,16 +213,10 @@ export function resolveTtsConfig(engineType, syncedCreds = {}, env = {}, fetched
   }
 
   if (engineType === "tts_vclip") {
-    const voiceId = firstFilledString([
-      syncedCreds.vclipVoiceId,
-      env.DEFAULT_VCLIP_VOICE_ID,
-      env.VCLIP_VOICE_ID,
-      env.VCLIP_USER_VOICE_ID,
-      fetchedVoice
-    ], { rejectLegacyLucyDefault: true });
+    const voiceId = resolveSyncedVoiceId(engineType, syncedCreds);
 
     if (!voiceId) {
-      throw new Error("Chưa cấu hình userVoiceId VClip hợp lệ. Vui lòng nhập đúng ID giọng VClip trong Web App rồi đồng bộ lại Telegram.");
+      throw new Error("Chưa đồng bộ userVoiceId VClip hợp lệ từ Web Tool. Vui lòng nhập đúng ID giọng VClip trên Web Tool prd rồi đồng bộ lại Telegram.");
     }
 
     return {
@@ -154,6 +225,23 @@ export function resolveTtsConfig(engineType, syncedCreds = {}, env = {}, fetched
       host: "api-tts.vclip.io",
       fileName: "vclip_voice.mp3",
       speed: 1.0
+    };
+  }
+
+  if (engineType === "tts_ausync") {
+    const voiceId = resolveSyncedVoiceId(engineType, syncedCreds);
+    if (!voiceId) {
+      throw new Error("Chưa đồng bộ Voice ID AusyncLab từ Web Tool. Vui lòng nhập Voice ID AusyncLab rồi đồng bộ lại Telegram.");
+    }
+
+    return {
+      apiKey: resolveTtsApiKey(engineType, syncedCreds, env),
+      voiceId,
+      host: "api.ausynclab.io",
+      fileName: "ausynclab_voice.wav",
+      speed: Number.parseFloat(firstFilledString([syncedCreds.ausyncLabSpeed, syncedCreds.ausyncSpeed, env.AUSYNC_SPEED])) || 1.0,
+      modelName: firstFilledString([syncedCreds.ausyncLabModel, syncedCreds.ausyncModel, env.AUSYNC_MODEL]) || "myna-2",
+      language: firstFilledString([syncedCreds.ausyncLabLanguage, syncedCreds.ausyncLanguage, env.AUSYNC_LANGUAGE]) || "vi"
     };
   }
 
@@ -198,61 +286,480 @@ export function extractComparisonPairs(scriptText) {
   return pairs;
 }
 
-function buildImageSearchQueries(title) {
-  const cleanTitle = cleanString(title)
+const IMAGE_SUBJECT_ALIASES = new Map([
+  ["chó doberman", "Dobermann"],
+  ["cho doberman", "Dobermann"],
+  ["doberman", "Dobermann"],
+  ["chó rottweiler", "Rottweiler"],
+  ["cho rottweiler", "Rottweiler"],
+  ["chó pitbull", "American Pit Bull Terrier"],
+  ["cho pitbull", "American Pit Bull Terrier"],
+  ["pitbull", "American Pit Bull Terrier"],
+  ["chó american bully", "American Bully"],
+  ["cho american bully", "American Bully"],
+  ["trí tuệ nhân tạo", "Artificial intelligence"],
+  ["tri tue nhan tao", "Artificial intelligence"],
+  ["trí tuệ con người", "Thinking"],
+  ["tri tue con nguoi", "Thinking"],
+  ["tư duy con người", "Thinking"],
+  ["tu duy con nguoi", "Thinking"],
+  ["khách quan", "Objectivity"],
+  ["khach quan", "Objectivity"],
+  ["chủ quan", "Subjectivity"],
+  ["chu quan", "Subjectivity"]
+]);
+
+const DOG_BREED_TERMS = new Set([
+  "dobermann",
+  "doberman",
+  "rottweiler",
+  "american pit bull terrier",
+  "pitbull",
+  "american bully"
+]);
+
+const BAD_IMAGE_TITLE_TERMS = [
+  "logo",
+  "icon",
+  "symbol",
+  "map",
+  "locator",
+  "flag",
+  "coat of arms",
+  "emblem",
+  "pdf",
+  "book",
+  "cover",
+  "poster",
+  "screenshot",
+  "audio",
+  ".oga",
+  ".ogg",
+  ".webm",
+  ".svg"
+];
+
+const BAD_IMAGE_DOMAINS = [
+  "wikipedia.org",
+  "wikimedia.org",
+  "wikiwand.com",
+  "youtube.com",
+  "youtu.be",
+  "facebook.com",
+  "tiktok.com",
+  "x.com",
+  "twitter.com",
+  "reddit.com"
+];
+
+function normalizeImageSubject(title) {
+  const raw = cleanString(title)
+    .replace(/[.?!]+$/g, "")
+    .replace(/\s+/g, " ");
+  const noPrefix = raw
     .replace(/^con\s+/i, "")
     .replace(/^chó\s+/i, "")
     .replace(/^cho\s+/i, "")
     .replace(/^mèo\s+/i, "")
-    .replace(/^meo\s+/i, "");
+    .replace(/^meo\s+/i, "")
+    .trim();
+  const lookupKey = raw.toLowerCase();
+  const noPrefixKey = noPrefix.toLowerCase();
 
-  const queries = [title, cleanTitle]
+  return {
+    raw,
+    subject: IMAGE_SUBJECT_ALIASES.get(lookupKey) || IMAGE_SUBJECT_ALIASES.get(noPrefixKey) || noPrefix || raw,
+    noPrefix
+  };
+}
+
+function tokenizeImageText(value) {
+  return cleanString(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function looksLikeDogBreed(subject) {
+  const normalized = tokenizeImageText(subject).join(" ");
+  return DOG_BREED_TERMS.has(normalized);
+}
+
+export function buildImageSearchQueries(title) {
+  const { raw, subject, noPrefix } = normalizeImageSubject(title);
+  const baseQueries = [subject, noPrefix, raw]
     .map(q => cleanString(q))
     .filter(Boolean);
 
-  return [...new Set(queries.flatMap(q => [`${q} photo`, `${q} animal`, q]))];
+  const queries = [];
+  for (const q of baseQueries) {
+    if (looksLikeDogBreed(q)) {
+      queries.push(`${q} dog breed`, `${q} dog`, q);
+    } else {
+      queries.push(q, `${q} photo`, `${q} illustration`);
+    }
+  }
+
+  return [...new Set(queries)];
 }
 
-async function fetchWikimediaImage(title) {
+function decodeSearchText(value) {
+  return cleanString(value)
+    .replace(/\\u003d/g, "=")
+    .replace(/\\u0026/g, "&")
+    .replace(/\\u003c/g, "<")
+    .replace(/\\u003e/g, ">")
+    .replace(/\\\//g, "/")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"");
+}
+
+function normalizeImageUrl(value) {
+  try {
+    const url = decodeSearchText(value);
+    return decodeURIComponent(url);
+  } catch (e) {
+    return decodeSearchText(value);
+  }
+}
+
+function isUsableWebImageUrl(value) {
+  const imageUrl = normalizeImageUrl(value);
+  if (!/^https?:\/\//i.test(imageUrl)) return false;
+  if (BAD_IMAGE_TITLE_TERMS.some(term => imageUrl.toLowerCase().includes(term))) return false;
+  try {
+    const parsed = new URL(imageUrl);
+    if (BAD_IMAGE_DOMAINS.some(domain => parsed.hostname.includes(domain))) return false;
+    return /\.(?:jpe?g|png|webp)(?:$|[?#])/i.test(parsed.pathname + parsed.search);
+  } catch (e) {
+    return false;
+  }
+}
+
+function scoreWebImageUrl(imageUrl, query, subject) {
+  const normalizedUrl = normalizeImageUrl(imageUrl);
+  const haystack = tokenizeImageText(normalizedUrl);
+  const tokenSet = new Set(haystack);
+  const subjectTokens = tokenizeImageText(subject);
+  const queryTokens = tokenizeImageText(query);
+  let score = 0;
+
+  for (const token of subjectTokens) {
+    if (tokenSet.has(token)) score += 8;
+  }
+  for (const token of queryTokens) {
+    if (tokenSet.has(token)) score += 2;
+  }
+  if (looksLikeDogBreed(subject) && tokenSet.has("dog")) score += 5;
+  if (/\/(?:image|photo|media|uploads?|content)\//i.test(normalizedUrl)) score += 2;
+  if (/\.(?:jpe?g|webp)(?:$|[?#])/i.test(normalizedUrl)) score += 2;
+  if (BAD_IMAGE_TITLE_TERMS.some(term => normalizedUrl.toLowerCase().includes(term))) score -= 25;
+
+  return score;
+}
+
+function pickBestWebImage(urls, query, subject) {
+  const seen = new Set();
+  return urls
+    .map(normalizeImageUrl)
+    .filter(isUsableWebImageUrl)
+    .filter(url => {
+      const key = url.split("?")[0].toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map(url => ({
+      url,
+      score: scoreWebImageUrl(url, query, subject)
+    }))
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score)[0]?.url || "";
+}
+
+async function fetchGoogleImageSearch(query, subject) {
+  try {
+    const url = new URL("https://www.google.com/search");
+    url.searchParams.set("tbm", "isch");
+    url.searchParams.set("hl", "en");
+    url.searchParams.set("safe", "active");
+    url.searchParams.set("q", query);
+
+    const res = await fetch(url.toString(), {
+      headers: {
+        "User-Agent": IMAGE_SEARCH_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml"
+      }
+    });
+    if (!res.ok) return "";
+
+    const text = decodeSearchText(await res.text());
+    const urls = [];
+    for (const match of text.matchAll(/https?:\/\/[^"'<>\\\s]+?\.(?:jpe?g|png|webp)(?:\?[^"'<>\\\s]*)?/gi)) {
+      urls.push(match[0]);
+    }
+    return pickBestWebImage(urls, query, subject);
+  } catch (e) {
+    return "";
+  }
+}
+
+async function fetchDuckDuckGoImageSearch(query, subject) {
+  try {
+    const homeUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`;
+    const homeRes = await fetch(homeUrl, {
+      headers: { "User-Agent": IMAGE_SEARCH_USER_AGENT }
+    });
+    if (!homeRes.ok) return "";
+    const homeText = await homeRes.text();
+    const vqd = homeText.match(/vqd=['"]?([^&'"]+)/)?.[1];
+    if (!vqd) return "";
+
+    const apiUrl = new URL("https://duckduckgo.com/i.js");
+    apiUrl.searchParams.set("l", "us-en");
+    apiUrl.searchParams.set("o", "json");
+    apiUrl.searchParams.set("q", query);
+    apiUrl.searchParams.set("vqd", vqd);
+    apiUrl.searchParams.set("f", ",,,");
+    apiUrl.searchParams.set("p", "1");
+
+    const res = await fetch(apiUrl.toString(), {
+      headers: {
+        "User-Agent": IMAGE_SEARCH_USER_AGENT,
+        "Referer": homeUrl,
+        "Accept": "application/json"
+      }
+    });
+    if (!res.ok) return "";
+    const data = await res.json();
+    const urls = (data.results || []).flatMap(item => [item.image, item.thumbnail]).filter(Boolean);
+    return pickBestWebImage(urls, query, subject);
+  } catch (e) {
+    return "";
+  }
+}
+
+async function fetchWebImage(title) {
+  const { subject } = normalizeImageSubject(title);
   for (const query of buildImageSearchQueries(title)) {
-    try {
-      const url = new URL("https://commons.wikimedia.org/w/api.php");
-      url.searchParams.set("action", "query");
-      url.searchParams.set("generator", "search");
-      url.searchParams.set("gsrnamespace", "6");
-      url.searchParams.set("gsrlimit", "6");
-      url.searchParams.set("gsrsearch", query);
-      url.searchParams.set("prop", "imageinfo");
-      url.searchParams.set("iiprop", "url|mime");
-      url.searchParams.set("iiurlwidth", "720");
-      url.searchParams.set("format", "json");
-      url.searchParams.set("origin", "*");
+    const googleImage = await fetchGoogleImageSearch(query, subject);
+    if (googleImage) return googleImage;
 
-      const res = await fetch(url.toString(), {
-        headers: { "User-Agent": "ViCompareBot/1.0 (image search for user-created videos)" }
-      });
-      if (!res.ok) continue;
-
-      const data = await res.json();
-      const pages = Object.values(data.query?.pages || {});
-      const image = pages
-        .map(page => page.imageinfo?.[0])
-        .find(info => info?.thumburl && /^image\//.test(info.mime || ""));
-
-      if (image?.thumburl) return image.thumburl;
-    } catch (e) {}
+    const duckDuckGoImage = await fetchDuckDuckGoImageSearch(query, subject);
+    if (duckDuckGoImage) return duckDuckGoImage;
   }
 
   return "";
 }
 
-async function fetchComparisonImages(scriptText) {
+export async function fetchComparisonImages(scriptText) {
   const pairs = extractComparisonPairs(scriptText);
   return Promise.all(pairs.map(async (pair) => ({
     ...pair,
-    leftImageUrl: await fetchWikimediaImage(pair.leftTitle),
-    rightImageUrl: await fetchWikimediaImage(pair.rightTitle)
+    leftImageUrl: await fetchWebImage(pair.leftTitle),
+    rightImageUrl: await fetchWebImage(pair.rightTitle)
   })));
+}
+
+function getManualImageStateKey(chatId) {
+  return `manual_images:${chatId}`;
+}
+
+function getPendingManualImageKey(chatId, pendingId) {
+  return `pending_image:${chatId}:${pendingId}`;
+}
+
+function buildManualImageState(chatId, scriptText, comparisonImages = []) {
+  const pairs = extractComparisonPairs(scriptText);
+  return {
+    chatId,
+    scriptText: cleanTelegramScriptText(scriptText),
+    sessionId: "",
+    comparisonImages: pairs.map((pair, index) => {
+      const existing = comparisonImages[index] || {};
+      return {
+        ...pair,
+        leftImageUrl: cleanString(existing.leftImageUrl),
+        rightImageUrl: cleanString(existing.rightImageUrl)
+      };
+    }),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+async function readManualImageState(chatId, env) {
+  if (!env.VICOMPARE_KV) return null;
+  try {
+    return await env.VICOMPARE_KV.get(getManualImageStateKey(chatId), "json");
+  } catch (e) {
+    return null;
+  }
+}
+
+async function writeManualImageState(chatId, state, env) {
+  if (!env.VICOMPARE_KV) return false;
+  await env.VICOMPARE_KV.put(getManualImageStateKey(chatId), JSON.stringify(state), { expirationTtl: 86400 });
+  return true;
+}
+
+function getManualImageTargets(comparisonImages = []) {
+  const targets = [];
+  comparisonImages.forEach((pair, index) => {
+    if (!pair.leftImageUrl) {
+      targets.push({ pairIndex: index, side: "left", title: pair.leftTitle });
+    }
+    if (!pair.rightImageUrl) {
+      targets.push({ pairIndex: index, side: "right", title: pair.rightTitle });
+    }
+  });
+  return targets;
+}
+
+function normalizeMatchText(value) {
+  return cleanString(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function scoreTextTargetMatch(text, title) {
+  const textTokens = new Set(normalizeMatchText(text).split(" ").filter(Boolean));
+  const titleTokens = normalizeMatchText(title).split(" ").filter(token => token.length > 1);
+  if (!textTokens.size || !titleTokens.length) return 0;
+  const matched = titleTokens.filter(token => textTokens.has(token)).length;
+  return matched / titleTokens.length;
+}
+
+export function pickManualImageTargetFromText(text, targets = []) {
+  const scored = targets
+    .map(target => ({
+      target,
+      score: Math.max(
+        scoreTextTargetMatch(text, target.title),
+        scoreTextTargetMatch(text, target.title?.replace(/^Anh hùng\s+/i, "")),
+        scoreTextTargetMatch(text, target.title?.replace(/^Người\s+/i, ""))
+      )
+    }))
+    .filter(item => item.score >= 0.65)
+    .sort((a, b) => b.score - a.score);
+
+  return scored[0]?.target || null;
+}
+
+export function readImageClassificationResult(value, targets = []) {
+  let parsed = value;
+  if (typeof value === "string") {
+    const jsonText = value.match(/\{[\s\S]*\}/)?.[0] || "";
+    if (!jsonText) return null;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  let pairIndex = Number(parsed?.pairIndex);
+  let side = cleanString(parsed?.side).toLowerCase();
+  const confidence = Number(parsed?.confidence ?? 0);
+  if (side === "trái" || side === "trai" || side === "a") side = "left";
+  if (side === "phải" || side === "phai" || side === "b") side = "right";
+
+  let target = targets.find(item => item.pairIndex === pairIndex && item.side === side);
+  if (!target && pairIndex > 0) {
+    pairIndex -= 1;
+    target = targets.find(item => item.pairIndex === pairIndex && item.side === side);
+  }
+
+  if (!target) {
+    const title = cleanString(parsed?.title || parsed?.targetTitle || parsed?.label || parsed?.match);
+    target = pickManualImageTargetFromText(title, targets);
+    if (target) {
+      pairIndex = target.pairIndex;
+      side = target.side;
+    }
+  }
+
+  if (!target || confidence < 0.2) return null;
+  return { pairIndex, side, confidence, title: target.title };
+}
+
+function mergeManualComparisonImages(baseImages = [], manualState = null) {
+  if (!manualState || !Array.isArray(manualState.comparisonImages)) return baseImages;
+  return baseImages.map((item, index) => {
+    const manual = manualState.comparisonImages[index];
+    if (!manual) return item;
+    return {
+      ...item,
+      leftImageUrl: cleanString(manual.leftImageUrl) || item.leftImageUrl || "",
+      rightImageUrl: cleanString(manual.rightImageUrl) || item.rightImageUrl || ""
+    };
+  });
+}
+
+function getManualImageProgress(comparisonImages = []) {
+  const total = comparisonImages.length * 2;
+  const done = comparisonImages.reduce((sum, pair) => (
+    sum + (pair.leftImageUrl ? 1 : 0) + (pair.rightImageUrl ? 1 : 0)
+  ), 0);
+  return { done, total };
+}
+
+async function assignManualImageToTarget(chatId, imageFileId, target, env) {
+  const state = await readManualImageState(chatId, env);
+  if (!state || !Array.isArray(state.comparisonImages) || !state.comparisonImages[target.pairIndex]) {
+    return null;
+  }
+
+  const imageUrl = `${WORKER_PUBLIC_BASE_URL}/api/telegram-file?file_id=${encodeURIComponent(imageFileId)}`;
+  const nextState = {
+    ...state,
+    comparisonImages: state.comparisonImages.map((pair, index) => {
+      if (index !== target.pairIndex) return pair;
+      return {
+        ...pair,
+        [`${target.side}ImageUrl`]: imageUrl
+      };
+    }),
+    updatedAt: new Date().toISOString()
+  };
+
+  await writeManualImageState(chatId, nextState, env);
+  if (nextState.sessionId) {
+    await updateSessionComparisonImages(nextState.sessionId, nextState.comparisonImages, env);
+  }
+
+  return nextState;
+}
+
+export function buildManualImageTargetKeyboard(targets, pendingId) {
+  const buttons = targets.map(target => ({
+    text: `${target.pairIndex + 1}${target.side === "left" ? "T" : "P"} ${target.title}`.slice(0, 60),
+    callback_data: `img_${pendingId}|${target.pairIndex}|${target.side}`
+  }));
+  const rows = [];
+  for (let i = 0; i < buttons.length; i += 2) {
+    rows.push(buttons.slice(i, i + 2));
+  }
+  return { inline_keyboard: rows };
+}
+
+async function updateSessionComparisonImages(sessionId, comparisonImages, env) {
+  if (!env.VICOMPARE_KV || !sessionId) return false;
+  const session = await env.VICOMPARE_KV.get(`session:${sessionId}`, "json");
+  if (!session) return false;
+  await env.VICOMPARE_KV.put(`session:${sessionId}`, JSON.stringify({
+    ...session,
+    comparisonImages,
+    updatedAt: new Date().toISOString()
+  }), { expirationTtl: 86400 });
+  return true;
 }
 
 async function pollExportAudioUrl(host, apiKey, exportId, engineName) {
@@ -283,6 +790,32 @@ async function pollExportAudioUrl(host, apiKey, exportId, engineName) {
   }
 
   throw new Error(`${engineName}: Quá thời gian tạo file.`);
+}
+
+async function pollAusyncLabAudioUrl(apiKey, audioId) {
+  for (let i = 0; i < 24; i += 1) {
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    const res = await fetch(`https://api.ausynclab.io/api/v1/speech/${encodeURIComponent(audioId)}`, {
+      method: "GET",
+      headers: {
+        "accept": "application/json",
+        "X-API-Key": apiKey
+      }
+    });
+    if (!res.ok) continue;
+    const data = await res.json().catch(() => ({}));
+    const result = data.result || data;
+    const state = cleanString(result.state || result.status || data.status).toUpperCase();
+    const audioUrl = firstFilledString([result.audio_url, result.audioUrl, result.url, result.download_url]);
+    if (audioUrl && ["SUCCEED", "SUCCEEDED", "SUCCESS", "COMPLETED", "DONE", ""].includes(state)) {
+      return audioUrl;
+    }
+    if (["FAILED", "FAIL", "ERROR"].includes(state)) {
+      throw new Error(`AusyncLab: ${result.message || "Tiến trình tạo giọng nói bị lỗi."}`);
+    }
+  }
+
+  throw new Error("AusyncLab: Quá thời gian tạo file.");
 }
 
 export function buildWebAppUrls({
@@ -344,28 +877,76 @@ export default {
     // REST API ENDPOINTS DÀNH CHO WEB APP
     // -------------------------------------------------------------
 
+    if (url.pathname === "/api/ausync-callback" && request.method === "POST") {
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
     // 1. POST /api/sync-profiles - Đồng bộ danh sách Kênh & Thông tin API Key/VoiceID từ Web App
     if (url.pathname === "/api/sync-profiles" && request.method === "POST") {
       try {
-        const body = await request.json();
-        if (env.VICOMPARE_KV) {
-          if (body.profiles && Array.isArray(body.profiles)) {
-            const profilesToSave = body.profiles.map(p => ({
-              id: p.id,
-              name: p.name || p.headerTitle || p.id
-            }));
-            await env.VICOMPARE_KV.put("channel_profiles", JSON.stringify(profilesToSave));
-          }
-          if (body.credentials) {
-            await env.VICOMPARE_KV.put("app_credentials", JSON.stringify(body.credentials));
-          }
+        if (!env.VICOMPARE_KV) {
+          return new Response(JSON.stringify({
+            success: false,
+            hasKv: false,
+            error: "Missing Cloudflare KV binding VICOMPARE_KV. Cannot persist Web Tool voice/API settings for Telegram."
+          }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
-        return new Response(JSON.stringify({ success: true }), {
+
+        const body = await request.json();
+        let credentialsSaved = false;
+        if (body.profiles && Array.isArray(body.profiles)) {
+          const profilesToSave = body.profiles.map(p => ({
+            id: p.id,
+            name: p.name || p.headerTitle || p.id
+          }));
+          await env.VICOMPARE_KV.put("channel_profiles", JSON.stringify(profilesToSave));
+        }
+        if (body.credentials) {
+          const existingCredentials = (await env.VICOMPARE_KV.get("app_credentials", "json")) || {};
+          const mergedCredentials = mergeSyncedCredentials(existingCredentials, body.credentials);
+          await env.VICOMPARE_KV.put("app_credentials", JSON.stringify(mergedCredentials));
+          credentialsSaved = true;
+        }
+        return new Response(JSON.stringify({ success: true, hasKv: true, credentialsSaved }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       } catch (err) {
         return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
       }
+    }
+
+    if (url.pathname === "/api/tts-config-status" && request.method === "GET") {
+      const status = {
+        hasKv: Boolean(env.VICOMPARE_KV),
+        hasCredentials: false,
+        hasVclipApiKey: false,
+        vclipVoiceId: "",
+        hasLucyLabApiKey: false,
+        lucyLabVoiceId: "",
+        hasElevenLabsApiKey: false,
+        elevenLabsVoiceId: "",
+        hasAusyncLabApiKey: false,
+        ausyncLabVoiceId: ""
+      };
+
+      if (env.VICOMPARE_KV) {
+        const credentials = (await env.VICOMPARE_KV.get("app_credentials", "json")) || {};
+        status.hasCredentials = Object.keys(credentials).length > 0;
+        status.hasVclipApiKey = Boolean(cleanString(credentials.vclipApiKey));
+        status.vclipVoiceId = resolveSyncedVoiceId("tts_vclip", credentials);
+        status.hasLucyLabApiKey = Boolean(cleanString(credentials.lucyLabApiKey));
+        status.lucyLabVoiceId = resolveSyncedVoiceId("tts_lucy", credentials);
+        status.hasElevenLabsApiKey = Boolean(cleanString(credentials.elevenLabsApiKey));
+        status.elevenLabsVoiceId = resolveSyncedVoiceId("tts_eleven", credentials);
+        status.hasAusyncLabApiKey = Boolean(cleanString(credentials.ausyncLabApiKey || credentials.ausyncApiKey));
+        status.ausyncLabVoiceId = resolveSyncedVoiceId("tts_ausync", credentials);
+      }
+
+      return new Response(JSON.stringify(status), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
     }
 
     // 2. GET /api/get-profiles - Lấy danh sách Mẫu Kênh
@@ -495,6 +1076,41 @@ export default {
       }
     }
 
+    // 6. GET /api/telegram-file - Proxy ảnh/file Telegram để Web Tool có thể dùng ổn định trên prod
+    if (url.pathname === "/api/telegram-file" && request.method === "GET") {
+      try {
+        const fileId = cleanString(url.searchParams.get("file_id"));
+        if (!fileId) {
+          return new Response("Missing file_id", { status: 400, headers: corsHeaders });
+        }
+
+        const token = env.TELEGRAM_BOT_TOKEN;
+        if (!token) {
+          return new Response("Missing bot token", { status: 500, headers: corsHeaders });
+        }
+
+        const fileInfoRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`);
+        const fileInfo = await fileInfoRes.json().catch(() => ({}));
+        const filePath = fileInfo.result?.file_path;
+        if (!fileInfoRes.ok || !filePath) {
+          return new Response("Telegram file not found", { status: 404, headers: corsHeaders });
+        }
+
+        const fileRes = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+        const headers = new Headers(corsHeaders);
+        headers.set("Content-Type", fileRes.headers.get("Content-Type") || "image/jpeg");
+        const contentLength = fileRes.headers.get("Content-Length");
+        if (contentLength) headers.set("Content-Length", contentLength);
+
+        return new Response(fileRes.body, {
+          status: fileRes.status,
+          headers
+        });
+      } catch (err) {
+        return new Response(`Telegram file proxy error: ${err.message}`, { status: 502, headers: corsHeaders });
+      }
+    }
+
     // -------------------------------------------------------------
     // TELEGRAM BOT WEBHOOK HANDLER
     // -------------------------------------------------------------
@@ -516,7 +1132,7 @@ export default {
       }
 
       if (update.message) {
-        await handleMessage(update.message, token, env);
+        ctx.waitUntil(handleMessage(update.message, token, env));
       }
 
       return new Response("OK", { status: 200, headers: corsHeaders });
@@ -526,30 +1142,6 @@ export default {
     }
   }
 };
-
-// Helper tự động lấy Voice ID hợp lệ từ tài khoản LucyLab / VClip
-async function fetchVoiceId(host, apiKey) {
-  const methods = ["getUserVoices", "getVoices", "getPublicVoices"];
-  for (const m of methods) {
-    try {
-      const res = await fetch(`https://${host}/json-rpc`, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ method: m, input: { limit: 20, page: 1 } })
-      });
-      const data = await res.json();
-      const list = data.result?.items || data.result?.voices || (Array.isArray(data.result) ? data.result : []);
-      if (list && Array.isArray(list) && list.length > 0) {
-        for (const item of list) {
-          if (!item) continue;
-          const candidate = pickVoiceCandidate(item);
-          if (candidate) return candidate;
-        }
-      }
-    } catch (e) {}
-  }
-  return null;
-}
 
 // Helper lấy danh sách Mẫu Kênh hiện tại
 async function getProfiles(env) {
@@ -562,6 +1154,192 @@ async function getProfiles(env) {
     } catch (e) {}
   }
   return DEFAULT_PROFILES;
+}
+
+async function downloadTelegramFileWithContentType(fileId, token) {
+  const fileInfoRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`);
+  const fileInfo = await fileInfoRes.json().catch(() => ({}));
+  const filePath = fileInfo.result?.file_path;
+  if (!fileInfoRes.ok || !filePath) {
+    throw new Error("Không tải được thông tin file từ Telegram.");
+  }
+
+  const fileRes = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+  if (!fileRes.ok) {
+    throw new Error("Không tải được file từ Telegram CDN.");
+  }
+
+  return {
+    buffer: await fileRes.arrayBuffer(),
+    contentType: inferImageMimeType(fileRes.headers.get("Content-Type"), filePath),
+    filePath
+  };
+}
+
+export function getTelegramImageFileId(message) {
+  const photo = message.photo;
+  if (photo && photo.length > 0) {
+    return photo[photo.length - 1].file_id;
+  }
+
+  const document = message.document;
+  const mimeType = cleanString(document?.mime_type).toLowerCase();
+  const fileName = cleanString(document?.file_name).toLowerCase();
+  const isImageDocument = mimeType.startsWith("image/")
+    || /\.(?:jpe?g|png|webp)$/i.test(fileName);
+
+  return isImageDocument ? document.file_id : "";
+}
+
+function getTelegramImageLabel(message) {
+  return [
+    message.caption,
+    message.document?.file_name
+  ].map(cleanString).filter(Boolean).join(" ");
+}
+
+export function inferImageMimeType(contentType, filePath = "") {
+  const mimeType = cleanString(contentType).toLowerCase();
+  if (["image/jpeg", "image/png", "image/webp"].includes(mimeType)) return mimeType;
+
+  const path = cleanString(filePath).toLowerCase();
+  if (/\.webp(?:$|\?)/i.test(path)) return "image/webp";
+  if (/\.png(?:$|\?)/i.test(path)) return "image/png";
+  if (/\.(?:jpe?g)(?:$|\?)/i.test(path)) return "image/jpeg";
+  return "image/jpeg";
+}
+
+export function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function classifyTelegramImageForTargets(photoBuffer, contentType, targets, env) {
+  const geminiKey = env.DEFAULT_GEMINI_KEY;
+  if (!geminiKey) {
+    throw new Error("Chưa cấu hình DEFAULT_GEMINI_KEY để nhận diện ảnh.");
+  }
+  if (!targets.length) return null;
+
+  const targetText = targets
+    .map(target => `${target.pairIndex + 1}.${target.side === "left" ? "left" : "right"} = ${target.title}`)
+    .join("\n");
+  const base64Image = arrayBufferToBase64(photoBuffer);
+  const mimeType = inferImageMimeType(contentType);
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key=${geminiKey}`;
+
+  const res = await fetch(geminiUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            {
+              text:
+                "Identify which target this image best represents for a Vietnamese short comparison video. " +
+                "Pick the closest target even for symbolic or documentary images. " +
+                "Return only compact JSON like {\"pairIndex\":0,\"side\":\"left\",\"title\":\"Dân quân\",\"confidence\":0.91}. " +
+                "pairIndex is zero-based. Use side left/right. Return confidence 0 only when the image is completely unrelated.\n\n" +
+                `Targets:\n${targetText}`
+            },
+            {
+              inlineData: {
+                mimeType,
+                data: base64Image
+              }
+            }
+          ]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 80
+      }
+    })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Gemini nhận diện ảnh lỗi ${res.status}: ${errText || res.statusText}`);
+  }
+
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  return readImageClassificationResult(text, targets);
+}
+
+async function handleManualComparisonImage(message, token, env) {
+  const chatId = message.chat.id;
+  const imageFileId = getTelegramImageFileId(message);
+  if (!imageFileId) return false;
+
+  const state = await readManualImageState(chatId, env);
+  if (!state || !Array.isArray(state.comparisonImages) || state.comparisonImages.length === 0) {
+    return false;
+  }
+
+  const targets = getManualImageTargets(state.comparisonImages);
+  if (targets.length === 0) {
+    await sendTelegramMessage(chatId, "✅ Kịch bản này đã đủ ảnh rồi. Nếu muốn đổi ảnh, gửi lại chủ đề để tạo phiên mới nhé.", token);
+    return true;
+  }
+
+  try {
+    const labelTarget = pickManualImageTargetFromText(getTelegramImageLabel(message), targets);
+    let classified = labelTarget
+      ? { ...labelTarget, confidence: 0.99 }
+      : null;
+
+    if (!classified) {
+      const { buffer, contentType } = await downloadTelegramFileWithContentType(imageFileId, token);
+      classified = await classifyTelegramImageForTargets(buffer, contentType, targets, env);
+    }
+
+    if (!classified) {
+      const pendingId = Math.random().toString(36).slice(2, 8);
+      if (env.VICOMPARE_KV) {
+        await env.VICOMPARE_KV.put(getPendingManualImageKey(chatId, pendingId), JSON.stringify({
+          imageFileId,
+          createdAt: new Date().toISOString()
+        }), { expirationTtl: 3600 });
+      }
+      await sendTelegramMessage(
+        chatId,
+        "⚠️ Tao chưa nhận diện chắc ảnh này thuộc mục nào. Bấm chọn ô cần gán ảnh này:",
+        token,
+        buildManualImageTargetKeyboard(targets, pendingId)
+      );
+      return true;
+    }
+
+    const nextState = await assignManualImageToTarget(chatId, imageFileId, classified, env);
+    if (!nextState) {
+      await sendTelegramMessage(chatId, "⚠️ Không tìm thấy phiên kịch bản để gán ảnh. Gửi lại chủ đề rồi thử lại nhé.", token);
+      return true;
+    }
+
+    const progress = getManualImageProgress(nextState.comparisonImages);
+    const sideLabel = classified.side === "left" ? "trái" : "phải";
+    const pair = nextState.comparisonImages[classified.pairIndex];
+    await sendTelegramMessage(
+      chatId,
+      `✅ Đã gán ảnh vào cặp ${classified.pairIndex + 1} ${sideLabel}: ${classified.title || pair?.[`${classified.side}Title`] || ""}\n` +
+      `📸 Tiến độ ảnh: ${progress.done}/${progress.total}.` +
+      (nextState.sessionId ? "\nMở lại link Web Tool/Preview là thấy ảnh đã cập nhật." : "\nSau khi chọn giọng, ảnh này sẽ tự nạp vào Web Tool.")
+      ,
+      token
+    );
+    return true;
+  } catch (err) {
+    await sendTelegramMessage(chatId, `❌ Lỗi nhận diện ảnh: ${err.message}`, token);
+    return true;
+  }
 }
 
 // Xử lý tin nhắn chat từ người dùng
@@ -579,6 +1357,10 @@ async function handleMessage(message, token, env) {
       "1. 📝 **Một chủ đề** (Ví dụ: 'So sánh Cafe phin Việt Nam và Espresso Ý').\n" +
       "2. 🖼️ **Bức ảnh kèm chủ đề** (Tôi sẽ phân tích ảnh & viết kịch bản!).";
     await sendTelegramMessage(chatId, welcomeText, token);
+    return;
+  }
+
+  if (await handleManualComparisonImage(message, token, env)) {
     return;
   }
 
@@ -689,6 +1471,9 @@ async function handleMessage(message, token, env) {
       throw new Error("Không nhận được nội dung kịch bản từ phản hồi của Gemini.");
     }
 
+    const manualImageState = buildManualImageState(chatId, scriptResult);
+    await writeManualImageState(chatId, manualImageState, env);
+
     // BƯỚC 1: Lấy danh sách Kênh đồng bộ và hiển thị các nút chọn Mẫu Kênh
     const profiles = await getProfiles(env);
     const channelButtons = profiles.map(p => ({
@@ -706,7 +1491,9 @@ async function handleMessage(message, token, env) {
 
     await sendTelegramMessage(
       chatId, 
-      `📝 **Kịch bản đề xuất:**\n\n${scriptResult}\n\n👇 **Bước 1/2: Vui lòng chọn Mẫu Kênh để sản xuất video:**`, 
+      `📝 **Kịch bản đề xuất:**\n\n${scriptResult}\n\n` +
+      `📸 Có thể gửi ảnh minh họa lên Telegram ngay bây giờ. Bot sẽ tự nhận diện ảnh thuộc đối tượng nào và nạp vào đúng ô trái/phải.\n\n` +
+      `👇 **Bước 1/2: Vui lòng chọn Mẫu Kênh để sản xuất video:**`, 
       token, 
       replyMarkup, 
       "Markdown"
@@ -727,6 +1514,43 @@ async function handleCallbackQuery(callbackQuery, token, env) {
     try {
       await answerTelegramCallbackQuery(callbackQuery.id, token);
     } catch (e) {}
+  }
+
+  if (data.startsWith("img_")) {
+    const [pendingPart, pairIndexText, sideText] = data.split("|");
+    const pendingId = pendingPart.replace("img_", "");
+    const pairIndex = Number(pairIndexText);
+    const side = sideText === "right" ? "right" : "left";
+
+    try {
+      const pending = env.VICOMPARE_KV
+        ? await env.VICOMPARE_KV.get(getPendingManualImageKey(chatId, pendingId), "json")
+        : null;
+      if (!pending?.imageFileId || !Number.isFinite(pairIndex)) {
+        await sendTelegramMessage(chatId, "⚠️ Ảnh chờ gán đã hết hạn hoặc không hợp lệ. Gửi lại ảnh đó giúp tao.", token);
+        return;
+      }
+
+      const state = await assignManualImageToTarget(chatId, pending.imageFileId, { pairIndex, side }, env);
+      if (!state) {
+        await sendTelegramMessage(chatId, "⚠️ Không tìm thấy phiên kịch bản để gán ảnh. Gửi lại chủ đề rồi thử lại nhé.", token);
+        return;
+      }
+
+      const progress = getManualImageProgress(state.comparisonImages);
+      const pair = state.comparisonImages[pairIndex];
+      const title = side === "left" ? pair?.leftTitle : pair?.rightTitle;
+      await sendTelegramMessage(
+        chatId,
+        `✅ Đã gán ảnh thủ công vào cặp ${pairIndex + 1} ${side === "left" ? "trái" : "phải"}: ${title || ""}\n` +
+        `📸 Tiến độ ảnh: ${progress.done}/${progress.total}.`,
+        token
+      );
+      return;
+    } catch (err) {
+      await sendTelegramMessage(chatId, `❌ Lỗi gán ảnh thủ công: ${err.message}`, token);
+      return;
+    }
   }
 
   // 1. Xử lý bấm chọn Nền tảng Đăng MXH (Social Publish)
@@ -777,11 +1601,14 @@ async function handleCallbackQuery(callbackQuery, token, env) {
     const voiceMarkup = {
       inline_keyboard: [
         [
-          { text: "🎙️ ElevenLabs (Adam)", callback_data: `tts_eleven|${channelId}` },
-          { text: "🎙️ LucyLab (Mặc định)", callback_data: `tts_lucy|${channelId}` }
+          { text: "🎙️ ElevenLabs", callback_data: `tts_eleven|${channelId}` },
+          { text: "🎙️ LucyLab", callback_data: `tts_lucy|${channelId}` }
         ],
         [
-          { text: "🎙️ VClip (Mặc định)", callback_data: `tts_vclip|${channelId}` }
+          { text: "🎙️ VClip", callback_data: `tts_vclip|${channelId}` }
+        ],
+        [
+          { text: "🎙️ AusyncLab", callback_data: `tts_ausync|${channelId}` }
         ]
       ]
     };
@@ -820,12 +1647,7 @@ async function handleCallbackQuery(callbackQuery, token, env) {
       let fileName = "voice.mp3";
       let audioUrlResult = null;
 
-      let syncedCreds = {};
-      try {
-        if (env.VICOMPARE_KV) {
-          syncedCreds = (await env.VICOMPARE_KV.get("app_credentials", "json")) || {};
-        }
-      } catch (e) {}
+      const syncedCreds = await getSyncedCredentials(env);
 
       if (engineType === "tts_eleven") {
         const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
@@ -848,9 +1670,7 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         fileName = ttsConfig.fileName;
 
       } else if (engineType === "tts_lucy") {
-        const apiKey = resolveTtsApiKey(engineType, syncedCreds, env);
-        const fetchedVoice = await fetchVoiceId("api.lucylab.io", apiKey);
-        const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env, fetchedVoice);
+        const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
         
         let startRes = await fetch("https://api.lucylab.io/json-rpc", {
           method: "POST",
@@ -896,9 +1716,7 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         fileName = ttsConfig.fileName;
 
       } else if (engineType === "tts_vclip") {
-        const apiKey = resolveTtsApiKey(engineType, syncedCreds, env);
-        const fetchedVoice = await fetchVoiceId("api-tts.vclip.io", apiKey);
-        const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env, fetchedVoice);
+        const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
         
         let startRes = await fetch("https://api-tts.vclip.io/json-rpc", {
           method: "POST",
@@ -942,6 +1760,37 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         const audioRes = await fetch(audioUrlResult);
         audioBuffer = await audioRes.arrayBuffer();
         fileName = ttsConfig.fileName;
+      } else if (engineType === "tts_ausync") {
+        const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
+        const startRes = await fetch("https://api.ausynclab.io/api/v1/speech/text-to-speech", {
+          method: "POST",
+          headers: {
+            "accept": "application/json",
+            "X-API-Key": ttsConfig.apiKey,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            audio_name: `ViCompare ${Date.now()}`,
+            text: String(scriptText).trim(),
+            voice_id: Number.isFinite(Number(ttsConfig.voiceId)) ? Number(ttsConfig.voiceId) : ttsConfig.voiceId,
+            speed: ttsConfig.speed,
+            model_name: ttsConfig.modelName,
+            language: ttsConfig.language,
+            callback_url: `${WORKER_PUBLIC_BASE_URL}/api/ausync-callback`
+          })
+        });
+        const startData = await startRes.json().catch(() => ({}));
+        if (!startRes.ok || startData.status >= 400) {
+          throw new Error(`AusyncLab API: ${startData.message || JSON.stringify(startData) || startRes.statusText}`);
+        }
+
+        const audioId = startData.result?.audio_id || startData.audio_id || startData.result?.id;
+        if (!audioId) throw new Error("AusyncLab: Không nhận được audio_id.");
+
+        audioUrlResult = await pollAusyncLabAudioUrl(ttsConfig.apiKey, audioId);
+        const audioRes = await fetch(audioUrlResult);
+        audioBuffer = await audioRes.arrayBuffer();
+        fileName = ttsConfig.fileName;
       }
 
       if (audioBuffer) {
@@ -958,7 +1807,9 @@ async function handleCallbackQuery(callbackQuery, token, env) {
           base64Audio = btoa(String.fromCharCode(...new Uint8Array(audioBuffer)));
         } catch (e) {}
 
-        const comparisonImages = await fetchComparisonImages(scriptText);
+        const manualImageState = await readManualImageState(chatId, env);
+        const autoComparisonImages = await fetchComparisonImages(scriptText);
+        const comparisonImages = mergeManualComparisonImages(autoComparisonImages, manualImageState);
 
         const sessionPayload = {
           sessionId,
@@ -975,6 +1826,14 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         if (env.VICOMPARE_KV) {
           await env.VICOMPARE_KV.put(`session:${sessionId}`, JSON.stringify(sessionPayload), { expirationTtl: 86400 });
           sessionSaved = true;
+          if (manualImageState) {
+            await writeManualImageState(chatId, {
+              ...manualImageState,
+              sessionId,
+              comparisonImages,
+              updatedAt: new Date().toISOString()
+            }, env);
+          }
         }
 
         // Tạo link chuyển hướng 1-Click sang Web App (Auto Render 0-Click hoặc Preview xem trước)

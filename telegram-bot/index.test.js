@@ -7,14 +7,51 @@ import {
   pickVoiceCandidate,
   readExportResult,
   buildWebAppUrls,
+  buildImageSearchQueries,
+  buildManualImageTargetKeyboard,
   cleanTelegramScriptText,
   extractComparisonPairs,
+  getTelegramImageFileId,
   getTikTokApiErrorMessage,
+  inferImageMimeType,
+  mergeSyncedCredentials,
   pickTikTokPrivacyLevel,
+  pickManualImageTargetFromText,
+  arrayBufferToBase64,
+  readImageClassificationResult,
   resolveTikTokCredentials
 } from "./index.js";
 
 describe("Telegram TTS config resolution", () => {
+  it("uses the synced ElevenLabs voice instead of a hardcoded default", () => {
+    const config = resolveTtsConfig("tts_eleven", {
+      elevenLabsApiKey: "eleven-key",
+      elevenLabsVoiceId: "synced-eleven-voice"
+    }, {
+      DEFAULT_ELEVEN_KEY: "env-eleven-key"
+    });
+
+    assert.equal(config.apiKey, "eleven-key");
+    assert.equal(config.voiceId, "synced-eleven-voice");
+    assert.equal(config.host, "api.elevenlabs.io");
+  });
+
+  it("accepts selectedVoiceId as the synced ElevenLabs voice from the Web Tool", () => {
+    const config = resolveTtsConfig("tts_eleven", {
+      elevenLabsApiKey: "eleven-key",
+      selectedVoiceId: "selected-eleven-voice"
+    }, {});
+
+    assert.equal(config.voiceId, "selected-eleven-voice");
+  });
+
+  it("requires a synced ElevenLabs voice ID", () => {
+    assert.throws(
+      () => resolveTtsConfig("tts_eleven", { elevenLabsApiKey: "eleven-key" }, {}),
+      /Chưa đồng bộ Voice ID ElevenLabs/
+    );
+  });
+
   it("does not use the LucyLab default voice as VClip userVoiceId", () => {
     assert.throws(
       () => resolveTtsConfig("tts_vclip", {
@@ -23,30 +60,61 @@ describe("Telegram TTS config resolution", () => {
       }, {
         DEFAULT_VOICE_ID: LEGACY_LUCYLAB_DEFAULT_VOICE_ID
       }),
-      /Chưa cấu hình userVoiceId VClip/
+      /Chưa đồng bộ userVoiceId VClip/
     );
   });
 
-  it("resolves VClip from VClip-specific env before fetched voice", () => {
+  it("resolves VClip only from the synced Web Tool voice ID", () => {
     const config = resolveTtsConfig(
       "tts_vclip",
-      { vclipApiKey: "vclip-key" },
-      { DEFAULT_VCLIP_VOICE_ID: " vclip-env-voice " },
+      { vclipApiKey: "vclip-key", vclipVoiceId: "synced-vclip-voice" },
+      {},
       "vclip-fetched-voice"
     );
 
     assert.equal(config.apiKey, "vclip-key");
-    assert.equal(config.voiceId, "vclip-env-voice");
+    assert.equal(config.voiceId, "synced-vclip-voice");
     assert.equal(config.host, "api-tts.vclip.io");
   });
 
-  it("keeps LucyLab fallback isolated to LucyLab", () => {
+  it("uses the synced LucyLab voice", () => {
     const config = resolveTtsConfig("tts_lucy", {
-      lucyLabApiKey: "lucy-key"
+      lucyLabApiKey: "lucy-key",
+      lucyLabVoiceId: "synced-lucy-voice"
     }, {});
 
-    assert.equal(config.voiceId, LEGACY_LUCYLAB_DEFAULT_VOICE_ID);
+    assert.equal(config.voiceId, "synced-lucy-voice");
     assert.equal(config.host, "api.lucylab.io");
+  });
+
+  it("requires a synced LucyLab voice ID", () => {
+    assert.throws(
+      () => resolveTtsConfig("tts_lucy", { lucyLabApiKey: "lucy-key" }, {}),
+      /Chưa đồng bộ Voice ID LucyLab/
+    );
+  });
+
+  it("uses the synced AusyncLab voice and options", () => {
+    const config = resolveTtsConfig("tts_ausync", {
+      ausyncLabApiKey: "ausync-key",
+      ausyncLabVoiceId: "12345",
+      ausyncLabModel: "myna-2",
+      ausyncLabSpeed: "1.1"
+    }, {});
+
+    assert.equal(config.apiKey, "ausync-key");
+    assert.equal(config.voiceId, "12345");
+    assert.equal(config.host, "api.ausynclab.io");
+    assert.equal(config.modelName, "myna-2");
+    assert.equal(config.language, "vi");
+    assert.equal(config.speed, 1.1);
+  });
+
+  it("requires a synced AusyncLab voice ID", () => {
+    assert.throws(
+      () => resolveTtsConfig("tts_ausync", { ausyncLabApiKey: "ausync-key" }, {}),
+      /Chưa đồng bộ Voice ID AusyncLab/
+    );
   });
 });
 
@@ -58,6 +126,24 @@ describe("voice list candidate picking", () => {
     });
 
     assert.equal(voice, "actual-user-voice-id");
+  });
+});
+
+describe("synced credential merging", () => {
+  it("does not overwrite existing voice settings with empty boot sync values", () => {
+    const merged = mergeSyncedCredentials({
+      vclipApiKey: "old-vclip-key",
+      vclipVoiceId: "8GNXzqzEk4AXq64rmSwqtW",
+      lucyLabVoiceId: "old-lucy-voice"
+    }, {
+      vclipApiKey: "",
+      vclipVoiceId: "",
+      lucyLabVoiceId: "new-lucy-voice"
+    });
+
+    assert.equal(merged.vclipApiKey, "old-vclip-key");
+    assert.equal(merged.vclipVoiceId, "8GNXzqzEk4AXq64rmSwqtW");
+    assert.equal(merged.lucyLabVoiceId, "new-lucy-voice");
   });
 });
 
@@ -108,6 +194,8 @@ Rottweiler mạnh mẽ.
 Đây là Chó Doberman.
 Đây là Chó Rottweiler.
 
+📸 Có thể gửi ảnh minh họa lên Telegram ngay bây giờ.
+
 👇 Bước 1/2: Vui lòng chọn Mẫu Kênh để sản xuất video:
 
 📺 Kênh đã chọn: 🐱 Mèo Thông Thái
@@ -147,6 +235,128 @@ Rottweiler mạnh mẽ.
     assert.equal(decoded.audioUrl, "https://cdn.example.com/voice.mp3");
     assert.equal(decoded.scriptText, "Đây là Chó Doberman.\nĐây là Chó Rottweiler.");
     assert.equal(decoded.comparisonImages[0].leftImageUrl, "https://upload.wikimedia.org/doberman.jpg");
+  });
+});
+
+describe("comparison image search queries", () => {
+  it("normalizes Vietnamese dog breed titles into precise English image queries", () => {
+    assert.deepEqual(buildImageSearchQueries("Chó Rottweiler").slice(0, 3), [
+      "Rottweiler dog breed",
+      "Rottweiler dog",
+      "Rottweiler"
+    ]);
+    assert.ok(buildImageSearchQueries("Chó Pitbull").includes("American Pit Bull Terrier dog breed"));
+  });
+
+  it("maps common Vietnamese abstract comparison titles before searching images", () => {
+    assert.ok(buildImageSearchQueries("Trí tuệ nhân tạo").includes("Artificial intelligence"));
+    assert.ok(buildImageSearchQueries("Trí tuệ con người").includes("Thinking"));
+  });
+});
+
+describe("manual Telegram image classification", () => {
+  it("normalizes octet-stream Telegram image files into Gemini-supported MIME types", () => {
+    assert.equal(inferImageMimeType("application/octet-stream", "documents/file_1.webp"), "image/webp");
+    assert.equal(inferImageMimeType("application/octet-stream", "photos/file_2.jpg"), "image/jpeg");
+    assert.equal(inferImageMimeType("image/png", "photos/file_3"), "image/png");
+  });
+
+  it("base64-encodes large image buffers without spreading the whole array", () => {
+    const bytes = new Uint8Array(120_000);
+    bytes[0] = 1;
+    bytes[119_999] = 255;
+
+    assert.equal(arrayBufferToBase64(bytes.buffer), Buffer.from(bytes).toString("base64"));
+  });
+
+  it("accepts Telegram image documents, not only compressed photo messages", () => {
+    assert.equal(
+      getTelegramImageFileId({
+        document: {
+          file_id: "doc-webp-file",
+          mime_type: "image/webp",
+          file_name: "doberman.webp"
+        }
+      }),
+      "doc-webp-file"
+    );
+
+    assert.equal(
+      getTelegramImageFileId({
+        document: {
+          file_id: "text-file",
+          mime_type: "text/plain",
+          file_name: "note.txt"
+        }
+      }),
+      ""
+    );
+  });
+
+  it("accepts a confident Gemini JSON target for a comparison image slot", () => {
+    const result = readImageClassificationResult(
+      '{"pairIndex":1,"side":"right","confidence":0.88}',
+      [
+        { pairIndex: 0, side: "left", title: "Chó Doberman" },
+        { pairIndex: 1, side: "right", title: "Chó American Bully" }
+      ]
+    );
+
+    assert.deepEqual(result, {
+      pairIndex: 1,
+      side: "right",
+      confidence: 0.88,
+      title: "Chó American Bully"
+    });
+  });
+
+  it("uses Telegram file names/captions to match abstract Vietnamese targets", () => {
+    const target = pickManualImageTargetFromText("dan-quan-tu-ve-1715568.webp", [
+      { pairIndex: 0, side: "left", title: "Quân nhân" },
+      { pairIndex: 0, side: "right", title: "Dân quân" }
+    ]);
+
+    assert.deepEqual(target, { pairIndex: 0, side: "right", title: "Dân quân" });
+  });
+
+  it("accepts Gemini title matches and one-based pair indexes", () => {
+    const result = readImageClassificationResult(
+      '{"pairIndex":1,"side":"phải","title":"Dân quân","confidence":0.25}',
+      [
+        { pairIndex: 0, side: "left", title: "Quân nhân" },
+        { pairIndex: 0, side: "right", title: "Dân quân" }
+      ]
+    );
+
+    assert.deepEqual(result, {
+      pairIndex: 0,
+      side: "right",
+      confidence: 0.25,
+      title: "Dân quân"
+    });
+  });
+
+  it("builds fallback assignment buttons for uncertain Telegram images", () => {
+    const keyboard = buildManualImageTargetKeyboard([
+      { pairIndex: 0, side: "left", title: "Quân nhân" },
+      { pairIndex: 0, side: "right", title: "Dân quân" },
+      { pairIndex: 1, side: "left", title: "Anh hùng liệt sĩ" }
+    ], "abc123");
+
+    assert.deepEqual(keyboard.inline_keyboard[0].map(button => button.callback_data), [
+      "img_abc123|0|left",
+      "img_abc123|0|right"
+    ]);
+    assert.equal(keyboard.inline_keyboard[1][0].callback_data, "img_abc123|1|left");
+  });
+
+  it("rejects very low-confidence or unknown image matches", () => {
+    assert.equal(
+      readImageClassificationResult('{"pairIndex":0,"side":"left","confidence":0.1}', [
+        { pairIndex: 0, side: "left", title: "Chó Doberman" }
+      ]),
+      null
+    );
   });
 });
 

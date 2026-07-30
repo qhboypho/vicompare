@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { drawFrame } from './utils/canvasRenderer';
 import { exportVideo } from './utils/videoExporter';
-import { saveAudioToStorage, getAudioFromStorage, clearAudioFromStorage, saveImageToStorage, getImageFromStorage, clearImagesFromStorage, deleteImageFromStorage, saveVideoToStorage, getVideoFromStorage } from './utils/audioStorage';
+import { saveAudioToStorage, getAudioFromStorage, clearAudioFromStorage, saveImageToStorage, getImageFromStorage, deleteImageFromStorage, saveVideoToStorage, getVideoFromStorage } from './utils/audioStorage';
 import {
   ACTIVE_SOCIAL_ACCOUNT_STORAGE_KEY,
   SELECTED_SOCIAL_ACCOUNT_STORAGE_KEY,
@@ -505,6 +505,15 @@ export default function App() {
   const [lucyLabVoices, setLucyLabVoices] = useState([]);
   const [isLoadingLucyLabVoices, setIsLoadingLucyLabVoices] = useState(false);
 
+  // Trạng thái AusyncLab
+  const [ausyncLabApiKey, setAusyncLabApiKey] = useState(() => localStorage.getItem('ausynclab_api_key') || '');
+  const [ausyncLabVoiceId, setAusyncLabVoiceId] = useState(() => localStorage.getItem('ausynclab_voice_id') || '');
+  const [ausyncLabModel, setAusyncLabModel] = useState(() => localStorage.getItem('ausynclab_model') || 'myna-2');
+  const [ausyncLabSpeed, setAusyncLabSpeed] = useState(() => {
+    const saved = localStorage.getItem('ausynclab_speed');
+    return saved !== null ? parseFloat(saved) : 1.0;
+  });
+
   // Bộ Quản Lý Mẫu Kênh (Channel Profiles / Presets)
   const [channelProfiles, setChannelProfiles] = useState(() => {
     const defaultProfiles = [
@@ -636,6 +645,80 @@ export default function App() {
   });
 
   const [activeChannelId, setActiveChannelId] = useState(() => localStorage.getItem('active_channel_id') || 'cat-thong-thai');
+  const getLogoStorageKey = (channelId = activeChannelId, fileName = logoFileName) => {
+    const safeChannel = String(channelId || 'default').replace(/[^a-z0-9_-]/gi, '_');
+    const safeName = String(fileName || 'logo').replace(/[^a-z0-9._-]/gi, '_');
+    return `channel_${safeChannel}_logo_${safeName}`;
+  };
+
+  const restoreLogoFromStorageRef = useRef(async (storedLogoUrl, fallbackFileName = '') => {
+    if (!storedLogoUrl || !storedLogoUrl.startsWith('idb:')) return false;
+    const dbKey = storedLogoUrl.replace('idb:', '');
+    try {
+      const blob = await getImageFromStorage(dbKey);
+      if (!blob) return false;
+      const localUrl = URL.createObjectURL(blob);
+      setHeaderLogoUrl(localUrl);
+      if (fallbackFileName) setLogoFileName(fallbackFileName);
+      cacheImage(localUrl, localUrl);
+      try {
+        localStorage.setItem('headerLogoUrl', storedLogoUrl);
+        if (fallbackFileName) localStorage.setItem('logoFileName', fallbackFileName);
+      } catch {}
+      return true;
+    } catch (err) {
+      console.warn('Lỗi khôi phục logo từ IndexedDB:', err);
+      return false;
+    }
+  });
+  const getPersistedHeaderLogoUrl = () => {
+    const persisted = localStorage.getItem('headerLogoUrl') || '';
+    if (persisted.startsWith('idb:')) return persisted;
+    return headerLogoUrl && !headerLogoUrl.startsWith('blob:') ? headerLogoUrl : '';
+  };
+  const getMascotStorageKey = (channelId = activeChannelId, poseKey = 'default') => {
+    const safeChannel = String(channelId || 'default').replace(/[^a-z0-9_-]/gi, '_');
+    const safePose = String(poseKey || 'pose').replace(/[^a-z0-9_-]/gi, '_');
+    return `channel_${safeChannel}_mascot_${safePose}`;
+  };
+  const getPersistedMascotPoses = (poses = mascotPoses, channelId = activeChannelId) => {
+    const savedByPose = {};
+    try {
+      const saved = JSON.parse(localStorage.getItem('mascotPoses') || '{}');
+      Object.assign(savedByPose, saved);
+    } catch {}
+
+    const persisted = {};
+    Object.entries(poses || {}).forEach(([pose, url]) => {
+      if (savedByPose[pose]?.startsWith?.('idb:')) {
+        persisted[pose] = savedByPose[pose];
+      } else if (url?.startsWith?.('idb:') || (!url?.startsWith?.('blob:') && !url?.startsWith?.('data:'))) {
+        persisted[pose] = url;
+      } else {
+        persisted[pose] = `idb:${getMascotStorageKey(channelId, pose)}`;
+      }
+    });
+    return persisted;
+  };
+
+  const restoreMascotPosesFromStorage = async (storedPoses) => {
+    const runtimePoses = { ...storedPoses };
+    await Promise.all(Object.entries(storedPoses || {}).map(async ([pose, url]) => {
+      if (!url?.startsWith?.('idb:')) return;
+      try {
+        const blob = await getImageFromStorage(url.replace('idb:', ''));
+        if (blob) {
+          const localUrl = URL.createObjectURL(blob);
+          runtimePoses[pose] = localUrl;
+          cacheImage(pose, localUrl);
+        }
+      } catch (err) {
+        console.warn('Lỗi khôi phục mascot từ IndexedDB:', err);
+      }
+    }));
+    setMascotPoses(runtimePoses);
+    return runtimePoses;
+  };
 
   // Helper to safely serialize channel profiles for localStorage without exceeding 5MB quota
   const safeSaveChannelProfiles = (profiles) => {
@@ -644,7 +727,7 @@ export default function App() {
         const cleanPoses = {};
         if (p.mascotPoses) {
           Object.entries(p.mascotPoses).forEach(([k, v]) => {
-            if (v && v.length > 500 && v.startsWith('data:')) {
+            if (v && (v.startsWith('blob:') || (v.length > 500 && v.startsWith('data:')))) {
               const dbKey = `channel_${p.id}_mascot_${k}`;
               try {
                 fetch(v).then(r => r.blob()).then(b => saveImageToStorage(dbKey, b)).catch(() => {});
@@ -672,8 +755,8 @@ export default function App() {
     try {
       const cleanPoses = {};
       Object.entries(poses).forEach(([k, v]) => {
-        if (v && v.length > 500 && v.startsWith('data:')) {
-          const dbKey = `current_mascot_${k}`;
+        if (v && (v.startsWith('blob:') || (v.length > 500 && v.startsWith('data:')))) {
+          const dbKey = getMascotStorageKey(activeChannelId, k);
           try {
             fetch(v).then(r => r.blob()).then(b => saveImageToStorage(dbKey, b)).catch(() => {});
           } catch {}
@@ -703,6 +786,10 @@ export default function App() {
     if (profile.headerTitle !== undefined) {
       setHeaderTitle(profile.headerTitle);
       try { localStorage.setItem('headerTitle', profile.headerTitle); } catch {}
+    }
+    if (profile.customFilename !== undefined) {
+      setCustomFilename(profile.customFilename);
+      try { localStorage.setItem('customFilename', profile.customFilename); } catch {}
     }
     if (profile.bgColor !== undefined) {
       setBgColor(profile.bgColor);
@@ -734,8 +821,12 @@ export default function App() {
     try { localStorage.setItem('mascotWhiteBacking', (profile.mascotWhiteBacking !== undefined ? profile.mascotWhiteBacking : true).toString()); } catch {}
 
     if (profile.headerLogoUrl !== undefined) {
-      setHeaderLogoUrl(profile.headerLogoUrl);
-      try { localStorage.setItem('headerLogoUrl', profile.headerLogoUrl); } catch {}
+      if (profile.headerLogoUrl && profile.headerLogoUrl.startsWith('idb:')) {
+        restoreLogoFromStorageRef.current(profile.headerLogoUrl, profile.logoFileName || '');
+      } else {
+        setHeaderLogoUrl(profile.headerLogoUrl);
+        try { localStorage.setItem('headerLogoUrl', profile.headerLogoUrl); } catch {}
+      }
     } else {
       setHeaderLogoUrl('');
       try { localStorage.setItem('headerLogoUrl', ''); } catch {}
@@ -778,6 +869,7 @@ export default function App() {
       : DEFAULT_MASCOT_POSES;
 
     setMascotPoses(posesToApply);
+    safeSaveMascotPoses(posesToApply);
     
     let pendingPosesCount = Object.keys(posesToApply).length;
     const checkDone = () => {
@@ -825,6 +917,7 @@ export default function App() {
       id: newId,
       name: name.trim(),
       headerTitle,
+      customFilename,
       bgColor,
       headerTitleColor,
       headerTitleFontSize,
@@ -835,9 +928,9 @@ export default function App() {
       mascotChromaThreshold,
       mascotWhiteBacking,
       logoFileName,
-      headerLogoUrl,
+      headerLogoUrl: getPersistedHeaderLogoUrl(),
       spriteFileName,
-      mascotPoses,
+      mascotPoses: getPersistedMascotPoses(),
       subtitleFontSize,
       titleFontSize,
       subtitleY,
@@ -850,7 +943,10 @@ export default function App() {
       subtitleMaxWidth,
       subtitleMaxLines,
       titleOutlineColor,
-      titleOutlineWidth
+      titleOutlineWidth,
+      imageFrameWidth,
+      imageFrameHeight,
+      globalImageZoom
     };
 
     const updated = [...channelProfiles, newProfile];
@@ -872,6 +968,7 @@ export default function App() {
         return {
           ...p,
           headerTitle,
+          customFilename,
           bgColor,
           headerTitleColor,
           headerTitleFontSize,
@@ -882,9 +979,9 @@ export default function App() {
           mascotChromaThreshold,
           mascotWhiteBacking,
           logoFileName,
-          headerLogoUrl,
+          headerLogoUrl: getPersistedHeaderLogoUrl(),
           spriteFileName,
-          mascotPoses,
+          mascotPoses: getPersistedMascotPoses(),
           subtitleFontSize,
           titleFontSize,
           subtitleY,
@@ -897,7 +994,10 @@ export default function App() {
           subtitleMaxWidth,
           subtitleMaxLines,
           titleOutlineColor,
-          titleOutlineWidth
+          titleOutlineWidth,
+          imageFrameWidth,
+          imageFrameHeight,
+          globalImageZoom
         };
       }
       return p;
@@ -1461,6 +1561,35 @@ export default function App() {
 
   // Tự động khôi phục cấu hình từ bản sao lưu ổ cứng khi localStorage bị trống
   useEffect(() => {
+    const buildBootCredentialOverrides = (data = {}) => ({
+      vclipApiKey: localStorage.getItem('vclip_api_key') || vclipApiKey || '',
+      vclipVoiceId: localStorage.getItem('vclip_voice_id') || vclipVoiceId || '',
+      lucyLabApiKey: localStorage.getItem('lucylab_api_key') || lucyLabApiKey || '',
+      lucyLabVoiceId: localStorage.getItem('lucylab_voice_id') || lucyLabVoiceId || '',
+      ausyncLabApiKey: localStorage.getItem('ausynclab_api_key') || ausyncLabApiKey || '',
+      ausyncLabVoiceId: localStorage.getItem('ausynclab_voice_id') || ausyncLabVoiceId || '',
+      ausyncLabModel: localStorage.getItem('ausynclab_model') || ausyncLabModel || 'myna-2',
+      ausyncLabSpeed: localStorage.getItem('ausynclab_speed') || ausyncLabSpeed || 1.0,
+      ausyncLabLanguage: 'vi',
+      elevenLabsApiKey: localStorage.getItem('elevenlabs_api_key') || elevenLabsApiKey || '',
+      elevenLabsVoiceId: localStorage.getItem('elevenlabs_voice_id') || selectedVoiceId || '',
+      selectedVoiceId: localStorage.getItem('elevenlabs_voice_id') || selectedVoiceId || '',
+      fbPageId: data.fb_page_id || fbPageId || '',
+      fbAccessToken: data.fb_access_token || fbAccessToken || '',
+      ytChannelId: data.yt_channel_id || ytChannelId || '',
+      ytAccessToken: data.yt_access_token || ytAccessToken || '',
+      ytClientId: data.yt_client_id || ytClientId || '',
+      ytClientSecret: data.yt_client_secret || ytClientSecret || '',
+      ytRefreshToken: data.yt_refresh_token || ytRefreshToken || '',
+      ttSessionId: data.tt_session_id || ttSessionId || '',
+      ttAccessToken: data.tt_access_token || ttAccessToken || '',
+      ttClientKey: data.tt_client_key || ttClientKey || '',
+      ttClientSecret: data.tt_client_secret || ttClientSecret || '',
+      ttRefreshToken: data.tt_refresh_token || ttRefreshToken || '',
+      ttOpenId: data.tt_open_id || ttOpenId || '',
+      ttDisplayName: data.tt_display_name || localStorage.getItem('tt_display_name') || DEFAULT_TT_DISPLAY_NAME
+    });
+
     const loadFromDisk = async () => {
       try {
         const res = await fetch('/api/load-credentials');
@@ -1538,16 +1667,21 @@ export default function App() {
             setCommentAiProvider(data.comment_ai_provider);
             localStorage.setItem('comment_ai_provider', data.comment_ai_provider);
           }
+          return buildBootCredentialOverrides(data);
         }
       } catch (err) {
         console.error('Lỗi khi khôi phục backup key từ ổ cứng:', err);
       }
+      return buildBootCredentialOverrides();
     };
-    loadFromDisk();
-    
-    // Tự động đồng bộ Kênh & Nạp phiên làm việc từ Telegram khi mở Web App
-    syncChannelProfilesToTelegram(channelProfiles);
-    loadSessionFromTelegram();
+
+    const boot = async () => {
+      const credentialOverrides = await loadFromDisk();
+      await syncChannelProfilesToTelegram(channelProfiles, credentialOverrides);
+      loadSessionFromTelegram();
+    };
+
+    boot();
   }, []);
 
   const telegramCredentialSyncTimerRef = useRef(null);
@@ -1562,7 +1696,14 @@ export default function App() {
     vclipVoiceId: vclipVoiceId || '',
     lucyLabApiKey: lucyLabApiKey || '',
     lucyLabVoiceId: lucyLabVoiceId || '',
+    ausyncLabApiKey: ausyncLabApiKey || '',
+    ausyncLabVoiceId: ausyncLabVoiceId || '',
+    ausyncLabModel: ausyncLabModel || 'myna-2',
+    ausyncLabSpeed: ausyncLabSpeed || 1.0,
+    ausyncLabLanguage: 'vi',
     elevenLabsApiKey: elevenLabsApiKey || '',
+    elevenLabsVoiceId: selectedVoiceId || '',
+    selectedVoiceId: selectedVoiceId || '',
     ttSessionId: ttSessionId || '',
     ttAccessToken: ttAccessToken || '',
     ttClientKey: ttClientKey || '',
@@ -2358,22 +2499,46 @@ export default function App() {
         console.error('Lỗi khôi phục âm thanh từ IndexedDB:', err);
       }
 
-      // 2. Khôi phục ảnh Logo nếu là blob url
+      // 2. Khôi phục ảnh Logo từ IndexedDB
       const savedLogoUrl = localStorage.getItem('headerLogoUrl') || '';
-      if (savedLogoUrl && savedLogoUrl.startsWith('blob:')) {
+      const savedLogoFileName = localStorage.getItem('logoFileName') || '';
+      if (savedLogoUrl && savedLogoUrl.startsWith('idb:')) {
+        await restoreLogoFromStorageRef.current(savedLogoUrl, savedLogoFileName);
+      } else if (savedLogoUrl && savedLogoUrl.startsWith('blob:')) {
         try {
           const blob = await getImageFromStorage(savedLogoUrl);
           if (blob) {
+            const dbKey = getLogoStorageKey(activeChannelId, savedLogoFileName);
+            const stableLogoUrl = `idb:${dbKey}`;
             const newUrl = URL.createObjectURL(blob);
             setHeaderLogoUrl(newUrl);
             cacheImage(newUrl, newUrl);
-            // Lưu tệp dưới khóa URL mới và xóa khóa cũ đi
-            await saveImageToStorage(newUrl, blob);
+            await saveImageToStorage(dbKey, blob);
             await deleteImageFromStorage(savedLogoUrl);
+            localStorage.setItem('headerLogoUrl', stableLogoUrl);
+            setChannelProfiles(prevProfiles => {
+              const updated = prevProfiles.map(p => (
+                p.id === activeChannelId
+                  ? { ...p, headerLogoUrl: stableLogoUrl, logoFileName: savedLogoFileName }
+                  : p
+              ));
+              safeSaveChannelProfiles(updated);
+              return updated;
+            });
           }
         } catch (err) {
           console.warn('Lỗi khôi phục logo từ IndexedDB:', err);
         }
+      }
+
+      // 2b. Khôi phục Mascot custom poses từ IndexedDB nếu localStorage đang giữ idb: keys
+      try {
+        const savedMascotPoses = JSON.parse(localStorage.getItem('mascotPoses') || '{}');
+        if (Object.values(savedMascotPoses).some(v => typeof v === 'string' && v.startsWith('idb:'))) {
+          await restoreMascotPosesFromStorage(savedMascotPoses);
+        }
+      } catch (err) {
+        console.warn('Lỗi khôi phục mascot poses từ IndexedDB:', err);
       }
 
       // 3. Khôi phục ảnh trong danh sách so sánh nếu là blob url
@@ -2492,7 +2657,7 @@ export default function App() {
         if (data.voices && data.voices.length > 0) {
           setVoices(data.voices);
           if (!selectedVoiceId) {
-            setSelectedVoiceId(data.voices[0].voice_id);
+            handleSaveElevenLabsVoiceId(data.voices[0].voice_id);
           }
           if (!silent) {
             alert(`Đã tải thành công ${data.voices.length} giọng đọc từ ElevenLabs!`);
@@ -2593,6 +2758,15 @@ export default function App() {
     if (key) fetchVoices(key);
   };
 
+  const handleSaveElevenLabsVoiceId = (id) => {
+    setSelectedVoiceId(id);
+    localStorage.setItem('elevenlabs_voice_id', id);
+    scheduleTelegramCredentialSync({
+      elevenLabsVoiceId: id,
+      selectedVoiceId: id
+    });
+  };
+
   // Trực tiếp Clone giọng nói (Instant Voice Cloning) qua ElevenLabs API
   const handleCloneVoice = async () => {
     if (!elevenLabsApiKey) {
@@ -2640,7 +2814,7 @@ export default function App() {
       // Nạp lại danh sách giọng và tự động chọn giọng vừa tạo
       await fetchVoices(elevenLabsApiKey);
       if (newVoiceId) {
-        setSelectedVoiceId(newVoiceId);
+        handleSaveElevenLabsVoiceId(newVoiceId);
       }
     } catch (err) {
       alert('Lỗi khi clone giọng nói: ' + err.message + '\n(Lưu ý: Tài khoản của bạn cần có gói trả phí Starter trở lên để sử dụng tính năng Clone giọng nói).');
@@ -2834,6 +3008,24 @@ export default function App() {
     setLucyLabVoiceId(id);
     localStorage.setItem('lucylab_voice_id', id);
     scheduleTelegramCredentialSync({ lucyLabVoiceId: id });
+  };
+
+  const handleSaveAusyncLabApiKey = (key) => {
+    setAusyncLabApiKey(key);
+    localStorage.setItem('ausynclab_api_key', key);
+    scheduleTelegramCredentialSync({ ausyncLabApiKey: key });
+  };
+
+  const handleSaveAusyncLabVoiceId = (id) => {
+    setAusyncLabVoiceId(id);
+    localStorage.setItem('ausynclab_voice_id', id);
+    scheduleTelegramCredentialSync({ ausyncLabVoiceId: id });
+  };
+
+  const handleSaveAusyncLabModel = (model) => {
+    setAusyncLabModel(model);
+    localStorage.setItem('ausynclab_model', model);
+    scheduleTelegramCredentialSync({ ausyncLabModel: model });
   };
 
   // Tải danh sách giọng đọc từ LucyLab
@@ -3176,6 +3368,110 @@ export default function App() {
     }
   };
 
+  const handleGenerateVoiceAusyncLab = async () => {
+    if (!ausyncLabApiKey) {
+      alert('Vui lòng nhập API Key AusyncLab.');
+      return;
+    }
+    if (!ausyncLabVoiceId) {
+      alert('Vui lòng nhập Voice ID AusyncLab.');
+      return;
+    }
+
+    setIsGeneratingVoice(true);
+    try {
+      const combinedText = timelineBlocks.map(b => b.text).join('\n\n').trim();
+      if (!combinedText) {
+        throw new Error('Chưa có kịch bản thoại để tạo giọng đọc.');
+      }
+
+      const startRes = await fetch('https://api.ausynclab.io/api/v1/speech/text-to-speech', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'X-API-Key': ausyncLabApiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          audio_name: `ViCompare ${Date.now()}`,
+          text: combinedText,
+          voice_id: Number.isFinite(Number(ausyncLabVoiceId)) ? Number(ausyncLabVoiceId) : ausyncLabVoiceId,
+          speed: parseFloat(ausyncLabSpeed || '1.0'),
+          model_name: ausyncLabModel || 'myna-2',
+          language: 'vi',
+          callback_url: 'https://vicompare-telegram-bot.qhboypho.workers.dev/api/ausync-callback'
+        })
+      });
+      const startData = await startRes.json().catch(() => ({}));
+      if (!startRes.ok || startData.status >= 400) {
+        throw new Error(startData.message || JSON.stringify(startData) || 'Lỗi kết nối đến API AusyncLab.');
+      }
+
+      const audioId = startData.result?.audio_id || startData.audio_id || startData.result?.id;
+      if (!audioId) {
+        throw new Error('AusyncLab không trả về audio_id.');
+      }
+
+      let audioUrlResult = '';
+      for (let attempts = 0; attempts < 24; attempts += 1) {
+        await new Promise(resolve => setTimeout(resolve, 2500));
+        const statusRes = await fetch(`https://api.ausynclab.io/api/v1/speech/${encodeURIComponent(audioId)}`, {
+          method: 'GET',
+          headers: {
+            'accept': 'application/json',
+            'X-API-Key': ausyncLabApiKey
+          }
+        });
+        if (!statusRes.ok) continue;
+        const statusData = await statusRes.json().catch(() => ({}));
+        const result = statusData.result || statusData;
+        const state = String(result.state || result.status || statusData.status || '').toUpperCase();
+        const url = result.audio_url || result.audioUrl || result.audio_url_stream || result.url || result.download_url;
+        if (url && ['SUCCEED', 'SUCCEEDED', 'SUCCESS', 'COMPLETED', 'DONE', ''].includes(state)) {
+          audioUrlResult = url;
+          break;
+        }
+        if (['FAILED', 'FAIL', 'ERROR'].includes(state)) {
+          throw new Error(result.message || 'Tiến trình tạo giọng nói trên AusyncLab bị lỗi.');
+        }
+      }
+
+      if (!audioUrlResult) {
+        throw new Error('Hết thời gian chờ tạo Audio trên AusyncLab. Vui lòng thử lại.');
+      }
+
+      let audioBlob;
+      try {
+        const requestUrl = `/cors-proxy?url=${encodeURIComponent(audioUrlResult)}`;
+        const blobRes = await fetch(requestUrl);
+        if (!blobRes.ok) throw new Error('CORS fetch proxy error');
+        audioBlob = await blobRes.blob();
+      } catch {
+        const directRes = await fetch(audioUrlResult);
+        audioBlob = await directRes.blob();
+      }
+
+      const localBlobUrl = URL.createObjectURL(audioBlob);
+      setAudioUrl(localBlobUrl);
+      const filename = `ausynclab_${ausyncLabVoiceId}.mp3`;
+      setAudioFileName(filename);
+      setIsPlaying(false);
+      setCurrentTime(0);
+
+      await saveAudioToStorage(audioBlob, filename);
+
+      const tempAudio = new Audio(localBlobUrl);
+      tempAudio.onloadedmetadata = async () => {
+        await runSilenceSyncWithUrl(localBlobUrl, tempAudio.duration);
+        alert('Đã tạo giọng nói AusyncLab và tự động đồng bộ nhịp phụ đề thành công!');
+      };
+    } catch (err) {
+      alert('Lỗi tạo Voice AusyncLab: ' + err.message);
+    } finally {
+      setIsGeneratingVoice(false);
+    }
+  };
+
   // Cache helper for Canvas drawing
   const cacheImage = (key, url) => {
     if (!url) return;
@@ -3270,9 +3566,16 @@ export default function App() {
     localStorage.setItem('subtitleHighlightStyle', subtitleHighlightStyle);
     localStorage.setItem('subtitleMaxWidth', subtitleMaxWidth.toString());
     localStorage.setItem('subtitleMaxLines', subtitleMaxLines.toString());
-    localStorage.setItem('mascotPoses', JSON.stringify(mascotPoses));
+    localStorage.setItem('mascotPoses', JSON.stringify(getPersistedMascotPoses()));
     localStorage.setItem('mascotScale', mascotScale.toString());
-    localStorage.setItem('headerLogoUrl', headerLogoUrl);
+    if (headerLogoUrl && headerLogoUrl.startsWith('blob:')) {
+      const persistedLogoUrl = localStorage.getItem('headerLogoUrl') || '';
+      if (!persistedLogoUrl.startsWith('idb:')) {
+        localStorage.setItem('headerLogoUrl', '');
+      }
+    } else {
+      localStorage.setItem('headerLogoUrl', headerLogoUrl);
+    }
     localStorage.setItem('logoFileName', logoFileName);
     localStorage.setItem('titleFontSize', titleFontSize.toString());
     localStorage.setItem('titleOutlineColor', titleOutlineColor);
@@ -3878,15 +4181,19 @@ export default function App() {
     const file = e.target.files[0];
     if (file) {
       const url = URL.createObjectURL(file);
+      const dbKey = getMascotStorageKey(activeChannelId, poseKey);
+      const storedUrl = `idb:${dbKey}`;
+      saveImageToStorage(dbKey, file);
       setMascotPoses(prev => {
         const updatedPoses = { ...prev, [poseKey]: url };
-        safeSaveMascotPoses(updatedPoses);
+        const persistedPoses = { ...getPersistedMascotPoses(prev), [poseKey]: storedUrl };
+        localStorage.setItem('mascotPoses', JSON.stringify(persistedPoses));
         
         // Auto update active channel profile in channelProfiles array
         setChannelProfiles(prevProfiles => {
           const updated = prevProfiles.map(p => {
             if (p.id === activeChannelId) {
-              return { ...p, mascotPoses: updatedPoses };
+              return { ...p, mascotPoses: persistedPoses };
             }
             return p;
           });
@@ -3918,6 +4225,7 @@ export default function App() {
 
         const posesKeys = ['default', 'point_left', 'point_right', 'shrug'];
         const newPoses = { ...mascotPoses };
+        const persistedPoses = { ...getPersistedMascotPoses(mascotPoses) };
 
         for (let idx = 0; idx < 4; idx++) {
           const offCanvas = document.createElement('canvas');
@@ -3949,19 +4257,22 @@ export default function App() {
           // Convert to data url
           const dataUrl = offCanvas.toDataURL('image/png');
           newPoses[posesKeys[idx]] = dataUrl;
+          const dbKey = getMascotStorageKey(activeChannelId, posesKeys[idx]);
+          persistedPoses[posesKeys[idx]] = `idb:${dbKey}`;
+          fetch(dataUrl).then(r => r.blob()).then(blob => saveImageToStorage(dbKey, blob)).catch(() => {});
           
           // Cache the new image data URL
           cacheImage(posesKeys[idx], dataUrl);
         }
 
         setMascotPoses(newPoses);
-        safeSaveMascotPoses(newPoses);
+        localStorage.setItem('mascotPoses', JSON.stringify(persistedPoses));
 
         // Auto update active channel profile in channelProfiles array
         setChannelProfiles(prevProfiles => {
           const updated = prevProfiles.map(p => {
             if (p.id === activeChannelId) {
-              return { ...p, mascotPoses: newPoses, spriteFileName: file.name };
+              return { ...p, mascotPoses: persistedPoses, spriteFileName: file.name };
             }
             return p;
           });
@@ -3981,25 +4292,27 @@ export default function App() {
     const file = e.target.files[0];
     if (file) {
       const url = URL.createObjectURL(file);
+      const dbKey = getLogoStorageKey(activeChannelId, file.name);
+      const storedLogoUrl = `idb:${dbKey}`;
       setHeaderLogoUrl(url);
       setLogoFileName(file.name);
-      localStorage.setItem('headerLogoUrl', url);
+      localStorage.setItem('headerLogoUrl', storedLogoUrl);
       localStorage.setItem('logoFileName', file.name);
 
       // Auto update active channel profile in channelProfiles array
       setChannelProfiles(prevProfiles => {
         const updated = prevProfiles.map(p => {
           if (p.id === activeChannelId) {
-            return { ...p, headerLogoUrl: url, logoFileName: file.name };
+            return { ...p, headerLogoUrl: storedLogoUrl, logoFileName: file.name };
           }
           return p;
         });
-        localStorage.setItem('channel_profiles', JSON.stringify(updated));
+        safeSaveChannelProfiles(updated);
         return updated;
       });
 
       cacheImage(url, url);
-      saveImageToStorage(url, file);
+      saveImageToStorage(dbKey, file);
     }
   };
 
@@ -4108,6 +4421,8 @@ export default function App() {
       subtitleMaxWidth,
       subtitleMaxLines,
       headerPosition,
+      headerLogoUrl: getPersistedHeaderLogoUrl(),
+      logoFileName,
       mascotPoses,
       mascotScale,
       titleFontSize,
@@ -4136,9 +4451,8 @@ export default function App() {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Clear old cached audio and images on new project load
+    // Clear old cached audio on new project load. Keep images because logo/project assets may be referenced by stable idb: keys.
     clearAudioFromStorage();
-    clearImagesFromStorage();
     setAudioUrl('');
     setAudioFileName('');
 
@@ -4183,13 +4497,25 @@ export default function App() {
         if (projectData.ytClientSecret !== undefined) setYtClientSecret(projectData.ytClientSecret);
         if (projectData.ytRefreshToken !== undefined) setYtRefreshToken(projectData.ytRefreshToken);
         if (projectData.customFilename !== undefined) setCustomFilename(projectData.customFilename);
+        if (projectData.logoFileName !== undefined) setLogoFileName(projectData.logoFileName);
+        if (projectData.headerLogoUrl !== undefined) {
+          if (projectData.headerLogoUrl && projectData.headerLogoUrl.startsWith('idb:')) {
+            restoreLogoFromStorageRef.current(projectData.headerLogoUrl, projectData.logoFileName || logoFileName);
+          } else {
+            setHeaderLogoUrl(projectData.headerLogoUrl);
+          }
+        }
 
         // Khôi phục ảnh Mascot tùy biến
         if (projectData.mascotPoses) {
-          setMascotPoses(projectData.mascotPoses);
-          Object.entries(projectData.mascotPoses).forEach(([pose, url]) => {
-            cacheImage(pose, url);
-          });
+          if (Object.values(projectData.mascotPoses).some(url => typeof url === 'string' && url.startsWith('idb:'))) {
+            restoreMascotPosesFromStorage(projectData.mascotPoses);
+          } else {
+            setMascotPoses(projectData.mascotPoses);
+            Object.entries(projectData.mascotPoses).forEach(([pose, url]) => {
+              cacheImage(pose, url);
+            });
+          }
         }
 
         // Khôi phục kích thước Mascot
@@ -4211,8 +4537,14 @@ export default function App() {
     try {
       if (config.headerTitle !== undefined) setHeaderTitle(config.headerTitle);
       if (config.customFilename !== undefined) setCustomFilename(config.customFilename);
-      if (config.headerLogoUrl !== undefined) setHeaderLogoUrl(config.headerLogoUrl);
       if (config.logoFileName !== undefined) setLogoFileName(config.logoFileName);
+      if (config.headerLogoUrl !== undefined) {
+        if (config.headerLogoUrl && config.headerLogoUrl.startsWith('idb:')) {
+          restoreLogoFromStorageRef.current(config.headerLogoUrl, config.logoFileName || logoFileName);
+        } else {
+          setHeaderLogoUrl(config.headerLogoUrl);
+        }
+      }
       if (config.bgColor !== undefined) setBgColor(config.bgColor);
       if (config.headerPosition !== undefined) setHeaderPosition(config.headerPosition);
       if (config.headerTitleColor !== undefined) setHeaderTitleColor(config.headerTitleColor);
@@ -4229,11 +4561,39 @@ export default function App() {
       if (config.mascotChromaKey !== undefined) setMascotChromaKey(config.mascotChromaKey);
       if (config.mascotChromaThreshold !== undefined) setMascotChromaThreshold(config.mascotChromaThreshold);
       if (config.ttsProvider !== undefined) setTtsProvider(config.ttsProvider);
-      if (config.selectedVoiceId !== undefined) setSelectedVoiceId(config.selectedVoiceId);
-      if (config.vclipVoiceId !== undefined) setVclipVoiceId(config.vclipVoiceId);
+      const ttsCredentialOverrides = {};
+      if (config.selectedVoiceId !== undefined) {
+        setSelectedVoiceId(config.selectedVoiceId);
+        localStorage.setItem('elevenlabs_voice_id', config.selectedVoiceId);
+        ttsCredentialOverrides.elevenLabsVoiceId = config.selectedVoiceId;
+        ttsCredentialOverrides.selectedVoiceId = config.selectedVoiceId;
+      }
+      if (config.vclipVoiceId !== undefined) {
+        setVclipVoiceId(config.vclipVoiceId);
+        localStorage.setItem('vclip_voice_id', config.vclipVoiceId);
+        ttsCredentialOverrides.vclipVoiceId = config.vclipVoiceId;
+      }
       if (config.vclipSpeed !== undefined) setVclipSpeed(config.vclipSpeed);
-      if (config.lucyLabVoiceId !== undefined) setLucyLabVoiceId(config.lucyLabVoiceId);
+      if (config.lucyLabVoiceId !== undefined) {
+        setLucyLabVoiceId(config.lucyLabVoiceId);
+        localStorage.setItem('lucylab_voice_id', config.lucyLabVoiceId);
+        ttsCredentialOverrides.lucyLabVoiceId = config.lucyLabVoiceId;
+      }
+      if (config.ausyncLabVoiceId !== undefined) {
+        setAusyncLabVoiceId(config.ausyncLabVoiceId);
+        localStorage.setItem('ausynclab_voice_id', config.ausyncLabVoiceId);
+        ttsCredentialOverrides.ausyncLabVoiceId = config.ausyncLabVoiceId;
+      }
+      if (config.ausyncLabModel !== undefined) {
+        setAusyncLabModel(config.ausyncLabModel);
+        localStorage.setItem('ausynclab_model', config.ausyncLabModel);
+        ttsCredentialOverrides.ausyncLabModel = config.ausyncLabModel;
+      }
+      if (Object.keys(ttsCredentialOverrides).length > 0) {
+        scheduleTelegramCredentialSync(ttsCredentialOverrides);
+      }
       if (config.lucyLabSpeed !== undefined) setLucyLabSpeed(config.lucyLabSpeed);
+      if (config.ausyncLabSpeed !== undefined) setAusyncLabSpeed(config.ausyncLabSpeed);
       if (config.stability !== undefined) setStability(config.stability);
       if (config.similarityBoost !== undefined) setSimilarityBoost(config.similarityBoost);
       if (config.styleExaggeration !== undefined) setStyleExaggeration(config.styleExaggeration);
@@ -4259,10 +4619,14 @@ export default function App() {
       if (config.globalImageZoom !== undefined) setGlobalImageZoom(config.globalImageZoom);
 
       if (config.mascotPoses) {
-        setMascotPoses(config.mascotPoses);
-        Object.entries(config.mascotPoses).forEach(([pose, url]) => {
-          cacheImage(pose, url);
-        });
+        if (Object.values(config.mascotPoses).some(url => typeof url === 'string' && url.startsWith('idb:'))) {
+          restoreMascotPosesFromStorage(config.mascotPoses);
+        } else {
+          setMascotPoses(config.mascotPoses);
+          Object.entries(config.mascotPoses).forEach(([pose, url]) => {
+            cacheImage(pose, url);
+          });
+        }
       }
 
       if (config.audioFileName) {
@@ -4943,7 +5307,7 @@ export default function App() {
       projectConfig: {
         headerTitle,
         customFilename,
-        headerLogoUrl,
+        headerLogoUrl: getPersistedHeaderLogoUrl(),
         logoFileName,
         bgColor,
         headerPosition,
@@ -4963,6 +5327,9 @@ export default function App() {
         vclipSpeed,
         lucyLabVoiceId,
         lucyLabSpeed,
+        ausyncLabVoiceId,
+        ausyncLabModel,
+        ausyncLabSpeed,
         stability,
         similarityBoost,
         styleExaggeration,
@@ -5777,6 +6144,13 @@ export default function App() {
                 >
                   LucyLab TTS
                 </button>
+                <button 
+                  className={`tab-btn ${ttsProvider === 'ausynclab' ? 'active' : ''}`}
+                  onClick={() => handleSelectTtsProvider('ausynclab')}
+                  style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'ausynclab' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
+                >
+                  AusyncLab TTS
+                </button>
               </div>
 
               {/* 1. ElevenLabs UI */}
@@ -5803,7 +6177,7 @@ export default function App() {
                       <label>Chọn Giọng Đọc (Voice)</label>
                       <select 
                         value={selectedVoiceId} 
-                        onChange={(e) => setSelectedVoiceId(e.target.value)}
+                        onChange={(e) => handleSaveElevenLabsVoiceId(e.target.value)}
                         disabled={voices.length === 0}
                       >
                         {voices.length === 0 ? (
@@ -6245,6 +6619,114 @@ export default function App() {
 
                     <div style={{ fontSize: '0.7rem', color: '#a0aec0', marginTop: '0.2rem', fontStyle: 'italic', textAlign: 'center', lineHeight: '1.4' }}>
                       * Khi bấm Sinh giọng, hệ thống gửi kịch bản thoại tới API LucyLab (json-rpc), tự động Polling chờ ghép audio hoàn tất và căn khớp nhịp phụ đề dựa trên khoảng nghỉ giọng đọc.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 4. AusyncLab UI */}
+              {ttsProvider === 'ausynclab' && (
+                <div className="glass-card" style={{ marginTop: 0 }}>
+                  <h2 className="card-title">Trình tạo giọng nói AusyncLab TTS</h2>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <div className="form-group">
+                      <label>AusyncLab API Key</label>
+                      <ApiKeyInput 
+                        value={ausyncLabApiKey} 
+                        onChange={(e) => handleSaveAusyncLabApiKey(e.target.value)}
+                        placeholder="Nhập API Key AusyncLab" 
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Voice ID AusyncLab</label>
+                      <input 
+                        type="text" 
+                        value={ausyncLabVoiceId} 
+                        onChange={(e) => handleSaveAusyncLabVoiceId(e.target.value)}
+                        placeholder="Nhập Voice ID lấy từ ausynclab.io" 
+                        style={{ padding: '0.5rem', fontSize: '0.8rem' }}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Model AusyncLab</label>
+                      <select
+                        value={ausyncLabModel}
+                        onChange={(e) => handleSaveAusyncLabModel(e.target.value)}
+                        style={{ padding: '0.5rem', fontSize: '0.8rem' }}
+                      >
+                        <option value="myna-2">myna-2</option>
+                        <option value="myna-1-turbo">myna-1-turbo</option>
+                        <option value="myna-1">myna-1</option>
+                        <option value="fast">fast</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Tốc độ đọc AusyncLab</span>
+                        <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{ausyncLabSpeed}x</span>
+                      </label>
+                      <input 
+                        type="range" 
+                        min="0.75" 
+                        max="1.25" 
+                        step="0.05" 
+                        value={ausyncLabSpeed} 
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setAusyncLabSpeed(val);
+                          localStorage.setItem('ausynclab_speed', val.toString());
+                          scheduleTelegramCredentialSync({ ausyncLabSpeed: val });
+                        }} 
+                      />
+                      <span style={{ fontSize: '0.65rem', color: '#888' }}>Phạm vi theo AusyncLab: 0.75 - 1.25</span>
+                    </div>
+
+                    <div className="form-group">
+                      <label>Xem trước Kịch bản thoại gửi đi</label>
+                      <textarea 
+                        value={timelineBlocks.map(b => b.text).join('\n\n')}
+                        readOnly
+                        rows={8}
+                        style={{ background: '#0b0f19', color: '#94a3b8', fontStyle: 'italic', fontSize: '0.8rem', resize: 'none' }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <button 
+                        className="btn btn-primary" 
+                        onClick={handleGenerateVoiceAusyncLab} 
+                        disabled={isGeneratingVoice || isProcessingAudio || !ausyncLabApiKey || !ausyncLabVoiceId}
+                        style={{ width: '100%', padding: '0.75rem' }}
+                      >
+                        {isGeneratingVoice ? (
+                          <>
+                            <span className="spinner" style={{ marginRight: '0.5rem' }}></span> Đang gọi API AusyncLab tạo giọng...
+                          </>
+                        ) : isProcessingAudio ? (
+                          <>
+                            <span className="spinner" style={{ marginRight: '0.5rem' }}></span> Đang phân tích khoảng lặng khớp nhịp...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={16} /> Sinh giọng đọc AusyncLab & Tự động khớp nhịp
+                          </>
+                        )}
+                      </button>
+
+                      {audioUrl && (
+                        <button 
+                          className="btn btn-secondary" 
+                          onClick={handleAutoSyncSilence}
+                          disabled={isGeneratingVoice || isProcessingAudio}
+                          style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--accent-indigo)', color: 'var(--accent-indigo)' }}
+                        >
+                          {isProcessingAudio ? 'Đang phân tích...' : 'Chạy lại Tự động khớp nhịp (Silence Sync)'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

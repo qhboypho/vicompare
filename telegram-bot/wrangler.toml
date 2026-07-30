@@ -1,3 +1,7 @@
 name = "vicompare-telegram-bot"
 main = "index.js"
 compatibility_date = "2024-03-01"
+
+[[kv_namespaces]]
+binding = "VICOMPARE_KV"
+id = "f9d414951f3f4c5d9f20daef9fdf50a1"
