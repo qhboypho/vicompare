@@ -8303,6 +8303,7 @@ export default function App() {
             </p>
 
             <textarea
+              className="script-textarea"
               value={scriptText}
               onChange={(e) => setScriptText(e.target.value)}
               placeholder="Paste dialogue script here..."

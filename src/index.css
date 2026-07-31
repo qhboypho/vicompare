@@ -1299,7 +1299,17 @@ textarea:focus {
     width: 100%;
   }
 
-  .script-panel textarea {
-    min-height: 450px !important;
+  .script-panel textarea,
+  .script-textarea {
+    min-height: 480px !important;
+    height: 480px !important;
+  }
+}
+
+@media (max-width: 1024px) {
+  .script-panel textarea,
+  .script-textarea {
+    min-height: 480px !important;
+    height: 480px !important;
   }
 }
