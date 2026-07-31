@@ -1,0 +1,77 @@
+{
+  "routes": [
+    {
+      "routePath": "/terms/tiktokr3uZgcdxChpIJzZkWVT6IZ5gk6Bp9BZp.txt",
+      "mountPath": "/terms",
+      "method": "",
+      "module": [
+        "terms/tiktokr3uZgcdxChpIJzZkWVT6IZ5gk6Bp9BZp.txt.js:onRequest"
+      ]
+    },
+    {
+      "routePath": "/fb-api/:path*",
+      "mountPath": "/fb-api",
+      "method": "",
+      "module": [
+        "fb-api/[[path]].js:onRequest"
+      ]
+    },
+    {
+      "routePath": "/fb-rupload/:path*",
+      "mountPath": "/fb-rupload",
+      "method": "",
+      "module": [
+        "fb-rupload/[[path]].js:onRequest"
+      ]
+    },
+    {
+      "routePath": "/fb-upload/:path*",
+      "mountPath": "/fb-upload",
+      "method": "",
+      "module": [
+        "fb-upload/[[path]].js:onRequest"
+      ]
+    },
+    {
+      "routePath": "/google-token/:path*",
+      "mountPath": "/google-token",
+      "method": "",
+      "module": [
+        "google-token/[[path]].js:onRequest"
+      ]
+    },
+    {
+      "routePath": "/tiktok-api/:path*",
+      "mountPath": "/tiktok-api",
+      "method": "",
+      "module": [
+        "tiktok-api/[[path]].js:onRequest"
+      ]
+    },
+    {
+      "routePath": "/tiktok-upload/:path*",
+      "mountPath": "/tiktok-upload",
+      "method": "",
+      "module": [
+        "tiktok-upload/[[path]].js:onRequest"
+      ]
+    },
+    {
+      "routePath": "/youtube-api/:path*",
+      "mountPath": "/youtube-api",
+      "method": "",
+      "module": [
+        "youtube-api/[[path]].js:onRequest"
+      ]
+    },
+    {
+      "routePath": "/cors-proxy",
+      "mountPath": "/",
+      "method": "",
+      "module": [
+        "cors-proxy.js:onRequest"
+      ]
+    }
+  ],
+  "baseURL": "/"
+}

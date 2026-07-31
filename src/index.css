@@ -1298,4 +1298,8 @@ textarea:focus {
   .timeline-item > div:last-child .btn {
     width: 100%;
   }
+
+  .script-panel textarea {
+    min-height: 450px !important;
+  }
 }
