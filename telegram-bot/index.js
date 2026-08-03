@@ -32,28 +32,7 @@ function firstFilledString(values, { rejectLegacyLucyDefault = false } = {}) {
   return "";
 }
 
-function buildLocalCloneTtsEndpoint(serverUrl) {
-  const cleaned = cleanString(serverUrl).replace(/\/+$/, "");
-  if (!cleaned) return "";
-  if (/\/(?:tts|synthesize|generate|text-to-speech)$/i.test(cleaned)) return cleaned;
-  return `${cleaned}/tts`;
-}
 
-function isLocalNetworkUrl(rawUrl) {
-  try {
-    const hostname = new URL(rawUrl).hostname.toLowerCase();
-    return (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "0.0.0.0" ||
-      hostname.startsWith("192.168.") ||
-      hostname.startsWith("10.") ||
-      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
-    );
-  } catch {
-    return false;
-  }
-}
 
 function base64ToArrayBuffer(base64) {
   const clean = cleanString(base64).replace(/^data:[^,]+,/, "");
@@ -153,17 +132,15 @@ export function resolveTtsApiKey(engineType, syncedCreds = {}, env = {}) {
     return apiKey;
   }
 
-  if (engineType === "tts_ausync") {
+  if (engineType === "tts_voicefree") {
     const apiKey = firstFilledString([
-      syncedCreds.ausyncLabApiKey,
-      syncedCreds.ausyncApiKey,
-      syncedCreds.ausynclab_api_key,
-      syncedCreds.ausync_api_key,
-      env.DEFAULT_AUSYNC_KEY,
-      env.AUSYNC_KEY,
-      env.AUSYNCLAB_API_KEY
+      syncedCreds.voicefreeApiKey,
+      syncedCreds.voicefree_api_key,
+      env.DEFAULT_VOICEFREE_KEY,
+      env.VOICEFREE_KEY,
+      env.VOICEFREE_API_KEY
     ]);
-    if (!apiKey) throw new Error("Chưa cấu hình API Key AusyncLab!");
+    if (!apiKey) throw new Error("Chưa cấu hình API Key Voicefree (xi-api-key)!");
     return apiKey;
   }
 
@@ -201,22 +178,10 @@ function resolveSyncedVoiceId(engineType, syncedCreds = {}) {
     ], { rejectLegacyLucyDefault: true });
   }
 
-  if (engineType === "tts_ausync") {
+  if (engineType === "tts_voicefree") {
     return firstFilledString([
-      syncedCreds.ausyncLabVoiceId,
-      syncedCreds.ausyncVoiceId,
-      syncedCreds.ausynclabVoiceId,
-      syncedCreds.ausync_lab_voice_id,
-      syncedCreds.ausync_voice_id
-    ]);
-  }
-
-  if (engineType === "tts_local") {
-    return firstFilledString([
-      syncedCreds.localCloneVoiceId,
-      syncedCreds.localVoiceId,
-      syncedCreds.local_clone_voice_id,
-      syncedCreds.local_voice_id
+      syncedCreds.voicefreeVoiceId,
+      syncedCreds.voicefree_voice_id
     ]);
   }
 
@@ -270,53 +235,20 @@ export function resolveTtsConfig(engineType, syncedCreds = {}, env = {}) {
     };
   }
 
-  if (engineType === "tts_ausync") {
+  if (engineType === "tts_voicefree") {
     const voiceId = resolveSyncedVoiceId(engineType, syncedCreds);
     if (!voiceId) {
-      throw new Error("Chưa đồng bộ Voice ID AusyncLab từ Web Tool. Vui lòng nhập Voice ID AusyncLab rồi đồng bộ lại Telegram.");
+      throw new Error("Chưa đồng bộ Voice ID Voicefree từ Web Tool. Vui lòng nhập Voice ID Voicefree rồi đồng bộ lại Telegram.");
     }
 
     return {
       apiKey: resolveTtsApiKey(engineType, syncedCreds, env),
       voiceId,
-      host: "api.ausynclab.io",
-      fileName: "ausynclab_voice.wav",
-      speed: Number.parseFloat(firstFilledString([syncedCreds.ausyncLabSpeed, syncedCreds.ausyncSpeed, env.AUSYNC_SPEED])) || 1.0,
-      modelName: firstFilledString([syncedCreds.ausyncLabModel, syncedCreds.ausyncModel, env.AUSYNC_MODEL]) || "myna-2",
-      language: firstFilledString([syncedCreds.ausyncLabLanguage, syncedCreds.ausyncLanguage, env.AUSYNC_LANGUAGE]) || "vi"
-    };
-  }
-
-  if (engineType === "tts_local") {
-    const serverUrl = firstFilledString([
-      syncedCreds.localCloneServerUrl,
-      syncedCreds.localVoiceServerUrl,
-      syncedCreds.local_clone_server_url,
-      syncedCreds.local_voice_server_url,
-      env.LOCAL_CLONE_SERVER_URL,
-      env.LOCAL_VOICE_SERVER_URL
-    ]);
-    if (!serverUrl) {
-      throw new Error("Chưa đồng bộ Local Clone Server URL từ Web Tool. Vui lòng nhập URL server/tunnel ở Web Tool prd rồi đồng bộ lại Telegram.");
-    }
-    if (isLocalNetworkUrl(serverUrl) && env.ALLOW_LOCAL_CLONE_PRIVATE_URL !== "true") {
-      throw new Error("Telegram bot prd không gọi được Local Clone URL nội bộ/127.0.0.1. Hãy bật Cloudflare Tunnel/ngrok và nhập URL HTTPS public vào Web Tool.");
-    }
-
-    return {
-      apiKey: firstFilledString([
-        syncedCreds.localCloneApiKey,
-        syncedCreds.localVoiceApiKey,
-        syncedCreds.local_clone_api_key,
-        syncedCreds.local_voice_api_key,
-        env.LOCAL_CLONE_API_KEY,
-        env.LOCAL_VOICE_API_KEY
-      ]),
-      voiceId: resolveSyncedVoiceId(engineType, syncedCreds),
-      serverUrl,
-      endpoint: buildLocalCloneTtsEndpoint(serverUrl),
-      fileName: "local_clone_voice.mp3",
-      speed: 1.0
+      host: "api.taovoicefree.com",
+      fileName: "voicefree_voice.mp3",
+      provider: firstFilledString([syncedCreds.voicefreeProvider, syncedCreds.voicefree_provider, env.VOICEFREE_PROVIDER]) || "elevenlabs",
+      modelId: firstFilledString([syncedCreds.voicefreeModelId, syncedCreds.voicefree_model_id, env.VOICEFREE_MODEL_ID]) || "eleven_multilingual_v2",
+      speed: Number.parseFloat(firstFilledString([syncedCreds.voicefreeSpeed, syncedCreds.voicefree_speed, env.VOICEFREE_SPEED])) || 1.0
     };
   }
 
@@ -339,56 +271,7 @@ export function readExportResult(result = {}) {
   return { state, audioUrl, failed, completed };
 }
 
-async function requestLocalCloneAudioBuffer(ttsConfig, text) {
-  const response = await fetch(ttsConfig.endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(ttsConfig.apiKey ? { Authorization: `Bearer ${ttsConfig.apiKey}` } : {})
-    },
-    body: JSON.stringify({
-      text: String(text || "").trim(),
-      voiceId: ttsConfig.voiceId,
-      voice_id: ttsConfig.voiceId,
-      language: "vi",
-      format: "mp3"
-    })
-  });
 
-  const contentType = response.headers.get("content-type") || "";
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => "");
-    throw new Error(`Local Clone server lỗi ${response.status}: ${errorText || response.statusText}`);
-  }
-
-  if (contentType.includes("application/json")) {
-    const data = await response.json();
-    const audioUrl = firstFilledString([
-      data.audioUrl,
-      data.audio_url,
-      data.url,
-      data.downloadUrl,
-      data.download_url
-    ]);
-    if (audioUrl) {
-      const audioRes = await fetch(audioUrl);
-      if (!audioRes.ok) throw new Error(`Local Clone audioUrl tải lỗi ${audioRes.status}.`);
-      return await audioRes.arrayBuffer();
-    }
-
-    const audioBase64 = firstFilledString([
-      data.audioBase64,
-      data.audio_base64,
-      data.base64,
-      data.audio
-    ]);
-    if (audioBase64) return base64ToArrayBuffer(audioBase64);
-
-    throw new Error("Local Clone server không trả về audioUrl hoặc audioBase64.");
-  }
-
-  return await response.arrayBuffer();
-}
 
 export function extractComparisonPairs(scriptText) {
   const lines = cleanTelegramScriptText(scriptText)
@@ -918,30 +801,28 @@ async function pollExportAudioUrl(host, apiKey, exportId, engineName) {
   throw new Error(`${engineName}: Quá thời gian tạo file.`);
 }
 
-async function pollAusyncLabAudioUrl(apiKey, audioId) {
-  for (let i = 0; i < 24; i += 1) {
-    await new Promise(resolve => setTimeout(resolve, 2500));
-    const res = await fetch(`https://api.ausynclab.io/api/v1/speech/${encodeURIComponent(audioId)}`, {
+async function pollVoicefreeAudioUrl(apiKey, taskId) {
+  for (let attempts = 0; attempts < 30; attempts += 1) {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const statusRes = await fetch(`https://api.taovoicefree.com/v1/history/${encodeURIComponent(taskId)}`, {
       method: "GET",
       headers: {
         "accept": "application/json",
-        "X-API-Key": apiKey
+        "xi-api-key": apiKey
       }
     });
-    if (!res.ok) continue;
-    const data = await res.json().catch(() => ({}));
-    const result = data.result || data;
-    const state = cleanString(result.state || result.status || data.status).toUpperCase();
-    const audioUrl = firstFilledString([result.audio_url, result.audioUrl, result.url, result.download_url]);
-    if (audioUrl && ["SUCCEED", "SUCCEEDED", "SUCCESS", "COMPLETED", "DONE", ""].includes(state)) {
-      return audioUrl;
+    if (!statusRes.ok) continue;
+    const statusData = await statusRes.json().catch(() => ({}));
+    const state = String(statusData.status || statusData.state || "").toLowerCase();
+    const url = statusData.result?.audio_url || statusData.audio_url || statusData.result?.url;
+    if (url || state === "completed") {
+      return url || statusData.result?.audio_url;
     }
-    if (["FAILED", "FAIL", "ERROR"].includes(state)) {
-      throw new Error(`AusyncLab: ${result.message || "Tiến trình tạo giọng nói bị lỗi."}`);
+    if (state === "failed") {
+      throw new Error(`Voicefree: ${statusData.error || statusData.message || "Tiến trình tạo giọng nói bị lỗi."}`);
     }
   }
-
-  throw new Error("AusyncLab: Quá thời gian tạo file.");
+  throw new Error("Voicefree: Quá thời gian tạo file.");
 }
 
 export function buildWebAppUrls({
@@ -1061,10 +942,8 @@ export default {
         lucyLabVoiceId: "",
         hasElevenLabsApiKey: false,
         elevenLabsVoiceId: "",
-        hasAusyncLabApiKey: false,
-        ausyncLabVoiceId: "",
-        hasLocalCloneServerUrl: false,
-        localCloneVoiceId: ""
+        hasVoicefreeApiKey: false,
+        voicefreeVoiceId: ""
       };
 
       if (env.VICOMPARE_KV) {
@@ -1076,10 +955,8 @@ export default {
         status.lucyLabVoiceId = resolveSyncedVoiceId("tts_lucy", credentials);
         status.hasElevenLabsApiKey = Boolean(cleanString(credentials.elevenLabsApiKey));
         status.elevenLabsVoiceId = resolveSyncedVoiceId("tts_eleven", credentials);
-        status.hasAusyncLabApiKey = Boolean(cleanString(credentials.ausyncLabApiKey || credentials.ausyncApiKey));
-        status.ausyncLabVoiceId = resolveSyncedVoiceId("tts_ausync", credentials);
-        status.hasLocalCloneServerUrl = Boolean(cleanString(credentials.localCloneServerUrl || credentials.localVoiceServerUrl));
-        status.localCloneVoiceId = resolveSyncedVoiceId("tts_local", credentials);
+        status.hasVoicefreeApiKey = Boolean(cleanString(credentials.voicefreeApiKey || credentials.voicefree_api_key));
+        status.voicefreeVoiceId = resolveSyncedVoiceId("tts_voicefree", credentials);
       }
 
       return new Response(JSON.stringify(status), {
@@ -1746,7 +1623,7 @@ async function handleCallbackQuery(callbackQuery, token, env) {
           { text: "🎙️ VClip", callback_data: `tts_vclip|${channelId}` }
         ],
         [
-          { text: "🎙️ AusyncLab", callback_data: `tts_ausync|${channelId}` }
+          { text: "🎙️ Voicefree", callback_data: `tts_voicefree|${channelId}` }
         ],
         [
           { text: "🎙️ Local Clone", callback_data: `tts_local|${channelId}` }
@@ -1901,40 +1778,36 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         const audioRes = await fetch(audioUrlResult);
         audioBuffer = await audioRes.arrayBuffer();
         fileName = ttsConfig.fileName;
-      } else if (engineType === "tts_ausync") {
+      } else if (engineType === "tts_voicefree") {
         const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
-        const startRes = await fetch("https://api.ausynclab.io/api/v1/speech/text-to-speech", {
+        const startRes = await fetch(`https://api.taovoicefree.com/v1/text-to-speech/${encodeURIComponent(ttsConfig.voiceId)}`, {
           method: "POST",
           headers: {
             "accept": "application/json",
-            "X-API-Key": ttsConfig.apiKey,
+            "xi-api-key": ttsConfig.apiKey,
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            audio_name: `ViCompare ${Date.now()}`,
             text: String(scriptText).trim(),
-            voice_id: Number.isFinite(Number(ttsConfig.voiceId)) ? Number(ttsConfig.voiceId) : ttsConfig.voiceId,
-            speed: ttsConfig.speed,
-            model_name: ttsConfig.modelName,
-            language: ttsConfig.language,
-            callback_url: `${WORKER_PUBLIC_BASE_URL}/api/ausync-callback`
+            provider: ttsConfig.provider || "elevenlabs",
+            model_id: ttsConfig.modelId || "eleven_multilingual_v2",
+            language_code: "vi",
+            voice_settings: {
+              speed: ttsConfig.speed
+            }
           })
         });
         const startData = await startRes.json().catch(() => ({}));
-        if (!startRes.ok || startData.status >= 400) {
-          throw new Error(`AusyncLab API: ${startData.message || JSON.stringify(startData) || startRes.statusText}`);
+        if (!startRes.ok || startData.status === "failed") {
+          throw new Error(`Voicefree API: ${startData.message || startData.error || JSON.stringify(startData) || startRes.statusText}`);
         }
 
-        const audioId = startData.result?.audio_id || startData.audio_id || startData.result?.id;
-        if (!audioId) throw new Error("AusyncLab: Không nhận được audio_id.");
+        const taskId = startData.id || startData.result?.id;
+        if (!taskId) throw new Error("Voicefree: Không nhận được task ID.");
 
-        audioUrlResult = await pollAusyncLabAudioUrl(ttsConfig.apiKey, audioId);
+        audioUrlResult = await pollVoicefreeAudioUrl(ttsConfig.apiKey, taskId);
         const audioRes = await fetch(audioUrlResult);
         audioBuffer = await audioRes.arrayBuffer();
-        fileName = ttsConfig.fileName;
-      } else if (engineType === "tts_local") {
-        const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
-        audioBuffer = await requestLocalCloneAudioBuffer(ttsConfig, scriptText);
         fileName = ttsConfig.fileName;
       }
 

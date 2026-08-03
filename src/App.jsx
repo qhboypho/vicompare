@@ -118,12 +118,7 @@ const base64ToBlob = (base64, mimeType = 'audio/mpeg') => {
   return new Blob([bytes], { type: mimeType });
 };
 
-const buildLocalCloneTtsEndpoint = (serverUrl) => {
-  const cleaned = String(serverUrl || '').trim().replace(/\/+$/, '');
-  if (!cleaned) return '';
-  if (/\/(?:tts|synthesize|generate|text-to-speech)$/i.test(cleaned)) return cleaned;
-  return `${cleaned}/tts`;
-};
+
 
 // A reusable component to render password-type input fields with view eye toggle and copy button
 const ApiKeyInput = ({ value, onChange, placeholder = "Nhập API Key...", className = "", style = {}, ...props }) => {
@@ -564,7 +559,10 @@ export default function App() {
 
   // Trạng thái VClip
   const DEFAULT_VCLIP_KEY = safeAtob(['dmNfbGl2ZV9kODNlMjBlODMx', 'MjA0MGIyYTc1OGU1ZDA3MDEwNDFhYg=='].join(''));
-  const [ttsProvider, setTtsProvider] = useState(() => localStorage.getItem('tts_provider') || 'lucylab');
+  const [ttsProvider, setTtsProvider] = useState(() => {
+    const saved = localStorage.getItem('tts_provider');
+    return (saved && saved !== 'localclone') ? saved : 'voicefree';
+  });
   const [vclipApiKey, setVclipApiKey] = useState(() => localStorage.getItem('vclip_api_key') || DEFAULT_VCLIP_KEY);
   const [vclipVoiceId, setVclipVoiceId] = useState(() => localStorage.getItem('vclip_voice_id') || '');
   const [vclipSpeed, setVclipSpeed] = useState(1.0);
@@ -591,19 +589,17 @@ export default function App() {
   const [lucyLabVoices, setLucyLabVoices] = useState([]);
   const [isLoadingLucyLabVoices, setIsLoadingLucyLabVoices] = useState(false);
 
-  // Trạng thái AusyncLab
-  const [ausyncLabApiKey, setAusyncLabApiKey] = useState(() => localStorage.getItem('ausynclab_api_key') || '');
-  const [ausyncLabVoiceId, setAusyncLabVoiceId] = useState(() => localStorage.getItem('ausynclab_voice_id') || '');
-  const [ausyncLabModel, setAusyncLabModel] = useState(() => localStorage.getItem('ausynclab_model') || 'myna-2');
-  const [ausyncLabSpeed, setAusyncLabSpeed] = useState(() => {
-    const saved = localStorage.getItem('ausynclab_speed');
+  // Trạng thái Voicefree (taovoicefree.com)
+  const [voicefreeApiKey, setVoicefreeApiKey] = useState(() => localStorage.getItem('voicefree_api_key') || '');
+  const [voicefreeVoiceId, setVoicefreeVoiceId] = useState(() => localStorage.getItem('voicefree_voice_id') || '');
+  const [voicefreeProvider, setVoicefreeProvider] = useState(() => localStorage.getItem('voicefree_provider') || 'elevenlabs');
+  const [voicefreeModelId, setVoicefreeModelId] = useState(() => localStorage.getItem('voicefree_model_id') || 'eleven_multilingual_v2');
+  const [voicefreeSpeed, setVoicefreeSpeed] = useState(() => {
+    const saved = localStorage.getItem('voicefree_speed');
     return saved !== null ? parseFloat(saved) : 1.0;
   });
 
-  // Trạng thái Local Clone TTS
-  const [localCloneServerUrl, setLocalCloneServerUrl] = useState(() => localStorage.getItem('localclone_server_url') || '');
-  const [localCloneVoiceId, setLocalCloneVoiceId] = useState(() => localStorage.getItem('localclone_voice_id') || '');
-  const [localCloneApiKey, setLocalCloneApiKey] = useState(() => localStorage.getItem('localclone_api_key') || '');
+
 
   // Bộ Quản Lý Mẫu Kênh (Channel Profiles / Presets)
   const [channelProfiles, setChannelProfiles] = useState(() => {
@@ -1688,14 +1684,11 @@ export default function App() {
       vclipVoiceId: localStorage.getItem('vclip_voice_id') || vclipVoiceId || '',
       lucyLabApiKey: localStorage.getItem('lucylab_api_key') || lucyLabApiKey || '',
       lucyLabVoiceId: localStorage.getItem('lucylab_voice_id') || lucyLabVoiceId || '',
-      ausyncLabApiKey: localStorage.getItem('ausynclab_api_key') || ausyncLabApiKey || '',
-      ausyncLabVoiceId: localStorage.getItem('ausynclab_voice_id') || ausyncLabVoiceId || '',
-      ausyncLabModel: localStorage.getItem('ausynclab_model') || ausyncLabModel || 'myna-2',
-      ausyncLabSpeed: localStorage.getItem('ausynclab_speed') || ausyncLabSpeed || 1.0,
-      ausyncLabLanguage: 'vi',
-      localCloneServerUrl: localStorage.getItem('localclone_server_url') || localCloneServerUrl || '',
-      localCloneVoiceId: localStorage.getItem('localclone_voice_id') || localCloneVoiceId || '',
-      localCloneApiKey: localStorage.getItem('localclone_api_key') || localCloneApiKey || '',
+      voicefreeApiKey: localStorage.getItem('voicefree_api_key') || voicefreeApiKey || '',
+      voicefreeVoiceId: localStorage.getItem('voicefree_voice_id') || voicefreeVoiceId || '',
+      voicefreeProvider: localStorage.getItem('voicefree_provider') || voicefreeProvider || 'elevenlabs',
+      voicefreeModelId: localStorage.getItem('voicefree_model_id') || voicefreeModelId || 'eleven_multilingual_v2',
+      voicefreeSpeed: localStorage.getItem('voicefree_speed') || voicefreeSpeed || 1.0,
       elevenLabsApiKey: localStorage.getItem('elevenlabs_api_key') || elevenLabsApiKey || '',
       elevenLabsVoiceId: localStorage.getItem('elevenlabs_voice_id') || selectedVoiceId || '',
       selectedVoiceId: localStorage.getItem('elevenlabs_voice_id') || selectedVoiceId || '',
@@ -1821,11 +1814,11 @@ export default function App() {
     vclipVoiceId: vclipVoiceId || '',
     lucyLabApiKey: lucyLabApiKey || '',
     lucyLabVoiceId: lucyLabVoiceId || '',
-    ausyncLabApiKey: ausyncLabApiKey || '',
-    ausyncLabVoiceId: ausyncLabVoiceId || '',
-    ausyncLabModel: ausyncLabModel || 'myna-2',
-    ausyncLabSpeed: ausyncLabSpeed || 1.0,
-    ausyncLabLanguage: 'vi',
+    voicefreeApiKey: voicefreeApiKey || '',
+    voicefreeVoiceId: voicefreeVoiceId || '',
+    voicefreeProvider: voicefreeProvider || 'elevenlabs',
+    voicefreeModelId: voicefreeModelId || 'eleven_multilingual_v2',
+    voicefreeSpeed: voicefreeSpeed || 1.0,
     localCloneServerUrl: localCloneServerUrl || '',
     localCloneVoiceId: localCloneVoiceId || '',
     localCloneApiKey: localCloneApiKey || '',
@@ -2941,95 +2934,65 @@ export default function App() {
     return await fetchAudioBlobWithProxyFallback(audioUrlResult);
   };
 
-  const requestAusyncLabAudioBlob = async (text) => {
-    const startRes = await fetch('https://api.ausynclab.io/api/v1/speech/text-to-speech', {
+  const fetchVoicefreeApi = async (endpointPath, options = {}) => {
+    try {
+      const res = await fetch(`/voicefree-api${endpointPath}`, options);
+      if (res.ok || res.status < 500) return res;
+    } catch {}
+    return await fetch(`https://api.taovoicefree.com${endpointPath}`, options);
+  };
+
+  const requestVoicefreeAudioBlob = async (text) => {
+    const voiceId = voicefreeVoiceId.trim();
+    if (!voiceId) throw new Error('Vui lòng nhập Voice ID Voicefree.');
+    const startRes = await fetchVoicefreeApi(`/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
       method: 'POST',
       headers: {
         'accept': 'application/json',
-        'X-API-Key': ausyncLabApiKey,
+        'xi-api-key': voicefreeApiKey.trim(),
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        audio_name: `ViCompare Segment ${Date.now()}`,
         text,
-        voice_id: Number.isFinite(Number(ausyncLabVoiceId)) ? Number(ausyncLabVoiceId) : ausyncLabVoiceId,
-        speed: parseFloat(ausyncLabSpeed || '1.0'),
-        model_name: ausyncLabModel || 'myna-2',
-        language: 'vi',
-        callback_url: 'https://vicompare-telegram-bot.qhboypho.workers.dev/api/ausync-callback'
+        provider: voicefreeProvider || 'elevenlabs',
+        model_id: voicefreeModelId || 'eleven_multilingual_v2',
+        language_code: 'vi',
+        voice_settings: {
+          speed: parseFloat(voicefreeSpeed || '1.0')
+        }
       })
     });
     const startData = await startRes.json().catch(() => ({}));
-    if (!startRes.ok || startData.status >= 400) {
-      throw new Error(startData.message || JSON.stringify(startData) || 'Lỗi kết nối đến API AusyncLab.');
+    if (!startRes.ok || startData.status === 'failed') {
+      throw new Error(startData.message || startData.error || JSON.stringify(startData) || 'Lỗi kết nối đến API Voicefree.');
     }
-    const audioId = startData.result?.audio_id || startData.audio_id || startData.result?.id;
-    if (!audioId) throw new Error('AusyncLab không trả về audio_id.');
+    const taskId = startData.id || startData.result?.id;
+    if (!taskId) throw new Error('Voicefree không trả về task ID.');
 
     let audioUrlResult = '';
-    for (let attempts = 0; attempts < 24; attempts += 1) {
-      await new Promise(resolve => setTimeout(resolve, 2500));
-      const statusRes = await fetch(`https://api.ausynclab.io/api/v1/speech/${encodeURIComponent(audioId)}`, {
+    for (let attempts = 0; attempts < 30; attempts += 1) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const statusRes = await fetchVoicefreeApi(`/v1/history/${encodeURIComponent(taskId)}`, {
         method: 'GET',
         headers: {
           'accept': 'application/json',
-          'X-API-Key': ausyncLabApiKey
+          'xi-api-key': voicefreeApiKey.trim()
         }
       });
       if (!statusRes.ok) continue;
       const statusData = await statusRes.json().catch(() => ({}));
-      const result = statusData.result || statusData;
-      const state = String(result.state || result.status || statusData.status || '').toUpperCase();
-      const url = result.audio_url || result.audioUrl || result.audio_url_stream || result.url || result.download_url;
-      if (url && ['SUCCEED', 'SUCCEEDED', 'SUCCESS', 'COMPLETED', 'DONE', ''].includes(state)) {
-        audioUrlResult = url;
+      const state = String(statusData.status || statusData.state || '').toLowerCase();
+      const url = statusData.result?.audio_url || statusData.audio_url || statusData.result?.url;
+      if (url || state === 'completed') {
+        audioUrlResult = url || statusData.result?.audio_url;
         break;
       }
-      if (['FAILED', 'FAIL', 'ERROR'].includes(state)) {
-        throw new Error(result.message || 'Tiến trình tạo giọng nói trên AusyncLab bị lỗi.');
+      if (state === 'failed') {
+        throw new Error(statusData.error || statusData.message || 'Tiến trình tạo giọng nói trên Voicefree bị lỗi.');
       }
     }
-    if (!audioUrlResult) throw new Error('Hết thời gian chờ tạo Audio trên AusyncLab.');
+    if (!audioUrlResult) throw new Error('Hết thời gian chờ tạo Audio trên Voicefree.');
     return await fetchAudioBlobWithProxyFallback(audioUrlResult);
-  };
-
-  const requestLocalCloneAudioBlob = async (text) => {
-    const endpoint = buildLocalCloneTtsEndpoint(localCloneServerUrl);
-    if (!endpoint) throw new Error('Vui lòng nhập Local Clone Server URL.');
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(localCloneApiKey ? { Authorization: `Bearer ${localCloneApiKey}` } : {})
-      },
-      body: JSON.stringify({
-        text,
-        voiceId: localCloneVoiceId,
-        voice_id: localCloneVoiceId,
-        language: 'vi',
-        format: 'mp3'
-      })
-    });
-
-    const contentType = response.headers.get('content-type') || '';
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      throw new Error(errorText || `Local Clone server lỗi ${response.status}.`);
-    }
-
-    if (contentType.includes('application/json')) {
-      const data = await response.json();
-      const audioUrlResult = data.audioUrl || data.audio_url || data.url || data.downloadUrl || data.download_url;
-      if (audioUrlResult) return await fetchAudioBlobWithProxyFallback(audioUrlResult);
-      const audioBase64 = data.audioBase64 || data.audio_base64 || data.base64 || data.audio;
-      if (audioBase64) return base64ToBlob(audioBase64, data.mimeType || data.mime_type || 'audio/mpeg');
-      throw new Error('Local Clone server không trả về audioUrl hoặc audioBase64.');
-    }
-
-    return await response.blob();
-  };
-
   const requestSegmentAudioBlob = async (provider, text, options = {}) => {
     if (provider === 'eleven') return requestElevenLabsAudioBlob(text);
     if (provider === 'lucylab') {
@@ -3055,8 +3018,7 @@ export default function App() {
         intervalMs: 3000
       });
     }
-    if (provider === 'ausync') return requestAusyncLabAudioBlob(text);
-    if (provider === 'localclone') return requestLocalCloneAudioBlob(text);
+    if (provider === 'voicefree') return requestVoicefreeAudioBlob(text);
     throw new Error('Provider TTS không hợp lệ.');
   };
 
@@ -3070,11 +3032,8 @@ export default function App() {
     if (provider === 'vclip' && (!(options.apiKey || vclipApiKey) || !vclipVoiceId)) {
       throw new Error('Vui lòng nhập API Key và Voice ID VClip.');
     }
-    if (provider === 'ausync' && (!ausyncLabApiKey || !ausyncLabVoiceId)) {
-      throw new Error('Vui lòng nhập API Key và Voice ID AusyncLab.');
-    }
-    if (provider === 'localclone' && !localCloneServerUrl) {
-      throw new Error('Vui lòng nhập Local Clone Server URL.');
+    if (provider === 'voicefree' && (!voicefreeApiKey || !voicefreeVoiceId)) {
+      throw new Error('Vui lòng nhập API Key và Voice ID Voicefree.');
     }
   };
 
@@ -3455,8 +3414,32 @@ export default function App() {
     return handleGenerateSegmentedVoice('vclip', { apiKey: targetKey });
   };
 
-  const handleGenerateVoiceAusyncLab = async () => {
-    return handleGenerateSegmentedVoice('ausync');
+  const handleSaveVoicefreeApiKey = (key) => {
+    setVoicefreeApiKey(key);
+    localStorage.setItem('voicefree_api_key', key);
+    scheduleTelegramCredentialSync({ voicefreeApiKey: key });
+  };
+
+  const handleSaveVoicefreeVoiceId = (id) => {
+    setVoicefreeVoiceId(id);
+    localStorage.setItem('voicefree_voice_id', id);
+    scheduleTelegramCredentialSync({ voicefreeVoiceId: id });
+  };
+
+  const handleSaveVoicefreeProvider = (provider) => {
+    setVoicefreeProvider(provider);
+    localStorage.setItem('voicefree_provider', provider);
+    scheduleTelegramCredentialSync({ voicefreeProvider: provider });
+  };
+
+  const handleSaveVoicefreeModelId = (modelId) => {
+    setVoicefreeModelId(modelId);
+    localStorage.setItem('voicefree_model_id', modelId);
+    scheduleTelegramCredentialSync({ voicefreeModelId: modelId });
+  };
+
+  const handleGenerateVoiceVoicefree = async () => {
+    return handleGenerateSegmentedVoice('voicefree');
   };
 
   const handleGenerateVoiceLocalClone = async () => {
@@ -4481,9 +4464,10 @@ export default function App() {
       vclipSpeed,
       lucyLabVoiceId,
       lucyLabSpeed,
-      ausyncLabVoiceId,
-      ausyncLabModel,
-      ausyncLabSpeed,
+      voicefreeVoiceId,
+      voicefreeProvider,
+      voicefreeModelId,
+      voicefreeSpeed,
       localCloneServerUrl,
       localCloneVoiceId,
       localCloneApiKey,
@@ -4639,15 +4623,20 @@ export default function App() {
         localStorage.setItem('lucylab_voice_id', config.lucyLabVoiceId);
         ttsCredentialOverrides.lucyLabVoiceId = config.lucyLabVoiceId;
       }
-      if (config.ausyncLabVoiceId !== undefined) {
-        setAusyncLabVoiceId(config.ausyncLabVoiceId);
-        localStorage.setItem('ausynclab_voice_id', config.ausyncLabVoiceId);
-        ttsCredentialOverrides.ausyncLabVoiceId = config.ausyncLabVoiceId;
+      if (config.voicefreeVoiceId !== undefined) {
+        setVoicefreeVoiceId(config.voicefreeVoiceId);
+        localStorage.setItem('voicefree_voice_id', config.voicefreeVoiceId);
+        ttsCredentialOverrides.voicefreeVoiceId = config.voicefreeVoiceId;
       }
-      if (config.ausyncLabModel !== undefined) {
-        setAusyncLabModel(config.ausyncLabModel);
-        localStorage.setItem('ausynclab_model', config.ausyncLabModel);
-        ttsCredentialOverrides.ausyncLabModel = config.ausyncLabModel;
+      if (config.voicefreeProvider !== undefined) {
+        setVoicefreeProvider(config.voicefreeProvider);
+        localStorage.setItem('voicefree_provider', config.voicefreeProvider);
+        ttsCredentialOverrides.voicefreeProvider = config.voicefreeProvider;
+      }
+      if (config.voicefreeModelId !== undefined) {
+        setVoicefreeModelId(config.voicefreeModelId);
+        localStorage.setItem('voicefree_model_id', config.voicefreeModelId);
+        ttsCredentialOverrides.voicefreeModelId = config.voicefreeModelId;
       }
       if (config.localCloneServerUrl !== undefined) {
         setLocalCloneServerUrl(config.localCloneServerUrl);
@@ -4668,7 +4657,7 @@ export default function App() {
         scheduleTelegramCredentialSync(ttsCredentialOverrides);
       }
       if (config.lucyLabSpeed !== undefined) setLucyLabSpeed(config.lucyLabSpeed);
-      if (config.ausyncLabSpeed !== undefined) setAusyncLabSpeed(config.ausyncLabSpeed);
+      if (config.voicefreeSpeed !== undefined) setVoicefreeSpeed(config.voicefreeSpeed);
       if (config.stability !== undefined) setStability(config.stability);
       if (config.similarityBoost !== undefined) setSimilarityBoost(config.similarityBoost);
       if (config.styleExaggeration !== undefined) setStyleExaggeration(config.styleExaggeration);
@@ -5407,9 +5396,10 @@ export default function App() {
         vclipSpeed,
         lucyLabVoiceId,
         lucyLabSpeed,
-        ausyncLabVoiceId,
-        ausyncLabModel,
-        ausyncLabSpeed,
+        voicefreeVoiceId,
+        voicefreeProvider,
+        voicefreeModelId,
+        voicefreeSpeed,
         stability,
         similarityBoost,
         styleExaggeration,
@@ -6244,18 +6234,11 @@ export default function App() {
                   LucyLab TTS
                 </button>
                 <button
-                  className={`tab-btn ${ttsProvider === 'ausynclab' ? 'active' : ''}`}
-                  onClick={() => handleSelectTtsProvider('ausynclab')}
-                  style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'ausynclab' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
+                  className={`tab-btn ${ttsProvider === 'voicefree' ? 'active' : ''}`}
+                  onClick={() => handleSelectTtsProvider('voicefree')}
+                  style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'voicefree' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
                 >
-                  AusyncLab TTS
-                </button>
-                <button
-                  className={`tab-btn ${ttsProvider === 'localclone' ? 'active' : ''}`}
-                  onClick={() => handleSelectTtsProvider('localclone')}
-                  style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'localclone' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
-                >
-                  Local Clone
+                  Voicefree
                 </button>
               </div>
 
@@ -6814,65 +6797,75 @@ export default function App() {
                 </div>
               )}
 
-              {/* 4. AusyncLab UI */}
-              {ttsProvider === 'ausynclab' && (
+              {/* 4. Voicefree UI */}
+              {ttsProvider === 'voicefree' && (
                 <div className="glass-card" style={{ marginTop: 0 }}>
-                  <h2 className="card-title">Trình tạo giọng nói AusyncLab TTS</h2>
+                  <h2 className="card-title">Trình tạo giọng nói Voicefree TTS</h2>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     <div className="form-group">
-                      <label>AusyncLab API Key</label>
+                      <label>Voicefree API Key (xi-api-key)</label>
                       <ApiKeyInput
-                        value={ausyncLabApiKey}
-                        onChange={(e) => handleSaveAusyncLabApiKey(e.target.value)}
-                        placeholder="Nhập API Key AusyncLab"
+                        value={voicefreeApiKey}
+                        onChange={(e) => handleSaveVoicefreeApiKey(e.target.value)}
+                        placeholder="Nhập API Key Voicefree (xi-api-key)"
                       />
                     </div>
 
                     <div className="form-group">
-                      <label>Voice ID AusyncLab</label>
+                      <label>Voice ID Voicefree</label>
                       <input
                         type="text"
-                        value={ausyncLabVoiceId}
-                        onChange={(e) => handleSaveAusyncLabVoiceId(e.target.value)}
-                        placeholder="Nhập Voice ID lấy từ ausynclab.io"
+                        value={voicefreeVoiceId}
+                        onChange={(e) => handleSaveVoicefreeVoiceId(e.target.value)}
+                        placeholder="Nhập Voice ID từ taovoicefree.com"
                         style={{ padding: '0.5rem', fontSize: '0.8rem' }}
                       />
                     </div>
 
                     <div className="form-group">
-                      <label>Model AusyncLab</label>
+                      <label>Provider</label>
                       <select
-                        value={ausyncLabModel}
-                        onChange={(e) => handleSaveAusyncLabModel(e.target.value)}
+                        value={voicefreeProvider}
+                        onChange={(e) => handleSaveVoicefreeProvider(e.target.value)}
                         style={{ padding: '0.5rem', fontSize: '0.8rem' }}
                       >
-                        <option value="myna-2">myna-2</option>
-                        <option value="myna-1-turbo">myna-1-turbo</option>
-                        <option value="myna-1">myna-1</option>
-                        <option value="fast">fast</option>
+                        <option value="elevenlabs">ElevenLabs (mặc định)</option>
+                        <option value="minimax">MiniMax</option>
+                        <option value="capcut">CapCut</option>
                       </select>
                     </div>
 
                     <div className="form-group">
+                      <label>Model ID</label>
+                      <input
+                        type="text"
+                        value={voicefreeModelId}
+                        onChange={(e) => handleSaveVoicefreeModelId(e.target.value)}
+                        placeholder="Ví dụ: eleven_multilingual_v2, speech-2.8-turbo, capcut..."
+                        style={{ padding: '0.5rem', fontSize: '0.8rem' }}
+                      />
+                    </div>
+
+                    <div className="form-group">
                       <label style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span>Tốc độ đọc AusyncLab</span>
-                        <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{ausyncLabSpeed}x</span>
+                        <span>Tốc độ đọc Voicefree</span>
+                        <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{voicefreeSpeed}x</span>
                       </label>
                       <input
                         type="range"
-                        min="0.75"
-                        max="1.25"
+                        min="0.5"
+                        max="2.0"
                         step="0.05"
-                        value={ausyncLabSpeed}
+                        value={voicefreeSpeed}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value);
-                          setAusyncLabSpeed(val);
-                          localStorage.setItem('ausynclab_speed', val.toString());
-                          scheduleTelegramCredentialSync({ ausyncLabSpeed: val });
+                          setVoicefreeSpeed(val);
+                          localStorage.setItem('voicefree_speed', val.toString());
+                          scheduleTelegramCredentialSync({ voicefreeSpeed: val });
                         }}
                       />
-                      <span style={{ fontSize: '0.65rem', color: '#888' }}>Phạm vi theo AusyncLab: 0.75 - 1.25</span>
+                      <span style={{ fontSize: '0.65rem', color: '#888' }}>Phạm vi: 0.5x - 2.0x | Tài liệu API: https://taovoicefree.com/docs</span>
                     </div>
 
                     <div className="form-group">
@@ -6888,13 +6881,13 @@ export default function App() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                       <button
                         className="btn btn-primary"
-                        onClick={handleGenerateVoiceAusyncLab}
-                        disabled={isGeneratingVoice || isProcessingAudio || !ausyncLabApiKey || !ausyncLabVoiceId}
+                        onClick={handleGenerateVoiceVoicefree}
+                        disabled={isGeneratingVoice || isProcessingAudio || !voicefreeApiKey || !voicefreeVoiceId}
                         style={{ width: '100%', padding: '0.75rem' }}
                       >
                         {isGeneratingVoice ? (
                           <>
-                            <span className="spinner" style={{ marginRight: '0.5rem' }}></span> Đang gọi API AusyncLab tạo giọng...
+                            <span className="spinner" style={{ marginRight: '0.5rem' }}></span> Đang gọi API Voicefree tạo giọng...
                           </>
                         ) : isProcessingAudio ? (
                           <>
@@ -6902,7 +6895,7 @@ export default function App() {
                           </>
                         ) : (
                           <>
-                            <Sparkles size={16} /> Sinh giọng đọc AusyncLab & Tự động khớp nhịp
+                            <Sparkles size={16} /> Sinh giọng đọc Voicefree & Tự động khớp nhịp
                           </>
                         )}
                       </button>
@@ -6922,96 +6915,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* 5. Local Clone UI */}
-              {ttsProvider === 'localclone' && (
-                <div className="glass-card" style={{ marginTop: 0 }}>
-                  <h2 className="card-title">Trình tạo giọng nói Local Clone</h2>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    <div className="form-group">
-                      <label>Local Voice Server URL</label>
-                      <input
-                        type="text"
-                        value={localCloneServerUrl}
-                        onChange={(e) => handleSaveLocalCloneServerUrl(e.target.value)}
-                        placeholder="Ví dụ: https://voice-server.trycloudflare.com hoặc http://127.0.0.1:7860"
-                        style={{ padding: '0.5rem', fontSize: '0.8rem' }}
-                      />
-                      <span style={{ fontSize: '0.65rem', color: '#888' }}>
-                        Tool sẽ gọi POST /tts nếu URL chưa trỏ sẵn tới endpoint tạo giọng.
-                      </span>
-                    </div>
-
-                    <div className="form-group">
-                      <label>Token Server (nếu có)</label>
-                      <ApiKeyInput
-                        value={localCloneApiKey}
-                        onChange={(e) => handleSaveLocalCloneApiKey(e.target.value)}
-                        placeholder="Bearer token/API key của server local, có thể bỏ trống"
-                      />
-                    </div>
-
-                    <div className="form-group">
-                      <label>Voice ID / Tên giọng clone</label>
-                      <input
-                        type="text"
-                        value={localCloneVoiceId}
-                        onChange={(e) => handleSaveLocalCloneVoiceId(e.target.value)}
-                        placeholder="Ví dụ: giong_nu_chinh hoặc speaker_01"
-                        style={{ padding: '0.5rem', fontSize: '0.8rem' }}
-                      />
-                    </div>
-
-                    <div className="form-group">
-                      <label>Xem trước Kịch bản thoại gửi đi</label>
-                      <textarea
-                        value={timelineBlocks.map(b => b.text).join('\n\n')}
-                        readOnly
-                        rows={8}
-                        style={{ background: '#0b0f19', color: '#94a3b8', fontStyle: 'italic', fontSize: '0.8rem', resize: 'none' }}
-                      />
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      <button
-                        className="btn btn-primary"
-                        onClick={handleGenerateVoiceLocalClone}
-                        disabled={isGeneratingVoice || isProcessingAudio || !localCloneServerUrl}
-                        style={{ width: '100%', padding: '0.75rem' }}
-                      >
-                        {isGeneratingVoice ? (
-                          <>
-                            <span className="spinner" style={{ marginRight: '0.5rem' }}></span> Đang gọi Local Clone server tạo giọng...
-                          </>
-                        ) : isProcessingAudio ? (
-                          <>
-                            <span className="spinner" style={{ marginRight: '0.5rem' }}></span> Đang phân tích khoảng lặng khớp nhịp...
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles size={16} /> Sinh giọng đọc Local Clone & Tự động khớp nhịp
-                          </>
-                        )}
-                      </button>
-
-                      {audioUrl && (
-                        <button
-                          className="btn btn-secondary"
-                          onClick={handleAutoSyncSilence}
-                          disabled={isGeneratingVoice || isProcessingAudio}
-                          style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--accent-indigo)', color: 'var(--accent-indigo)' }}
-                        >
-                          {isProcessingAudio ? 'Đang phân tích...' : 'Chạy lại Tự động khớp nhịp (Silence Sync)'}
-                        </button>
-                      )}
-                    </div>
-
-                    <div style={{ fontSize: '0.7rem', color: '#a0aec0', marginTop: '0.2rem', fontStyle: 'italic', textAlign: 'center', lineHeight: '1.4' }}>
-                      * Telegram đang chạy trên prd thì Server URL phải là HTTPS public tunnel như Cloudflare Tunnel/ngrok. Nếu dùng 127.0.0.1 thì chỉ web tool local gọi được.
-                    </div>
-                  </div>
-                </div>
-              )}
 
             </div>
           )}
@@ -8788,4 +8692,5 @@ export default function App() {
 
     </div>
   );
+}
 }

@@ -57,10 +57,19 @@ const corsProxyPlugin = () => ({
         }
 
         try {
-          const targetRes = await fetch(targetUrl);
+          const targetRes = await fetch(targetUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': '*/*'
+            }
+          });
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', '*');
+
           if (!targetRes.ok) {
             res.statusCode = targetRes.status;
-            res.end(`Failed to fetch: ${targetRes.statusText}`);
+            res.end(`Failed to fetch upstream: ${targetRes.statusText}`);
             return;
           }
 
@@ -68,11 +77,11 @@ const corsProxyPlugin = () => ({
           if (contentType) {
             res.setHeader('content-type', contentType);
           }
-          res.setHeader('Access-Control-Allow-Origin', '*');
 
           const arrayBuffer = await targetRes.arrayBuffer();
           res.end(Buffer.from(arrayBuffer));
         } catch (err) {
+          res.setHeader('Access-Control-Allow-Origin', '*');
           res.statusCode = 500;
           res.end(`Proxy error: ${err.message}`);
         }
@@ -122,6 +131,11 @@ export default defineConfig({
         target: 'https://open-upload.tiktokapis.com',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/tiktok-upload/, '')
+      },
+      '/voicefree-api': {
+        target: 'https://api.taovoicefree.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/voicefree-api/, '')
       }
     }
   }

@@ -94,68 +94,28 @@ describe("Telegram TTS config resolution", () => {
     );
   });
 
-  it("uses the synced AusyncLab voice and options", () => {
-    const config = resolveTtsConfig("tts_ausync", {
-      ausyncLabApiKey: "ausync-key",
-      ausyncLabVoiceId: "12345",
-      ausyncLabModel: "myna-2",
-      ausyncLabSpeed: "1.1"
+  it("uses the synced Voicefree voice and options", () => {
+    const config = resolveTtsConfig("tts_voicefree", {
+      voicefreeApiKey: "voicefree-key",
+      voicefreeVoiceId: "12345",
+      voicefreeProvider: "elevenlabs",
+      voicefreeModelId: "eleven_multilingual_v2",
+      voicefreeSpeed: "1.1"
     }, {});
 
-    assert.equal(config.apiKey, "ausync-key");
+    assert.equal(config.apiKey, "voicefree-key");
     assert.equal(config.voiceId, "12345");
-    assert.equal(config.host, "api.ausynclab.io");
-    assert.equal(config.modelName, "myna-2");
-    assert.equal(config.language, "vi");
+    assert.equal(config.host, "api.taovoicefree.com");
+    assert.equal(config.provider, "elevenlabs");
+    assert.equal(config.modelId, "eleven_multilingual_v2");
     assert.equal(config.speed, 1.1);
   });
 
-  it("requires a synced AusyncLab voice ID", () => {
+  it("requires a synced Voicefree voice ID", () => {
     assert.throws(
-      () => resolveTtsConfig("tts_ausync", { ausyncLabApiKey: "ausync-key" }, {}),
-      /Chưa đồng bộ Voice ID AusyncLab/
+      () => resolveTtsConfig("tts_voicefree", { voicefreeApiKey: "voicefree-key" }, {}),
+      /Chưa đồng bộ Voice ID Voicefree/
     );
-  });
-
-  it("uses synced Local Clone server settings without hardcoded voice", () => {
-    const config = resolveTtsConfig("tts_local", {
-      localCloneServerUrl: "https://voice.example.com",
-      localCloneVoiceId: "custom-vietnamese-voice",
-      localCloneApiKey: "local-token"
-    }, {});
-
-    assert.equal(config.serverUrl, "https://voice.example.com");
-    assert.equal(config.endpoint, "https://voice.example.com/tts");
-    assert.equal(config.voiceId, "custom-vietnamese-voice");
-    assert.equal(config.apiKey, "local-token");
-  });
-
-  it("requires a Local Clone server URL", () => {
-    assert.throws(
-      () => resolveTtsConfig("tts_local", {}, {}),
-      /Chưa đồng bộ Local Clone Server URL/
-    );
-  });
-
-  it("blocks localhost Local Clone URLs for production Telegram by default", () => {
-    assert.throws(
-      () => resolveTtsConfig("tts_local", {
-        localCloneServerUrl: "http://127.0.0.1:7860",
-        localCloneVoiceId: "voice-a"
-      }, {}),
-      /không gọi được Local Clone URL nội bộ/
-    );
-  });
-
-  it("allows localhost Local Clone URLs when explicitly enabled", () => {
-    const config = resolveTtsConfig("tts_local", {
-      localCloneServerUrl: "http://127.0.0.1:7860",
-      localCloneVoiceId: "voice-a"
-    }, {
-      ALLOW_LOCAL_CLONE_PRIVATE_URL: "true"
-    });
-
-    assert.equal(config.endpoint, "http://127.0.0.1:7860/tts");
   });
 });
 

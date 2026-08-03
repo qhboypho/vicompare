@@ -31,3 +31,13 @@ credentials_backup.json
 .playwright-mcp/
 output/
 social-accounts-compact.png
+desktop.ini
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+ENV/
+local-voice-server/.venv/
+local-voice-server/data/
+local-voice-server/outputs/
