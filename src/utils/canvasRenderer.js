@@ -377,10 +377,12 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   const leftX = 360 - midGap / 2 - panelW;
   const rightX = 360 + midGap / 2;
 
-  // Smart fallback keyword matching for highlight when block highlight is missing or 'none'
   const getSmartHighlight = (block) => {
     if (!block) return 'none';
-    if (block.highlight && block.highlight !== 'none') return block.highlight;
+    // Respect explicit highlight setting ('none', 'left', 'right') 100%
+    if (block.highlight !== undefined && block.highlight !== null && block.highlight !== '') {
+      return block.highlight;
+    }
     
     const textLower = (block.text || '').toLowerCase();
     if (!textLower) return 'none';
