@@ -5,6 +5,7 @@ import os
 import sys
 import time
 import shutil
+import hashlib
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -22,15 +23,34 @@ for stream in (sys.stdout, sys.stderr):
         except Exception:
             pass
 
+# PyTorch thread optimization for CPU
+try:
+    import torch
+    torch.set_num_threads(max(1, os.cpu_count() or 4))
+except Exception:
+    pass
+
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.getenv("OMNIVOICE_DATA_DIR", APP_DIR / "data")).resolve()
 OUTPUT_DIR = DATA_DIR / "omnivoice-outputs"
+PRESETS_DIR = DATA_DIR / "omnivoice-presets"
 
 OMNIVOICE_MODEL: Any | None = None
+PROMPT_CACHE: dict[str, Any] = {}
+
+PRESET_TEXTS = {
+    "vi_male_warm_narrator": "Xin chào, đây là giọng nam trầm ấm thuyết minh chuyên nghiệp, phát âm rõ ràng truyền cảm.",
+    "vi_female_soft_emotional": "Xin chào, đây là giọng nữ nhẹ nhàng truyền cảm ngọt ngào, chất giọng sâu lắng và tinh tế.",
+    "vi_male_energetic_young": "Xin chào, đây là giọng nam trẻ trung sôi nổi tự tin, phù hợp cho các nội dung quảng cáo và review sôi động.",
+    "vi_female_news_anchor": "Xin chào, đây là giọng nữ bản tin chuyên nghiệp rõ ràng, âm điệu chuẩn phát thanh viên truyền hình.",
+    "vi_male_elderly_calm": "Xin chào, đây là giọng nam cao tuổi điềm tĩnh thông thái, âm giọng sâu lắng bài học cuộc sống.",
+    "vi_female_cute_young": "Xin chào, đây là giọng nữ trẻ dễ thương vui tươi, vô cùng đáng yêu và nhí nhảnh."
+}
 
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    PRESETS_DIR.mkdir(parents=True, exist_ok=True)
 
 def resolve_device() -> str:
     device = os.getenv("OMNIVOICE_DEVICE", "auto").strip().lower()
@@ -41,6 +61,17 @@ def resolve_device() -> str:
         return "cuda" if torch.cuda.is_available() else "cpu"
     except Exception:
         return "cpu"
+
+def get_generation_config() -> Any:
+    try:
+        from omnivoice.models.omnivoice import OmniVoiceGenerationConfig
+        device = resolve_device()
+        # Default to 8 steps on CPU for 4x speedup, 16 steps on GPU
+        default_steps = 8 if device == "cpu" else 16
+        steps = int(os.getenv("OMNIVOICE_STEPS", str(default_steps)))
+        return OmniVoiceGenerationConfig(num_step=steps)
+    except Exception:
+        return None
 
 def get_omnivoice_model() -> Any:
     global OMNIVOICE_MODEL
@@ -90,6 +121,7 @@ def health() -> dict[str, Any]:
         "engine": "omnivoice",
         "device": resolve_device(),
         "modelLoaded": OMNIVOICE_MODEL is not None,
+        "cachedPrompts": len(PROMPT_CACHE),
         "outputDir": str(OUTPUT_DIR)
     }
 
@@ -101,20 +133,33 @@ async def generate_tts(payload: OmniVoiceTtsRequest) -> Response:
         raise HTTPException(status_code=400, detail="Thiếu nội dung văn bản.")
 
     model = get_omnivoice_model()
+    gen_config = get_generation_config()
+
     try:
         kwargs = {
             "text": text,
             "language": payload.language,
             "speed": payload.speed
         }
+        if gen_config is not None:
+            kwargs["generation_config"] = gen_config
 
-        PRESETS_DIR = DATA_DIR / "omnivoice-presets"
         if payload.voice_id:
             preset_file = PRESETS_DIR / f"{payload.voice_id}.wav"
             if preset_file.exists():
-                kwargs["ref_audio"] = str(preset_file.resolve())
+                cache_key = f"preset_{payload.voice_id}"
+                if cache_key in PROMPT_CACHE:
+                    kwargs["voice_clone_prompt"] = PROMPT_CACHE[cache_key]
+                else:
+                    ref_text = PRESET_TEXTS.get(payload.voice_id)
+                    prompt = model.create_voice_clone_prompt(
+                        ref_audio=str(preset_file.resolve()),
+                        ref_text=ref_text
+                    )
+                    PROMPT_CACHE[cache_key] = prompt
+                    kwargs["voice_clone_prompt"] = prompt
 
-        if "ref_audio" not in kwargs and payload.instruct:
+        if "voice_clone_prompt" not in kwargs and "ref_audio" not in kwargs and payload.instruct:
             kwargs["instruct"] = payload.instruct.strip()
 
         audio_list = model.generate(**kwargs)
@@ -156,17 +201,41 @@ async def clone_voice(
         raise HTTPException(status_code=400, detail="Thiếu văn bản để đọc.")
 
     model = get_omnivoice_model()
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_ref:
-        shutil.copyfileobj(audio.file, tmp_ref)
-        tmp_ref_path = tmp_ref.name
+    gen_config = get_generation_config()
+
+    file_bytes = await audio.read()
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
+
+    if file_hash in PROMPT_CACHE:
+        prompt = PROMPT_CACHE[file_hash]
+    else:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_ref:
+            tmp_ref.write(file_bytes)
+            tmp_ref_path = tmp_ref.name
+        try:
+            prompt = model.create_voice_clone_prompt(
+                ref_audio=tmp_ref_path,
+                ref_text=None
+            )
+            PROMPT_CACHE[file_hash] = prompt
+        finally:
+            if os.path.exists(tmp_ref_path):
+                try:
+                    os.remove(tmp_ref_path)
+                except Exception:
+                    pass
 
     try:
-        audio_list = model.generate(
-            text=cleaned_text,
-            ref_audio=tmp_ref_path,
-            language=language,
-            speed=speed
-        )
+        kwargs = {
+            "text": cleaned_text,
+            "voice_clone_prompt": prompt,
+            "language": language,
+            "speed": speed
+        }
+        if gen_config is not None:
+            kwargs["generation_config"] = gen_config
+
+        audio_list = model.generate(**kwargs)
         if not audio_list or len(audio_list) == 0:
             raise HTTPException(status_code=500, detail="OmniVoice không trả về dữ liệu âm thanh clone.")
 
@@ -191,9 +260,6 @@ async def clone_voice(
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Lỗi clone giọng OmniVoice: {exc}") from exc
-    finally:
-        if os.path.exists(tmp_ref_path):
-            os.remove(tmp_ref_path)
 
 if __name__ == "__main__":
     import uvicorn
