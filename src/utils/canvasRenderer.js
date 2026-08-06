@@ -534,19 +534,31 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     if (imgUrl && loadedImages[imgUrl]) {
       const img = loadedImages[imgUrl];
       
-      // Guaranteed 100% Full Flush Cover Fit: Math.max ensures image ALWAYS spans 100% of width AND 100% of height!
-      const coverScale = Math.max(width / img.width, height / img.height);
+      // Native Canvas implementation of CSS background-size: cover; background-position: center
+      const imgRatio = img.width / img.height;
+      const targetRatio = width / height;
       const userZoom = Math.max(1.0, (state.globalImageZoom !== undefined ? state.globalImageZoom : 100) / 100);
-      const finalScale = coverScale * userZoom;
 
-      const scaledW = img.width * finalScale;
-      const scaledH = img.height * finalScale;
+      let sw = img.width;
+      let sh = img.height;
 
-      // Center scaled image flush inside frame bounds
-      const drawX = x + (width - scaledW) / 2;
-      const drawY = y + (height - scaledH) / 2;
+      if (imgRatio > targetRatio) {
+        // Image is wider than container: crop left and right sides equally
+        sw = img.height * targetRatio;
+      } else {
+        // Image is taller than container: crop top and bottom sides equally
+        sh = img.width / targetRatio;
+      }
 
-      ctx.drawImage(img, drawX, drawY, scaledW, scaledH);
+      // Apply zoom factor centered
+      sw = sw / userZoom;
+      sh = sh / userZoom;
+
+      const sx = (img.width - sw) / 2;
+      const sy = (img.height - sh) / 2;
+
+      // Draw 100% full flush to container bounds [x, y, width, height]
+      ctx.drawImage(img, sx, sy, sw, sh, x, y, width, height);
     } else {
       // Placeholder if no image
       ctx.fillStyle = '#E3DCD5';
