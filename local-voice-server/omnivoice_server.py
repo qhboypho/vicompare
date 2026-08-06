@@ -70,6 +70,7 @@ class OmniVoiceTtsRequest(BaseModel):
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     language: str = Field(default="vi")
     instruct: str | None = None
+    voice_id: str | None = None
 
 app = FastAPI(title="ViCompare OmniVoice Local Server", version="1.0.0")
 
@@ -106,7 +107,14 @@ async def generate_tts(payload: OmniVoiceTtsRequest) -> Response:
             "language": payload.language,
             "speed": payload.speed
         }
-        if payload.instruct:
+
+        PRESETS_DIR = DATA_DIR / "omnivoice-presets"
+        if payload.voice_id:
+            preset_file = PRESETS_DIR / f"{payload.voice_id}.wav"
+            if preset_file.exists():
+                kwargs["ref_audio"] = str(preset_file.resolve())
+
+        if "ref_audio" not in kwargs and payload.instruct:
             kwargs["instruct"] = payload.instruct.strip()
 
         audio_list = model.generate(**kwargs)

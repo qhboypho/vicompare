@@ -3142,7 +3142,8 @@ export default function App() {
       const payload = {
         text,
         speed,
-        language: 'vi'
+        language: 'vi',
+        voice_id: omnivoiceVoiceId
       };
       if (voiceProfile && voiceProfile.instruct) {
         payload.instruct = voiceProfile.instruct;
@@ -3624,6 +3625,7 @@ export default function App() {
           text: voiceProfile.previewText || 'Xin chào, đây là giọng đọc thử nghiệm.',
           speed: parseFloat(omnivoiceSpeed || '1.0'),
           language: 'vi',
+          voice_id: omnivoiceVoiceId,
           instruct: voiceProfile.instruct
         })
       });
