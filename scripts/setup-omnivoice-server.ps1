@@ -5,13 +5,21 @@ $ProjectDir = Split-Path -Parent $ScriptDir
 $ServerDir = Join-Path $ProjectDir "local-voice-server"
 $VenvDir = Join-Path $ServerDir ".venv-omnivoice"
 
+# Detect Python command (py or python)
+$SysPython = Get-Command "py" -ErrorAction SilentlyContinue
+if ($SysPython) {
+    $PythonCmd = "py"
+} else {
+    $PythonCmd = "python"
+}
+
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host " Setup Local OmniVoice TTS & Clone Server" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
 if (-not (Test-Path $VenvDir)) {
     Write-Host "[1/3] Dang tao môi truong ao Python (.venv-omnivoice)..." -ForegroundColor Yellow
-    python -m venv $VenvDir
+    & $PythonCmd -m venv $VenvDir
 } else {
     Write-Host "[1/3] Môi truong ao .venv-omnivoice da ton tai." -ForegroundColor Green
 }

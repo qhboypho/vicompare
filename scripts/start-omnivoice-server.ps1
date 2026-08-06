@@ -7,8 +7,13 @@ $VenvDir = Join-Path $ServerDir ".venv-omnivoice"
 $PythonExe = Join-Path $VenvDir "Scripts\python.exe"
 
 if (-not (Test-Path $PythonExe)) {
-    # Fallback to system python if venv not created yet
-    $PythonExe = "python"
+    # Fallback to system py or python if venv not created yet
+    $SysPython = Get-Command "py" -ErrorAction SilentlyContinue
+    if ($SysPython) {
+        $PythonExe = "py"
+    } else {
+        $PythonExe = "python"
+    }
 }
 
 Write-Host "==========================================" -ForegroundColor Cyan
