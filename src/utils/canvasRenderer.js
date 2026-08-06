@@ -534,28 +534,37 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     if (imgUrl && loadedImages[imgUrl]) {
       const img = loadedImages[imgUrl];
       
-      // Native Canvas implementation of CSS background-size: cover; background-position: center
-      const imgRatio = img.width / img.height;
-      const targetRatio = width / height;
-      const userZoom = Math.max(1.0, (state.globalImageZoom !== undefined ? state.globalImageZoom : 100) / 100);
+      const naturalW = img.naturalWidth || img.width || 100;
+      const naturalH = img.naturalHeight || img.height || 100;
 
-      let sw = img.width;
-      let sh = img.height;
+      // Native Canvas implementation of CSS background-size: cover; background-position: center
+      const imgRatio = naturalW / naturalH;
+      const targetRatio = width / height;
+      
+      const sideZoomVal = side === 'left' ? (activeComp.leftZoom || 100) : (activeComp.rightZoom || 100);
+      const userZoom = Math.max(1.0, (state.globalImageZoom !== undefined ? state.globalImageZoom : 100) / 100) * Math.max(1.0, sideZoomVal / 100);
+
+      let sw = naturalW;
+      let sh = naturalH;
 
       if (imgRatio > targetRatio) {
         // Image is wider than container: crop left and right sides equally
-        sw = img.height * targetRatio;
+        sw = naturalH * targetRatio;
       } else {
         // Image is taller than container: crop top and bottom sides equally
-        sh = img.width / targetRatio;
+        sh = naturalW / targetRatio;
       }
 
       // Apply zoom factor centered
       sw = sw / userZoom;
       sh = sh / userZoom;
 
-      const sx = (img.width - sw) / 2;
-      const sy = (img.height - sh) / 2;
+      const sx = (naturalW - sw) / 2;
+      const sy = (naturalH - sh) / 2;
+
+      // Fill dark background inside rounded frame mask to prevent light canvas bleed
+      ctx.fillStyle = '#0B0F19';
+      ctx.fillRect(x - 1, y - 1, width + 2, height + 2);
 
       // Draw 100% full flush to container bounds [x, y, width, height]
       ctx.drawImage(img, sx, sy, sw, sh, x, y, width, height);
