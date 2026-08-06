@@ -8,13 +8,6 @@ const rootDir = path.resolve(__dirname, '..');
 
 const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <defs>
-    <!-- Background Gradient -->
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0F172A"/>
-      <stop offset="50%" stop-color="#0B0F19"/>
-      <stop offset="100%" stop-color="#1E1B4B"/>
-    </linearGradient>
-
     <!-- Left Frame Gradient (Cyan) -->
     <linearGradient id="leftGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#38BDF8"/>
@@ -53,48 +46,38 @@ const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 10
     </linearGradient>
   </defs>
 
-  <!-- Squircle Outer Container -->
-  <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#bgGrad)" stroke="rgba(255,255,255,0.12)" stroke-width="8"/>
-
-  <!-- Subtle Grid Lines in Background -->
-  <g opacity="0.08" stroke="#FFFFFF" stroke-width="2">
-    <line x1="128" y1="128" x2="896" y2="896"/>
-    <line x1="896" y1="128" x2="128" y2="896"/>
-    <circle cx="512" cy="512" r="320" fill="none"/>
-  </g>
-
   <!-- Left 9:16 Vertical Video Frame (Cyan Glow) -->
-  <g transform="translate(190, 240)">
+  <g transform="translate(190, 220)">
     <rect x="0" y="0" width="260" height="460" rx="28" fill="url(#leftGrad)" filter="url(#glowCyan)" opacity="0.95"/>
-    <rect x="12" y="12" width="236" height="436" rx="20" fill="#0B0F19" opacity="0.85"/>
+    <rect x="12" y="12" width="236" height="436" rx="20" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="4"/>
     <!-- Play Icon Inside Left Frame -->
     <polygon points="115,200 115,260 160,230" fill="url(#leftGrad)"/>
     <!-- Subtitle bar representation -->
-    <rect x="30" y="380" width="176" height="18" rx="9" fill="url(#leftGrad)" opacity="0.8"/>
+    <rect x="30" y="380" width="176" height="18" rx="9" fill="url(#leftGrad)" opacity="0.9"/>
   </g>
 
   <!-- Right 9:16 Vertical Video Frame (Magenta Glow) -->
-  <g transform="translate(574, 240)">
+  <g transform="translate(574, 220)">
     <rect x="0" y="0" width="260" height="460" rx="28" fill="url(#rightGrad)" filter="url(#glowPurple)" opacity="0.95"/>
-    <rect x="12" y="12" width="236" height="436" rx="20" fill="#0B0F19" opacity="0.85"/>
+    <rect x="12" y="12" width="236" height="436" rx="20" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="4"/>
     <!-- Play Icon Inside Right Frame -->
     <polygon points="115,200 115,260 160,230" fill="url(#rightGrad)"/>
     <!-- Subtitle bar representation -->
-    <rect x="30" y="380" width="176" height="18" rx="9" fill="url(#rightGrad)" opacity="0.8"/>
+    <rect x="30" y="380" width="176" height="18" rx="9" fill="url(#rightGrad)" opacity="0.9"/>
   </g>
 
   <!-- Central Glowing "VS" Badge -->
-  <g transform="translate(512, 470)" filter="url(#glowGold)">
-    <circle cx="0" cy="0" r="105" fill="#0B0F19" stroke="url(#goldGrad)" stroke-width="12"/>
+  <g transform="translate(512, 450)" filter="url(#glowGold)">
+    <circle cx="0" cy="0" r="105" fill="none" stroke="url(#goldGrad)" stroke-width="14"/>
     <text x="0" y="24" font-family="'Impact', 'Arial Black', sans-serif" font-size="82" font-weight="900" fill="url(#goldGrad)" text-anchor="middle" letter-spacing="2">VS</text>
   </g>
 
   <!-- App Title at Bottom -->
-  <text x="512" y="845" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="72" font-weight="900" fill="#FFFFFF" text-anchor="middle" letter-spacing="4">ViCompare</text>
-  <text x="512" y="895" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="28" font-weight="700" fill="#37E6C4" text-anchor="middle" letter-spacing="6">AUTOMATION STUDIO</text>
+  <text x="512" y="825" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="76" font-weight="900" fill="#FFFFFF" text-anchor="middle" letter-spacing="4">ViCompare</text>
+  <text x="512" y="878" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="28" font-weight="700" fill="#37E6C4" text-anchor="middle" letter-spacing="6">AUTOMATION STUDIO</text>
 </svg>`;
 
 const publicDir = path.join(rootDir, 'public');
 fs.writeFileSync(path.join(publicDir, 'vicompare-logo.svg'), svgContent, 'utf-8');
 fs.writeFileSync(path.join(publicDir, 'favicon.svg'), svgContent, 'utf-8');
-console.log('Saved SVG logo to public/vicompare-logo.svg and public/favicon.svg');
+console.log('Saved transparent SVG logo to public/vicompare-logo.svg and public/favicon.svg');
