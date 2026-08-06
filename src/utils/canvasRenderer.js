@@ -534,26 +534,15 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     if (imgUrl && loadedImages[imgUrl]) {
       const img = loadedImages[imgUrl];
       
-      // Full flush cover mode: Fill 100% of the rounded rectangle frame
-      const imgRatio = img.width / img.height;
-      const targetRatio = width / height;
-      let drawW = width;
-      let drawH = height;
+      // Guaranteed 100% Full Flush Cover Fit: Math.max ensures image ALWAYS spans 100% of width AND 100% of height!
+      const coverScale = Math.max(width / img.width, height / img.height);
+      const userZoom = Math.max(1.0, (state.globalImageZoom !== undefined ? state.globalImageZoom : 100) / 100);
+      const finalScale = coverScale * userZoom;
 
-      if (imgRatio > targetRatio) {
-        // Image is wider than frame ratio, match height and scale width to cover 100%
-        drawW = height * imgRatio;
-      } else {
-        // Image is taller than frame ratio, match width and scale height to cover 100%
-        drawH = width / imgRatio;
-      }
+      const scaledW = img.width * finalScale;
+      const scaledH = img.height * finalScale;
 
-      // Apply Global Zoom factor
-      const zoomFactor = (state.globalImageZoom !== undefined ? state.globalImageZoom : 100) / 100;
-      const scaledW = drawW * zoomFactor;
-      const scaledH = drawH * zoomFactor;
-
-      // Center scaled image inside target frame bounds
+      // Center scaled image flush inside frame bounds
       const drawX = x + (width - scaledW) / 2;
       const drawY = y + (height - scaledH) / 2;
 
