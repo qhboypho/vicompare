@@ -358,16 +358,17 @@ const DEFAULT_COMPARISONS = [
 ];
 
 const DEFAULT_TIMELINE = [
-  { id: 't-1', start: 0.0, end: 2.5, text: 'Đây là khách quan.', pose: 'point_left', highlight: 'left' },
-  { id: 't-2', start: 2.5, end: 5.0, text: 'Đây là chủ quan.', pose: 'point_right', highlight: 'right' },
-  { id: 't-3', start: 5.0, end: 7.2, text: 'Sự khác nhau là gì?', pose: 'shrug', highlight: 'none' },
-  { id: 't-4', start: 7.2, end: 17.5, text: 'Khách quan là góc nhìn nhìn nhận sự việc đúng như bản chất thực tế đang diễn ra, không bị ảnh hưởng bởi cảm xúc hay định kiến cá nhân.', pose: 'point_left', highlight: 'left' },
-  { id: 't-5', start: 17.5, end: 28.0, text: 'Chủ quan là góc nhìn xuất phát từ ý muốn, cảm xúc, kinh nghiệm và quan điểm riêng của một cá nhân hoặc một nhóm người.', pose: 'point_right', highlight: 'right' },
-  { id: 't-6', start: 28.0, end: 30.5, text: 'Đây là trí tuệ nhân tạo.', pose: 'point_left', highlight: 'left' },
-  { id: 't-7', start: 30.5, end: 33.0, text: 'Đây là trí tuệ con người.', pose: 'point_right', highlight: 'right' },
-  { id: 't-8', start: 33.0, end: 35.2, text: 'Sự khác nhau là gì?', pose: 'shrug', highlight: 'none' },
-  { id: 't-9', start: 35.2, end: 45.0, text: 'Trí tuệ nhân tạo xử lý dữ liệu với tốc độ cực nhanh và chính xác dựa trên các thuật toán cùng mô hình được lập trình sẵn.', pose: 'point_left', highlight: 'left' },
-  { id: 't-10', start: 45.0, end: 56.0, text: 'Trí tuệ con người sở hữu sự thấu cảm, ý thức, khả năng tư duy phản biện và sự sáng tạo vượt ra ngoài những quy tắc có sẵn.', pose: 'point_right', highlight: 'right' }
+  { id: 't-1', start: 0.0, end: 2.0, text: 'So sánh hai khái niệm:', pose: 'default', highlight: 'none' },
+  { id: 't-2', start: 2.0, end: 4.5, text: 'Bên trái là Khách quan.', pose: 'point_left', highlight: 'left' },
+  { id: 't-3', start: 4.5, end: 7.0, text: 'Bên phải là Chủ quan.', pose: 'point_right', highlight: 'right' },
+  { id: 't-4', start: 7.0, end: 9.2, text: 'Sự khác nhau là gì?', pose: 'shrug', highlight: 'none' },
+  { id: 't-5', start: 9.2, end: 19.5, text: 'Khách quan là góc nhìn nhìn nhận sự việc đúng như bản chất thực tế đang diễn ra, không bị ảnh hưởng bởi cảm xúc hay định kiến cá nhân.', pose: 'point_left', highlight: 'left' },
+  { id: 't-6', start: 19.5, end: 30.0, text: 'Chủ quan là góc nhìn xuất phát từ ý muốn, cảm xúc, kinh nghiệm và quan điểm riêng của một cá nhân hoặc một nhóm người.', pose: 'point_right', highlight: 'right' },
+  { id: 't-7', start: 30.0, end: 32.5, text: 'Đây là trí tuệ nhân tạo.', pose: 'point_left', highlight: 'left' },
+  { id: 't-8', start: 32.5, end: 35.0, text: 'Đây là trí tuệ con người.', pose: 'point_right', highlight: 'right' },
+  { id: 't-9', start: 35.0, end: 37.2, text: 'Sự khác nhau là gì?', pose: 'shrug', highlight: 'none' },
+  { id: 't-10', start: 37.2, end: 47.0, text: 'Trí tuệ nhân tạo xử lý dữ liệu với tốc độ cực nhanh và chính xác dựa trên các thuật toán cùng mô hình được lập trình sẵn.', pose: 'point_left', highlight: 'left' },
+  { id: 't-11', start: 47.0, end: 58.0, text: 'Trí tuệ con người sở hữu sự thấu cảm, ý thức, khả năng tư duy phản biện và sự sáng tạo vượt ra ngoài những quy tắc có sẵn.', pose: 'point_right', highlight: 'right' }
 ];
 
 // Reusable File Upload Dropzone Component with Drag and Drop Support
