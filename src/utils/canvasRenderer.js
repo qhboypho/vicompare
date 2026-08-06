@@ -522,6 +522,29 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
   // Helper to draw a panel image
   const drawPanelImage = (imgUrl, x, y, width, height, layout, side) => {
+    const panelColor = side === 'left' ? (activeComp.leftColor || '#37E6C4') : (activeComp.rightColor || '#EC4899');
+    
+    // Draw pure soft ambient neon glow aura radiating behind card when active
+    if (layout.isActive && currHighlight === side) {
+      ctx.save();
+      ctx.shadowColor = panelColor;
+      
+      // Layer 1: Wide soft ambient neon halo fading outward
+      ctx.shadowBlur = 45;
+      ctx.fillStyle = panelColor;
+      ctx.globalAlpha = 0.45;
+      drawRoundedRect(ctx, x - 3, y - 3, width + 6, height + 6, 18);
+      ctx.fill();
+
+      // Layer 2: Inner concentrated neon glow ring
+      ctx.shadowBlur = 22;
+      ctx.globalAlpha = 0.65;
+      drawRoundedRect(ctx, x - 1, y - 1, width + 2, height + 2, 17);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
     ctx.save();
     
     // Apply blur filter if inactive
@@ -591,31 +614,6 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     }
 
     ctx.restore();
-
-    // Draw neon glowing border ONLY when active (pointed to) - Thin stroke with soft fading ambient aura
-    ctx.save();
-    const panelColor = side === 'left' ? (activeComp.leftColor || '#37E6C4') : (activeComp.rightColor || '#EC4899');
-
-    if (layout.isActive && (currHighlight === 'left' || currHighlight === 'right')) {
-      // 1. Wide soft ambient neon aura fading outward
-      ctx.strokeStyle = panelColor; 
-      ctx.lineWidth = 2;
-      ctx.shadowColor = panelColor;
-      ctx.shadowBlur = 45;
-      drawRoundedRect(ctx, x, y, width, height, 16);
-      ctx.stroke();
-
-      // 2. Mid-range glowing neon halo
-      ctx.shadowBlur = 24;
-      drawRoundedRect(ctx, x, y, width, height, 16);
-      ctx.stroke();
-
-      // 3. Thin crisp center neon stroke (2.5px)
-      ctx.lineWidth = 2.5;
-      ctx.shadowBlur = 10;
-      drawRoundedRect(ctx, x, y, width, height, 16);
-      ctx.stroke();
-    }
     ctx.restore();
   };
 

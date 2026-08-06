@@ -537,7 +537,17 @@ export default function App() {
   const [timelineBlocks, setTimelineBlocks] = useState(() => {
     try {
       const saved = localStorage.getItem('timelineBlocks');
-      return saved ? JSON.parse(saved) : DEFAULT_TIMELINE;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          if (parsed[0].start === 0 && parsed[0].highlight === 'left') {
+            parsed[0].highlight = 'none';
+            parsed[0].pose = 'default';
+          }
+          return parsed;
+        }
+      }
+      return DEFAULT_TIMELINE;
     } catch {
       return DEFAULT_TIMELINE;
     }
