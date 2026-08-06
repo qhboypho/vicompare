@@ -519,7 +519,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   drawFittedTitle(activeComp.rightTitle, rightLayout.x + rightLayout.w / 2, rightLayout.y - 25, rightScale, activeComp.rightColor || '#10B981', rightOpacity);
 
   // Helper to draw a panel image
-  const drawPanelImage = (imgUrl, x, y, width, height, layout) => {
+  const drawPanelImage = (imgUrl, x, y, width, height, layout, side) => {
     ctx.save();
     
     // Apply blur filter if inactive
@@ -580,28 +580,77 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
     ctx.restore();
 
-    // Draw premium active/inactive borders
+    // Draw premium neon glowing active/inactive borders matching title color
     ctx.save();
+    const panelColor = side === 'left' ? (activeComp.leftColor || '#37E6C4') : (activeComp.rightColor || '#EC4899');
+
     if (layout.isActive && (currHighlight === 'left' || currHighlight === 'right')) {
-      // Active panel border: thicker white border with drop shadow
-      ctx.strokeStyle = '#FFFFFF'; 
-      ctx.lineWidth = 5;
-      ctx.shadowColor = 'rgba(255, 255, 255, 0.4)';
-      ctx.shadowBlur = 10;
+      // Active panel border: vibrant neon glow matching title color!
+      ctx.strokeStyle = panelColor; 
+      ctx.lineWidth = 6;
+      ctx.shadowColor = panelColor;
+      ctx.shadowBlur = 24;
+      drawRoundedRect(ctx, x, y, width, height, 16);
+      ctx.stroke();
+
+      // Inner crisp white accent stroke
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = '#FFFFFF';
+      ctx.shadowBlur = 8;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
     } else {
-      // Inactive or default panel border
-      ctx.strokeStyle = layout.opacity < 1.0 ? 'rgba(208, 201, 192, 0.4)' : '#D0C9C0';
-      ctx.lineWidth = 2;
+      // Default/inactive panel border: clean subtle neon accent
+      ctx.strokeStyle = layout.opacity < 1.0 ? 'rgba(255, 255, 255, 0.25)' : panelColor;
+      ctx.lineWidth = 3.5;
+      ctx.shadowColor = panelColor;
+      ctx.shadowBlur = 10;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
     }
     ctx.restore();
   };
 
-  drawPanelImage(activeComp.leftImageUrl, leftLayout.x, leftLayout.y, leftLayout.w, leftLayout.h, leftLayout);
-  drawPanelImage(activeComp.rightImageUrl, rightLayout.x, rightLayout.y, rightLayout.w, rightLayout.h, rightLayout);
+  drawPanelImage(activeComp.leftImageUrl, leftLayout.x, leftLayout.y, leftLayout.w, leftLayout.h, leftLayout, 'left');
+  drawPanelImage(activeComp.rightImageUrl, rightLayout.x, rightLayout.y, rightLayout.w, rightLayout.h, rightLayout, 'right');
+
+  // 4.5 Draw Central Glowing Neon "VS" Badge
+  ctx.save();
+  const vsX = 360;
+  const vsY = panelY + panelH / 2;
+  const vsPulse = 1.0 + 0.035 * Math.sin(currentTime * Math.PI * 2.5);
+  const vsRadius = 38 * vsPulse;
+
+  // Outer glowing gold aura
+  ctx.shadowColor = '#FDE047';
+  ctx.shadowBlur = 22;
+
+  // Dark circular badge background
+  ctx.beginPath();
+  ctx.arc(vsX, vsY, vsRadius, 0, Math.PI * 2);
+  ctx.fillStyle = '#0B0F19';
+  ctx.fill();
+
+  // Glowing gold border
+  const vsGrad = ctx.createLinearGradient(vsX - vsRadius, vsY - vsRadius, vsX + vsRadius, vsY + vsRadius);
+  vsGrad.addColorStop(0, '#FDE047');
+  vsGrad.addColorStop(0.5, '#EAB308');
+  vsGrad.addColorStop(1, '#CA8A04');
+
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = vsGrad;
+  ctx.stroke();
+
+  // VS text
+  ctx.font = `900 ${Math.round(34 * vsPulse)}px "Impact", "Arial Black", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = vsGrad;
+  ctx.shadowColor = '#EAB308';
+  ctx.shadowBlur = 12;
+  ctx.fillText('VS', vsX, vsY + 2);
+  ctx.restore();
 
   // 5. Draw Mascot (Bottom Center)
   let mascotPose = state.mascotPose || 'default';
