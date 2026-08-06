@@ -534,18 +534,20 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     if (imgUrl && loadedImages[imgUrl]) {
       const img = loadedImages[imgUrl];
       
-      // Calculate cover dimensions (aspect ratio preservation)
+      // Calculate fit/contain dimensions preserving full image without cropping top/bottom text or logos
       const imgRatio = img.width / img.height;
       const targetRatio = width / height;
       let drawW = width;
       let drawH = height;
 
       if (imgRatio > targetRatio) {
-        // Image is wider than frame, so match height and scale width
-        drawW = height * imgRatio;
-      } else {
-        // Image is taller than frame, so match width and scale height
+        // Image is wider than frame ratio, fit to width
+        drawW = width;
         drawH = width / imgRatio;
+      } else {
+        // Image is taller than frame ratio, fit to height
+        drawH = height;
+        drawW = height * imgRatio;
       }
 
       // Apply Global Zoom factor
@@ -553,9 +555,13 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
       const scaledW = drawW * zoomFactor;
       const scaledH = drawH * zoomFactor;
 
-      // Center the scaled image inside the target frame bounds [x, y, width, height]
+      // Center the scaled image inside target frame
       const drawX = x + (width - scaledW) / 2;
       const drawY = y + (height - scaledH) / 2;
+
+      // Fill dark container background for letterboxing
+      ctx.fillStyle = '#0B0F19';
+      ctx.fillRect(x, y, width, height);
 
       ctx.drawImage(img, drawX, drawY, scaledW, scaledH);
     } else {
@@ -580,32 +586,25 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
     ctx.restore();
 
-    // Draw premium neon glowing active/inactive borders matching title color
+    // Draw neon glowing border ONLY when active (pointed to) - NO BORDER AT ALL when standing still / inactive
+    // White border is 100% removed in ALL states!
     ctx.save();
     const panelColor = side === 'left' ? (activeComp.leftColor || '#37E6C4') : (activeComp.rightColor || '#EC4899');
 
     if (layout.isActive && (currHighlight === 'left' || currHighlight === 'right')) {
-      // Active panel border: vibrant neon glow matching title color!
+      // Active panel border: Pure vibrant NEON GLOW matching title color (100% NO WHITE BORDER!)
       ctx.strokeStyle = panelColor; 
       ctx.lineWidth = 6;
       ctx.shadowColor = panelColor;
-      ctx.shadowBlur = 24;
+      ctx.shadowBlur = 28;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
-      // Inner crisp white accent stroke
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 2.5;
-      ctx.shadowColor = '#FFFFFF';
-      ctx.shadowBlur = 8;
-      drawRoundedRect(ctx, x, y, width, height, 16);
-      ctx.stroke();
-    } else {
-      // Default/inactive panel border: clean subtle neon accent
-      ctx.strokeStyle = layout.opacity < 1.0 ? 'rgba(255, 255, 255, 0.25)' : panelColor;
-      ctx.lineWidth = 3.5;
+      // Secondary neon aura stroke
+      ctx.strokeStyle = panelColor;
+      ctx.lineWidth = 3;
       ctx.shadowColor = panelColor;
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 12;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
     }
