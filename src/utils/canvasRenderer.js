@@ -534,20 +534,18 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     if (imgUrl && loadedImages[imgUrl]) {
       const img = loadedImages[imgUrl];
       
-      // Calculate fit/contain dimensions preserving full image without cropping top/bottom text or logos
+      // Full flush cover mode: Fill 100% of the rounded rectangle frame
       const imgRatio = img.width / img.height;
       const targetRatio = width / height;
       let drawW = width;
       let drawH = height;
 
       if (imgRatio > targetRatio) {
-        // Image is wider than frame ratio, fit to width
-        drawW = width;
-        drawH = width / imgRatio;
-      } else {
-        // Image is taller than frame ratio, fit to height
-        drawH = height;
+        // Image is wider than frame ratio, match height and scale width to cover 100%
         drawW = height * imgRatio;
+      } else {
+        // Image is taller than frame ratio, match width and scale height to cover 100%
+        drawH = width / imgRatio;
       }
 
       // Apply Global Zoom factor
@@ -555,13 +553,9 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
       const scaledW = drawW * zoomFactor;
       const scaledH = drawH * zoomFactor;
 
-      // Center the scaled image inside target frame
+      // Center scaled image inside target frame bounds
       const drawX = x + (width - scaledW) / 2;
       const drawY = y + (height - scaledH) / 2;
-
-      // Fill dark container background for letterboxing
-      ctx.fillStyle = '#0B0F19';
-      ctx.fillRect(x, y, width, height);
 
       ctx.drawImage(img, drawX, drawY, scaledW, scaledH);
     } else {
@@ -586,25 +580,27 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
     ctx.restore();
 
-    // Draw neon glowing border ONLY when active (pointed to) - NO BORDER AT ALL when standing still / inactive
-    // White border is 100% removed in ALL states!
+    // Draw neon glowing border ONLY when active (pointed to) - Thin stroke with soft fading ambient aura
     ctx.save();
     const panelColor = side === 'left' ? (activeComp.leftColor || '#37E6C4') : (activeComp.rightColor || '#EC4899');
 
     if (layout.isActive && (currHighlight === 'left' || currHighlight === 'right')) {
-      // Active panel border: Pure vibrant NEON GLOW matching title color (100% NO WHITE BORDER!)
+      // 1. Wide soft ambient neon aura fading outward
       ctx.strokeStyle = panelColor; 
-      ctx.lineWidth = 6;
+      ctx.lineWidth = 2;
       ctx.shadowColor = panelColor;
-      ctx.shadowBlur = 28;
+      ctx.shadowBlur = 45;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
-      // Secondary neon aura stroke
-      ctx.strokeStyle = panelColor;
-      ctx.lineWidth = 3;
-      ctx.shadowColor = panelColor;
-      ctx.shadowBlur = 12;
+      // 2. Mid-range glowing neon halo
+      ctx.shadowBlur = 24;
+      drawRoundedRect(ctx, x, y, width, height, 16);
+      ctx.stroke();
+
+      // 3. Thin crisp center neon stroke (2.5px)
+      ctx.lineWidth = 2.5;
+      ctx.shadowBlur = 10;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
     }
