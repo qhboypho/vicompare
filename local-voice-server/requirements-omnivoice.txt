@@ -1,8 +1,0 @@
-fastapi>=0.100.0
-uvicorn>=0.22.0
-omnivoice
-torch>=2.0.0
-torchaudio>=2.0.0
-python-multipart>=0.0.6
-soundfile>=0.12.1
-scipy>=1.10.0

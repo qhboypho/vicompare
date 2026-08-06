@@ -328,44 +328,7 @@ const VOICEFREE_MODELS_BY_PROVIDER = {
   ]
 };
 
-const DEFAULT_OMNIVOICE_VOICES = [
-  {
-    id: 'vi_male_warm_narrator',
-    name: '👨 Nam Trầm Ấm - Thuyết Minh',
-    instruct: 'A middle-aged Vietnamese man with a warm, deep, authoritative and calm narrative voice.',
-    previewText: 'Xin chào, đây là giọng nam trầm ấm thuyết minh chuyên nghiệp.'
-  },
-  {
-    id: 'vi_female_soft_emotional',
-    name: '👩 Nữ Nhẹ Nhàng - Truyền Cảm',
-    instruct: 'A young Vietnamese woman with a soft, sweet, gentle and emotional voice.',
-    previewText: 'Xin chào, đây là giọng nữ nhẹ nhàng truyền cảm ngọt ngào.'
-  },
-  {
-    id: 'vi_male_energetic_young',
-    name: '👨 Nam Trẻ Trung - Sôi Nổi',
-    instruct: 'A young Vietnamese male with an energetic, clear, bright and confident voice.',
-    previewText: 'Xin chào, đây là giọng nam trẻ trung sôi nổi tự tin.'
-  },
-  {
-    id: 'vi_female_news_anchor',
-    name: '👩 Nữ Chuyên Nghiệp - Bản Tin',
-    instruct: 'A professional Vietnamese female news anchor voice, clear, articulate and formal.',
-    previewText: 'Xin chào, đây là giọng nữ bản tin chuyên nghiệp rõ ràng.'
-  },
-  {
-    id: 'vi_male_elderly_calm',
-    name: '👴 Nam Già - Điềm Tĩnh',
-    instruct: 'An elderly Vietnamese man with a wise, calm, deep and slow narrative voice.',
-    previewText: 'Xin chào, đây là giọng nam cao tuổi điềm tĩnh thông thái.'
-  },
-  {
-    id: 'vi_female_cute_young',
-    name: '👧 Nữ Trẻ - Dễ Thương',
-    instruct: 'A cute young Vietnamese girl voice, cheerful and lively.',
-    previewText: 'Xin chào, đây là giọng nữ trẻ dễ thương vui tươi.'
-  }
-];
+
 
 const DEFAULT_COMPARISONS = [
   {
@@ -663,7 +626,7 @@ export default function App() {
   const DEFAULT_VCLIP_KEY = safeAtob(['dmNfbGl2ZV9kODNlMjBlODMx', 'MjA0MGIyYTc1OGU1ZDA3MDEwNDFhYg=='].join(''));
   const [ttsProvider, setTtsProvider] = useState(() => {
     const saved = localStorage.getItem('tts_provider');
-    return (saved && saved !== 'localclone') ? saved : 'voicefree';
+    return (saved && saved !== 'localclone' && saved !== 'omnivoice') ? saved : 'voicefree';
   });
   const [vclipApiKey, setVclipApiKey] = useState(() => localStorage.getItem('vclip_api_key') || DEFAULT_VCLIP_KEY);
   const [vclipVoiceId, setVclipVoiceId] = useState(() => localStorage.getItem('vclip_voice_id') || '');
@@ -711,18 +674,7 @@ export default function App() {
     return saved !== null ? parseFloat(saved) : 1.0;
   });
 
-  // Trạng thái OmniVoice (Local AI Server)
-  const [omnivoiceApiHost, setOmnivoiceApiHost] = useState(() => localStorage.getItem('omnivoice_api_host') || 'http://127.0.0.1:8000');
-  const [omnivoiceMode, setOmnivoiceMode] = useState(() => localStorage.getItem('omnivoice_mode') || 'preset');
-  const [omnivoiceSpeed, setOmnivoiceSpeed] = useState(() => {
-    const saved = localStorage.getItem('omnivoice_speed');
-    return saved !== null ? parseFloat(saved) : 1.0;
-  });
-  const [omnivoiceCloneFile, setOmnivoiceCloneFile] = useState(null);
-  const [omnivoiceCloneFileName, setOmnivoiceCloneFileName] = useState('');
-  const [omnivoiceVoiceId, setOmnivoiceVoiceId] = useState(() => localStorage.getItem('omnivoice_voice_id') || 'vi_male_warm_narrator');
-  const [isTestingOmniVoice, setIsTestingOmniVoice] = useState(false);
-  const [isPreviewingOmniVoiceVoice, setIsPreviewingOmniVoiceVoice] = useState(false);
+
 
 
 
@@ -3117,51 +3069,6 @@ export default function App() {
     return await fetchAudioBlobWithProxyFallback(audioUrlResult);
   };
 
-  const requestOmniVoiceAudioBlob = async (text) => {
-    const host = (omnivoiceApiHost || 'http://127.0.0.1:8000').replace(/\/+$/, '');
-    const speed = parseFloat(omnivoiceSpeed || '1.0');
-
-    if (omnivoiceMode === 'clone' && omnivoiceCloneFile) {
-      const formData = new FormData();
-      formData.append('audio', omnivoiceCloneFile);
-      formData.append('text', text);
-      formData.append('speed', speed.toString());
-      formData.append('language', 'vi');
-
-      const res = await fetch(`${host}/clone`, {
-        method: 'POST',
-        body: formData
-      });
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        throw new Error(errText || 'Lỗi khi clone giọng trên Server Local OmniVoice.');
-      }
-      return await res.blob();
-    } else {
-      const voiceProfile = DEFAULT_OMNIVOICE_VOICES.find(v => v.id === omnivoiceVoiceId) || DEFAULT_OMNIVOICE_VOICES[0];
-      const payload = {
-        text,
-        speed,
-        language: 'vi',
-        voice_id: omnivoiceVoiceId
-      };
-      if (voiceProfile && voiceProfile.instruct) {
-        payload.instruct = voiceProfile.instruct;
-      }
-
-      const res = await fetch(`${host}/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        throw new Error(errText || 'Lỗi kết nối đến Server Local OmniVoice. Vui lòng kiểm tra server python.');
-      }
-      return await res.blob();
-    }
-  };
-
   const requestSegmentAudioBlob = async (provider, text, options = {}) => {
     if (provider === 'eleven') return requestElevenLabsAudioBlob(text);
     if (provider === 'lucylab') {
@@ -3188,7 +3095,6 @@ export default function App() {
       });
     }
     if (provider === 'voicefree') return requestVoicefreeAudioBlob(text);
-    if (provider === 'omnivoice') return requestOmniVoiceAudioBlob(text);
     throw new Error('Provider TTS không hợp lệ.');
   };
 
@@ -3204,12 +3110,6 @@ export default function App() {
     }
     if (provider === 'voicefree' && (!voicefreeApiKey || !voicefreeVoiceId)) {
       throw new Error('Vui lòng nhập API Key và Voice ID Voicefree.');
-    }
-    if (provider === 'omnivoice' && !omnivoiceApiHost) {
-      throw new Error('Vui lòng nhập URL Server Local OmniVoice.');
-    }
-    if (provider === 'omnivoice' && omnivoiceMode === 'clone' && !omnivoiceCloneFile) {
-      throw new Error('Vui lòng chọn hoặc kéo thả 1 tệp âm thanh mẫu (.wav/.mp3) để Clone giọng OmniVoice.');
     }
   };
 
@@ -3590,79 +3490,6 @@ export default function App() {
 
   const handleGenerateVoiceVoicefree = async () => {
     return handleGenerateSegmentedVoice('voicefree');
-  };
-
-  const handleSaveOmniVoiceApiHost = (host) => {
-    setOmnivoiceApiHost(host);
-    localStorage.setItem('omnivoice_api_host', host);
-  };
-
-  const handleSaveOmniVoiceMode = (mode) => {
-    setOmnivoiceMode(mode);
-    localStorage.setItem('omnivoice_mode', mode);
-  };
-
-  const handleSaveOmniVoiceSpeed = (speed) => {
-    setOmnivoiceSpeed(speed);
-    localStorage.setItem('omnivoice_speed', speed.toString());
-  };
-
-  const handleSaveOmniVoiceVoiceId = (voiceId) => {
-    setOmnivoiceVoiceId(voiceId);
-    localStorage.setItem('omnivoice_voice_id', voiceId);
-  };
-
-  const handlePreviewOmniVoiceVoice = async () => {
-    const voiceProfile = DEFAULT_OMNIVOICE_VOICES.find(v => v.id === omnivoiceVoiceId) || DEFAULT_OMNIVOICE_VOICES[0];
-    const host = (omnivoiceApiHost || 'http://127.0.0.1:8000').replace(/\/+$/, '');
-
-    try {
-      setIsPreviewingOmniVoiceVoice(true);
-      const res = await fetch(`${host}/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: voiceProfile.previewText || 'Xin chào, đây là giọng đọc thử nghiệm.',
-          speed: parseFloat(omnivoiceSpeed || '1.0'),
-          language: 'vi',
-          voice_id: omnivoiceVoiceId,
-          instruct: voiceProfile.instruct
-        })
-      });
-      if (!res.ok) {
-        throw new Error('Lỗi từ Server OmniVoice khi tạo audio mẫu.');
-      }
-      const blob = await res.blob();
-      const audioUrl = URL.createObjectURL(blob);
-      const audio = new Audio(audioUrl);
-      await audio.play();
-    } catch (err) {
-      alert(`Không thể phát thử giọng đọc OmniVoice.\nChi tiết: ${err.message}`);
-    } finally {
-      setIsPreviewingOmniVoiceVoice(false);
-    }
-  };
-
-  const handleTestOmniVoiceConnection = async () => {
-    try {
-      setIsTestingOmniVoice(true);
-      const host = (omnivoiceApiHost || 'http://127.0.0.1:8000').replace(/\/+$/, '');
-      const res = await fetch(`${host}/health`, { method: 'GET' });
-      if (res.ok) {
-        const data = await res.json();
-        alert(`KẾT NỐI OMNIVOICE SERVER THÀNH CÔNG!\n- Engine: ${data.engine || 'omnivoice'}\n- Thiết bị: ${data.device || 'auto'}\n- Trạng thái model: ${data.modelLoaded ? 'Đã nạp' : 'Sẵn sàng nạp khi sinh giọng'}`);
-      } else {
-        alert('Server OmniVoice phản hồi lỗi HTTP ' + res.status);
-      }
-    } catch (err) {
-      alert('Không thể kết nối đến OmniVoice Server tại ' + omnivoiceApiHost + '.\nVui lòng khởi chạy server python bằng lệnh: .\\scripts\\start-omnivoice-server.ps1');
-    } finally {
-      setIsTestingOmniVoice(false);
-    }
-  };
-
-  const handleGenerateVoiceOmniVoice = async () => {
-    return handleGenerateSegmentedVoice('omnivoice');
   };
 
   // Pre-load default mascot images
@@ -6404,13 +6231,6 @@ export default function App() {
                 >
                   Voicefree
                 </button>
-                <button
-                  className={`tab-btn ${ttsProvider === 'omnivoice' ? 'active' : ''}`}
-                  onClick={() => handleSelectTtsProvider('omnivoice')}
-                  style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem', borderRadius: '6px', cursor: 'pointer', border: 'none', background: ttsProvider === 'omnivoice' ? 'var(--accent-indigo)' : 'none', color: 'white', fontWeight: 'bold' }}
-                >
-                  OmniVoice (Local AI)
-                </button>
               </div>
 
               <div className="glass-card" style={{ marginTop: 0 }}>
@@ -7110,179 +6930,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* 5. OmniVoice UI */}
-              {ttsProvider === 'omnivoice' && (
-                <div className="glass-card" style={{ marginTop: 0 }}>
-                  <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Mic size={18} /> Trình tạo giọng nói OmniVoice (Local AI Server)
-                  </h2>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    <div className="form-group">
-                      <label>OmniVoice Local Server URL</label>
-                      <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <input
-                          type="text"
-                          value={omnivoiceApiHost}
-                          onChange={(e) => handleSaveOmniVoiceApiHost(e.target.value)}
-                          placeholder="http://127.0.0.1:8000"
-                          style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem' }}
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={handleTestOmniVoiceConnection}
-                          disabled={isTestingOmniVoice}
-                          style={{ whiteSpace: 'nowrap', padding: '0.5rem 0.75rem', fontSize: '0.75rem' }}
-                        >
-                          {isTestingOmniVoice ? 'Đang thử...' : 'Kiểm tra kết nối'}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="form-group">
-                      <label>Chế độ sinh giọng OmniVoice</label>
-                      <select
-                        value={omnivoiceMode}
-                        onChange={(e) => handleSaveOmniVoiceMode(e.target.value)}
-                        style={{ padding: '0.5rem', fontSize: '0.8rem' }}
-                      >
-                        <option value="preset">Mặc định (Danh sách Giọng AI Tiếng Việt)</option>
-                        <option value="clone">Clone Voice Zero-Shot (Tệp âm thanh mẫu)</option>
-                      </select>
-                    </div>
-
-                    {omnivoiceMode === 'preset' && (
-                      <div className="form-group">
-                        <label>Chọn giọng đọc AI Tiếng Việt (Giữ đồng nhất xuyên suốt kịch bản)</label>
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                          <select
-                            value={omnivoiceVoiceId}
-                            onChange={(e) => handleSaveOmniVoiceVoiceId(e.target.value)}
-                            style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem' }}
-                          >
-                            {DEFAULT_OMNIVOICE_VOICES.map(voice => (
-                              <option key={voice.id} value={voice.id}>{voice.name}</option>
-                            ))}
-                          </select>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={handlePreviewOmniVoiceVoice}
-                            disabled={isPreviewingOmniVoiceVoice}
-                            title="Bấm để nghe thử giọng đọc mẫu"
-                            style={{ whiteSpace: 'nowrap', padding: '0.5rem 0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-                          >
-                            {isPreviewingOmniVoiceVoice ? (
-                              <>
-                                <span className="spinner" style={{ width: '12px', height: '12px' }}></span> Đang phát...
-                              </>
-                            ) : (
-                              <>
-                                <Volume2 size={14} /> Nghe thử
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {omnivoiceMode === 'clone' && (
-                      <div className="form-group">
-                        <label>Tệp âm thanh mẫu giọng đọc (.wav/.mp3)</label>
-                        <input
-                          type="file"
-                          accept="audio/*"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              setOmnivoiceCloneFile(file);
-                              setOmnivoiceCloneFileName(file.name);
-                              localStorage.setItem('omnivoice_clone_file_name', file.name);
-                            }
-                          }}
-                          style={{ padding: '0.5rem', fontSize: '0.8rem' }}
-                        />
-                        {omnivoiceCloneFileName && (
-                          <div style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', marginTop: '0.2rem' }}>
-                            Đã chọn file mẫu: <strong>{omnivoiceCloneFileName}</strong>
-                          </div>
-                        )}
-                        <span style={{ fontSize: '0.65rem', color: '#888', marginTop: '0.2rem' }}>
-                          Mẹo: File âm thanh mẫu nên dài từ 3 - 10 giây, giọng đọc rõ ràng không lẫn tạp âm.
-                        </span>
-                      </div>
-                    )}
-
-                    <div className="form-group">
-                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span>Tốc độ đọc OmniVoice</span>
-                        <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{omnivoiceSpeed}x</span>
-                      </label>
-                      <input
-                        type="range"
-                        min="0.5"
-                        max="2.0"
-                        step="0.05"
-                        value={omnivoiceSpeed}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value);
-                          handleSaveOmniVoiceSpeed(val);
-                        }}
-                      />
-                      <span style={{ fontSize: '0.65rem', color: '#888' }}>Phạm vi: 0.5x - 2.0x | Model: k2-fsa/OmniVoice (Apache 2.0)</span>
-                    </div>
-
-                    <div className="form-group">
-                      <label>Xem trước Kịch bản thoại gửi đi</label>
-                      <textarea
-                        value={timelineBlocks.map(b => b.text).join('\n\n')}
-                        readOnly
-                        rows={8}
-                        style={{ background: '#0b0f19', color: '#94a3b8', fontStyle: 'italic', fontSize: '0.8rem', resize: 'none' }}
-                      />
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      <button
-                        className="btn btn-primary"
-                        onClick={handleGenerateVoiceOmniVoice}
-                        disabled={isGeneratingVoice || isProcessingAudio || !omnivoiceApiHost || (omnivoiceMode === 'clone' && !omnivoiceCloneFile)}
-                        style={{ width: '100%', padding: '0.75rem' }}
-                      >
-                        {isGeneratingVoice ? (
-                          <>
-                            <span className="spinner" style={{ marginRight: '0.5rem' }}></span> Đang gọi OmniVoice Server tạo giọng...
-                          </>
-                        ) : isProcessingAudio ? (
-                          <>
-                            <span className="spinner" style={{ marginRight: '0.5rem' }}></span> Đang phân tích khoảng lặng khớp nhịp...
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles size={16} /> Sinh giọng đọc OmniVoice & Tự động khớp nhịp
-                          </>
-                        )}
-                      </button>
-
-                      {audioUrl && (
-                        <button
-                          className="btn btn-secondary"
-                          onClick={handleAutoSyncSilence}
-                          disabled={isGeneratingVoice || isProcessingAudio}
-                          style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--accent-indigo)', color: 'var(--accent-indigo)' }}
-                        >
-                          {isProcessingAudio ? 'Đang phân tích...' : 'Chạy lại Tự động khớp nhịp (Silence Sync)'}
-                        </button>
-                      )}
-                    </div>
-
-                    <div style={{ fontSize: '0.7rem', color: '#a0aec0', marginTop: '0.2rem', fontStyle: 'italic', textAlign: 'center', lineHeight: '1.4' }}>
-                      * Hướng dẫn khởi chạy OmniVoice Server Local: Chạy lệnh <code>.\scripts\start-omnivoice-server.ps1</code> trên PowerShell.
-                    </div>
-                  </div>
-                </div>
-              )}
 
 
 
