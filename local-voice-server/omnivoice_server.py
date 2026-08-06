@@ -69,6 +69,7 @@ class OmniVoiceTtsRequest(BaseModel):
     text: str
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     language: str = Field(default="vi")
+    instruct: str | None = None
 
 app = FastAPI(title="ViCompare OmniVoice Local Server", version="1.0.0")
 
@@ -100,7 +101,15 @@ async def generate_tts(payload: OmniVoiceTtsRequest) -> Response:
 
     model = get_omnivoice_model()
     try:
-        audio_list = model.generate(text=text, language=payload.language, speed=payload.speed)
+        kwargs = {
+            "text": text,
+            "language": payload.language,
+            "speed": payload.speed
+        }
+        if payload.instruct:
+            kwargs["instruct"] = payload.instruct.strip()
+
+        audio_list = model.generate(**kwargs)
         if not audio_list or len(audio_list) == 0:
             raise HTTPException(status_code=500, detail="OmniVoice không trả về dữ liệu âm thanh.")
 

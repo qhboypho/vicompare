@@ -328,6 +328,45 @@ const VOICEFREE_MODELS_BY_PROVIDER = {
   ]
 };
 
+const DEFAULT_OMNIVOICE_VOICES = [
+  {
+    id: 'vi_male_warm_narrator',
+    name: '👨 Nam Trầm Ấm - Thuyết Minh',
+    instruct: 'A middle-aged Vietnamese man with a warm, deep, authoritative and calm narrative voice.',
+    previewText: 'Xin chào, đây là giọng nam trầm ấm thuyết minh chuyên nghiệp.'
+  },
+  {
+    id: 'vi_female_soft_emotional',
+    name: '👩 Nữ Nhẹ Nhàng - Truyền Cảm',
+    instruct: 'A young Vietnamese woman with a soft, sweet, gentle and emotional voice.',
+    previewText: 'Xin chào, đây là giọng nữ nhẹ nhàng truyền cảm ngọt ngào.'
+  },
+  {
+    id: 'vi_male_energetic_young',
+    name: '👨 Nam Trẻ Trung - Sôi Nổi',
+    instruct: 'A young Vietnamese male with an energetic, clear, bright and confident voice.',
+    previewText: 'Xin chào, đây là giọng nam trẻ trung sôi nổi tự tin.'
+  },
+  {
+    id: 'vi_female_news_anchor',
+    name: '👩 Nữ Chuyên Nghiệp - Bản Tin',
+    instruct: 'A professional Vietnamese female news anchor voice, clear, articulate and formal.',
+    previewText: 'Xin chào, đây là giọng nữ bản tin chuyên nghiệp rõ ràng.'
+  },
+  {
+    id: 'vi_male_elderly_calm',
+    name: '👴 Nam Già - Điềm Tĩnh',
+    instruct: 'An elderly Vietnamese man with a wise, calm, deep and slow narrative voice.',
+    previewText: 'Xin chào, đây là giọng nam cao tuổi điềm tĩnh thông thái.'
+  },
+  {
+    id: 'vi_female_cute_young',
+    name: '👧 Nữ Trẻ - Dễ Thương',
+    instruct: 'A cute young Vietnamese girl voice, cheerful and lively.',
+    previewText: 'Xin chào, đây là giọng nữ trẻ dễ thương vui tươi.'
+  }
+];
+
 const DEFAULT_COMPARISONS = [
   {
     id: 'comp-1',
@@ -681,7 +720,9 @@ export default function App() {
   });
   const [omnivoiceCloneFile, setOmnivoiceCloneFile] = useState(null);
   const [omnivoiceCloneFileName, setOmnivoiceCloneFileName] = useState('');
+  const [omnivoiceVoiceId, setOmnivoiceVoiceId] = useState(() => localStorage.getItem('omnivoice_voice_id') || 'vi_male_warm_narrator');
   const [isTestingOmniVoice, setIsTestingOmniVoice] = useState(false);
+  const [isPreviewingOmniVoiceVoice, setIsPreviewingOmniVoiceVoice] = useState(false);
 
 
 
@@ -3097,14 +3138,20 @@ export default function App() {
       }
       return await res.blob();
     } else {
+      const voiceProfile = DEFAULT_OMNIVOICE_VOICES.find(v => v.id === omnivoiceVoiceId) || DEFAULT_OMNIVOICE_VOICES[0];
+      const payload = {
+        text,
+        speed,
+        language: 'vi'
+      };
+      if (voiceProfile && voiceProfile.instruct) {
+        payload.instruct = voiceProfile.instruct;
+      }
+
       const res = await fetch(`${host}/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          speed,
-          language: 'vi'
-        })
+        body: JSON.stringify(payload)
       });
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
@@ -3557,6 +3604,41 @@ export default function App() {
   const handleSaveOmniVoiceSpeed = (speed) => {
     setOmnivoiceSpeed(speed);
     localStorage.setItem('omnivoice_speed', speed.toString());
+  };
+
+  const handleSaveOmniVoiceVoiceId = (voiceId) => {
+    setOmnivoiceVoiceId(voiceId);
+    localStorage.setItem('omnivoice_voice_id', voiceId);
+  };
+
+  const handlePreviewOmniVoiceVoice = async () => {
+    const voiceProfile = DEFAULT_OMNIVOICE_VOICES.find(v => v.id === omnivoiceVoiceId) || DEFAULT_OMNIVOICE_VOICES[0];
+    const host = (omnivoiceApiHost || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+
+    try {
+      setIsPreviewingOmniVoiceVoice(true);
+      const res = await fetch(`${host}/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: voiceProfile.previewText || 'Xin chào, đây là giọng đọc thử nghiệm.',
+          speed: parseFloat(omnivoiceSpeed || '1.0'),
+          language: 'vi',
+          instruct: voiceProfile.instruct
+        })
+      });
+      if (!res.ok) {
+        throw new Error('Lỗi từ Server OmniVoice khi tạo audio mẫu.');
+      }
+      const blob = await res.blob();
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      await audio.play();
+    } catch (err) {
+      alert(`Không thể phát thử giọng đọc OmniVoice.\nChi tiết: ${err.message}`);
+    } finally {
+      setIsPreviewingOmniVoiceVoice(false);
+    }
   };
 
   const handleTestOmniVoiceConnection = async () => {
@@ -7063,10 +7145,45 @@ export default function App() {
                         onChange={(e) => handleSaveOmniVoiceMode(e.target.value)}
                         style={{ padding: '0.5rem', fontSize: '0.8rem' }}
                       >
-                        <option value="preset">Mặc định (Giọng AI Tiếng Việt)</option>
+                        <option value="preset">Mặc định (Danh sách Giọng AI Tiếng Việt)</option>
                         <option value="clone">Clone Voice Zero-Shot (Tệp âm thanh mẫu)</option>
                       </select>
                     </div>
+
+                    {omnivoiceMode === 'preset' && (
+                      <div className="form-group">
+                        <label>Chọn giọng đọc AI Tiếng Việt (Giữ đồng nhất xuyên suốt kịch bản)</label>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <select
+                            value={omnivoiceVoiceId}
+                            onChange={(e) => handleSaveOmniVoiceVoiceId(e.target.value)}
+                            style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem' }}
+                          >
+                            {DEFAULT_OMNIVOICE_VOICES.map(voice => (
+                              <option key={voice.id} value={voice.id}>{voice.name}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={handlePreviewOmniVoiceVoice}
+                            disabled={isPreviewingOmniVoiceVoice}
+                            title="Bấm để nghe thử giọng đọc mẫu"
+                            style={{ whiteSpace: 'nowrap', padding: '0.5rem 0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                          >
+                            {isPreviewingOmniVoiceVoice ? (
+                              <>
+                                <span className="spinner" style={{ width: '12px', height: '12px' }}></span> Đang phát...
+                              </>
+                            ) : (
+                              <>
+                                <Volume2 size={14} /> Nghe thử
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {omnivoiceMode === 'clone' && (
                       <div className="form-group">
