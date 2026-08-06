@@ -51,7 +51,10 @@ def get_omnivoice_model() -> Any:
         from omnivoice import OmniVoice
         device = resolve_device()
         print(f"[OmniVoice] Loading OmniVoice model on device: {device}...")
-        OMNIVOICE_MODEL = OmniVoice.from_pretrained("k2-fsa/OmniVoice", device=device)
+        model = OmniVoice.from_pretrained("k2-fsa/OmniVoice")
+        if hasattr(model, "to"):
+            model = model.to(device)
+        OMNIVOICE_MODEL = model
         return OMNIVOICE_MODEL
     except Exception as exc:
         raise HTTPException(
@@ -97,13 +100,21 @@ async def generate_tts(payload: OmniVoiceTtsRequest) -> Response:
 
     model = get_omnivoice_model()
     try:
-        # Generate default TTS audio
-        audio_tensor = model.generate(text=text, language=payload.language, speed=payload.speed)
+        audio_list = model.generate(text=text, language=payload.language, speed=payload.speed)
+        if not audio_list or len(audio_list) == 0:
+            raise HTTPException(status_code=500, detail="OmniVoice không trả về dữ liệu âm thanh.")
+
+        import numpy as np
+        import scipy.io.wavfile as wavfile
+        audio_np = audio_list[0]
         
-        # Save to wav buffer
-        import torchaudio
+        if audio_np.dtype in (np.float32, np.float64):
+            audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
+        else:
+            audio_int16 = audio_np.astype(np.int16)
+
         buffer = io.BytesIO()
-        torchaudio.save(buffer, audio_tensor.cpu(), 24000, format="wav")
+        wavfile.write(buffer, 24000, audio_int16)
         wav_bytes = buffer.getvalue()
 
         filename = f"omnivoice_{int(time.time() * 1000)}.wav"
@@ -133,17 +144,26 @@ async def clone_voice(
         tmp_ref_path = tmp_ref.name
 
     try:
-        # Zero-shot voice cloning with reference audio
-        audio_tensor = model.generate(
+        audio_list = model.generate(
             text=cleaned_text,
             ref_audio=tmp_ref_path,
             language=language,
             speed=speed
         )
+        if not audio_list or len(audio_list) == 0:
+            raise HTTPException(status_code=500, detail="OmniVoice không trả về dữ liệu âm thanh clone.")
 
-        import torchaudio
+        import numpy as np
+        import scipy.io.wavfile as wavfile
+        audio_np = audio_list[0]
+
+        if audio_np.dtype in (np.float32, np.float64):
+            audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
+        else:
+            audio_int16 = audio_np.astype(np.int16)
+
         buffer = io.BytesIO()
-        torchaudio.save(buffer, audio_tensor.cpu(), 24000, format="wav")
+        wavfile.write(buffer, 24000, audio_int16)
         wav_bytes = buffer.getvalue()
 
         filename = f"omnivoice_clone_{int(time.time() * 1000)}.wav"
