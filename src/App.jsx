@@ -5781,9 +5781,13 @@ export default function App() {
     <div className="app-container">
       {/* Header Bar */}
       <header className="app-header">
-        <div className="logo-section">
-          <Sparkles className="logo-icon" size={26} />
-          <h1 className="app-title">TỰ ĐỘNG HÓA VIDEO SO SÁNH</h1>
+        <div className="logo-section" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <img src="/vicompare-app-icon.png" alt="ViCompare Logo" style={{ width: '34px', height: '34px', borderRadius: '8px', objectFit: 'contain', filter: 'drop-shadow(0 0 8px rgba(55, 230, 196, 0.4))' }} />
+          <h1 className="app-title" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <span style={{ color: 'var(--accent-cyan)', fontWeight: 900, letterSpacing: '0.5px' }}>VICOMPARE</span>
+            <span style={{ opacity: 0.6, fontSize: '0.85em' }}>|</span>
+            <span>TỰ ĐỘNG HÓA VIDEO SO SÁNH</span>
+          </h1>
         </div>
 
         <div className="actions-bar">
