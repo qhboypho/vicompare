@@ -514,7 +514,7 @@ export default function App() {
   // General Setup
   const [headerTitle, setHeaderTitle] = useState(() => localStorage.getItem('headerTitle') || 'Mèo Thông Thái');
   const [customFilename, setCustomFilename] = useState(() => localStorage.getItem('customFilename') || 'so_sanh_meo_thong_thai');
-  const [headerLogoUrl, setHeaderLogoUrl] = useState(() => localStorage.getItem('headerLogoUrl') || '');
+  const [headerLogoUrl, setHeaderLogoUrl] = useState(() => localStorage.getItem('headerLogoUrl') || '/vicompare-app-icon.png');
   const [logoFileName, setLogoFileName] = useState(() => localStorage.getItem('logoFileName') || '');
   const [bgColor, setBgColor] = useState(() => localStorage.getItem('bgColor') || '#FAF6F0');
   const [headerPosition, setHeaderPosition] = useState(() => localStorage.getItem('headerPosition') || 'top-center');

@@ -1,4 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, '..');
+
+const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <defs>
     <!-- Background Gradient -->
     <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -84,4 +92,9 @@
   <!-- App Title at Bottom -->
   <text x="512" y="845" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="72" font-weight="900" fill="#FFFFFF" text-anchor="middle" letter-spacing="4">ViCompare</text>
   <text x="512" y="895" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="28" font-weight="700" fill="#37E6C4" text-anchor="middle" letter-spacing="6">AUTOMATION STUDIO</text>
-</svg>
+</svg>`;
+
+const publicDir = path.join(rootDir, 'public');
+fs.writeFileSync(path.join(publicDir, 'vicompare-logo.svg'), svgContent, 'utf-8');
+fs.writeFileSync(path.join(publicDir, 'favicon.svg'), svgContent, 'utf-8');
+console.log('Saved SVG logo to public/vicompare-logo.svg and public/favicon.svg');
