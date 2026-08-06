@@ -302,6 +302,31 @@ const DEFAULT_ELEVEN_VOICES = [
   { voice_id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam (Nam - Thuyết minh)' }
 ];
 
+const VOICEFREE_MODELS_BY_PROVIDER = {
+  elevenlabs: [
+    { value: 'eleven_v3', label: 'Eleven v3 (Mới nhất - Khuyên dùng)' },
+    { value: 'eleven_multilingual_v2', label: 'Eleven Multilingual v2 (Bản v2 chuẩn)' },
+    { value: 'eleven_turbo_v2_5', label: 'Eleven Turbo v2.5 (Tốc độ cao)' },
+    { value: 'eleven_flash_v2_5', label: 'Eleven Flash v2.5 (Siêu nhanh)' },
+    { value: 'eleven_multilingual_v1', label: 'Eleven Multilingual v1' },
+    { value: 'eleven_monolingual_v1', label: 'Eleven Monolingual v1 (Tiếng Anh)' },
+    { value: 'eleven_turbo_v2', label: 'Eleven Turbo v2' },
+    { value: 'custom', label: '⚙️ Nhập Model ID tùy chỉnh...' }
+  ],
+  minimax: [
+    { value: 'speech-2.8-hd', label: 'Speech 2.8 HD (Khuyên dùng - Cảm xúc cao)' },
+    { value: 'speech-02-hd', label: 'Speech 02 HD' },
+    { value: 'speech-02-turbo', label: 'Speech 02 Turbo (Nhanh)' },
+    { value: 'speech-01-hd', label: 'Speech 01 HD' },
+    { value: 'speech-01-turbo', label: 'Speech 01 Turbo' },
+    { value: 'custom', label: '⚙️ Nhập Model ID tùy chỉnh...' }
+  ],
+  capcut: [
+    { value: 'capcut', label: 'CapCut Standard (Mặc định)' },
+    { value: 'custom', label: '⚙️ Nhập Model ID tùy chỉnh...' }
+  ]
+};
+
 const DEFAULT_COMPARISONS = [
   {
     id: 'comp-1',
@@ -432,6 +457,39 @@ const ComparisonImageDropzone = ({ imageUrl, title, onUpload, onRemove }) => (
 );
 
 export default function App() {
+  const loadedImagesRef = useRef({});
+  const triggerCanvasRedrawRef = useRef(null);
+
+  const cacheImage = (key, url) => {
+    if (!url) return;
+    if (url.startsWith('idb:')) {
+      getImageFromStorage(url.slice(4)).then(blob => {
+        if (!blob) {
+          console.warn(`Image not found in IndexedDB: ${url}`);
+          return;
+        }
+        const objectUrl = URL.createObjectURL(blob);
+        cacheImage(key, objectUrl);
+      }).catch(err => {
+        console.warn(`Failed to restore image from IndexedDB: ${url}`, err);
+      });
+      return;
+    }
+
+    const img = new Image();
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      img.crossOrigin = 'anonymous';
+    }
+    img.onload = () => {
+      loadedImagesRef.current[key] = img;
+      if (triggerCanvasRedrawRef.current) triggerCanvasRedrawRef.current();
+    };
+    img.onerror = (err) => {
+      console.error(`Failed to load image: ${url}`, err);
+    };
+    img.src = url;
+  };
+
   // Ngăn chặn sự kiện drop mặc định của trình duyệt để tránh bị chuyển hướng trang (browser navigate)
   useEffect(() => {
     const preventDefault = (e) => e.preventDefault();
@@ -444,7 +502,11 @@ export default function App() {
   }, []);
 
   // Navigation Tabs: 'content' (Nội dung) | 'timeline' (Pose & hành động) | 'tts' (Tạo voice)
-  const [activeTab, setActiveTab] = useState('content');
+  const [activeTab, setActiveTabState] = useState(() => localStorage.getItem('activeTab') || 'content');
+  const setActiveTab = (tab) => {
+    setActiveTabState(tab);
+    try { localStorage.setItem('activeTab', tab); } catch {}
+  };
 
   // General Setup
   const [headerTitle, setHeaderTitle] = useState(() => localStorage.getItem('headerTitle') || 'Mèo Thông Thái');
@@ -576,7 +638,13 @@ export default function App() {
     const todayStr = new Date().toISOString().split('T')[0];
     return `${defaultKey} | ${todayStr}`;
   });
-  const [vclipKeyItems, setVclipKeyItems] = useState(() => parseVclipKeyText(vclipRawKeyText));
+  const [vclipKeyItems, setVclipKeyItems] = useState(() => {
+    const saved = localStorage.getItem('vclip_key_list');
+    if (saved) return parseVclipKeyText(saved);
+    const defaultKey = localStorage.getItem('vclip_api_key') || DEFAULT_VCLIP_KEY;
+    const todayStr = new Date().toISOString().split('T')[0];
+    return parseVclipKeyText(`${defaultKey} | ${todayStr}`);
+  });
 
   // Trạng thái LucyLab (LucyAI / ViVibe)
   const DEFAULT_LUCY_KEY = safeAtob('c2tfbGl2ZV9DYTNOWkRkOGt6anFUT0g4ZzJyenBWakw4ZXU2WmU1Qw==');
@@ -593,7 +661,11 @@ export default function App() {
   const [voicefreeApiKey, setVoicefreeApiKey] = useState(() => localStorage.getItem('voicefree_api_key') || '');
   const [voicefreeVoiceId, setVoicefreeVoiceId] = useState(() => localStorage.getItem('voicefree_voice_id') || '');
   const [voicefreeProvider, setVoicefreeProvider] = useState(() => localStorage.getItem('voicefree_provider') || 'elevenlabs');
-  const [voicefreeModelId, setVoicefreeModelId] = useState(() => localStorage.getItem('voicefree_model_id') || 'eleven_multilingual_v2');
+  const [voicefreeModelId, setVoicefreeModelId] = useState(() => {
+    const saved = localStorage.getItem('voicefree_model_id');
+    if (!saved || saved === 'Eleven v3') return 'eleven_v3';
+    return saved;
+  });
   const [voicefreeSpeed, setVoicefreeSpeed] = useState(() => {
     const saved = localStorage.getItem('voicefree_speed');
     return saved !== null ? parseFloat(saved) : 1.0;
@@ -1711,7 +1783,8 @@ export default function App() {
     const loadFromDisk = async () => {
       try {
         const res = await fetch('/api/load-credentials');
-        if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
           const data = await res.json();
           if (data.fb_page_id && !fbPageId) {
             setFbPageId(data.fb_page_id);
@@ -1819,9 +1892,6 @@ export default function App() {
     voicefreeProvider: voicefreeProvider || 'elevenlabs',
     voicefreeModelId: voicefreeModelId || 'eleven_multilingual_v2',
     voicefreeSpeed: voicefreeSpeed || 1.0,
-    localCloneServerUrl: localCloneServerUrl || '',
-    localCloneVoiceId: localCloneVoiceId || '',
-    localCloneApiKey: localCloneApiKey || '',
     elevenLabsApiKey: elevenLabsApiKey || '',
     elevenLabsVoiceId: selectedVoiceId || '',
     selectedVoiceId: selectedVoiceId || '',
@@ -2569,7 +2639,6 @@ export default function App() {
   // HTML Element Refs
   const canvasRef = useRef(null);
   const audioRef = useRef(null);
-  const loadedImagesRef = useRef({});
   const animationFrameRef = useRef(null);
   const isApplyingProfileRef = useRef(false);
 
@@ -2955,7 +3024,7 @@ export default function App() {
       body: JSON.stringify({
         text,
         provider: voicefreeProvider || 'elevenlabs',
-        model_id: voicefreeModelId || 'eleven_multilingual_v2',
+        model_id: voicefreeModelId || 'eleven_v3',
         language_code: 'vi',
         voice_settings: {
           speed: parseFloat(voicefreeSpeed || '1.0')
@@ -2993,6 +3062,8 @@ export default function App() {
     }
     if (!audioUrlResult) throw new Error('Hết thời gian chờ tạo Audio trên Voicefree.');
     return await fetchAudioBlobWithProxyFallback(audioUrlResult);
+  };
+
   const requestSegmentAudioBlob = async (provider, text, options = {}) => {
     if (provider === 'eleven') return requestElevenLabsAudioBlob(text);
     if (provider === 'lucylab') {
@@ -3317,42 +3388,6 @@ export default function App() {
     scheduleTelegramCredentialSync({ lucyLabVoiceId: id });
   };
 
-  const handleSaveAusyncLabApiKey = (key) => {
-    setAusyncLabApiKey(key);
-    localStorage.setItem('ausynclab_api_key', key);
-    scheduleTelegramCredentialSync({ ausyncLabApiKey: key });
-  };
-
-  const handleSaveAusyncLabVoiceId = (id) => {
-    setAusyncLabVoiceId(id);
-    localStorage.setItem('ausynclab_voice_id', id);
-    scheduleTelegramCredentialSync({ ausyncLabVoiceId: id });
-  };
-
-  const handleSaveAusyncLabModel = (model) => {
-    setAusyncLabModel(model);
-    localStorage.setItem('ausynclab_model', model);
-    scheduleTelegramCredentialSync({ ausyncLabModel: model });
-  };
-
-  const handleSaveLocalCloneServerUrl = (url) => {
-    setLocalCloneServerUrl(url);
-    localStorage.setItem('localclone_server_url', url);
-    scheduleTelegramCredentialSync({ localCloneServerUrl: url });
-  };
-
-  const handleSaveLocalCloneVoiceId = (id) => {
-    setLocalCloneVoiceId(id);
-    localStorage.setItem('localclone_voice_id', id);
-    scheduleTelegramCredentialSync({ localCloneVoiceId: id });
-  };
-
-  const handleSaveLocalCloneApiKey = (key) => {
-    setLocalCloneApiKey(key);
-    localStorage.setItem('localclone_api_key', key);
-    scheduleTelegramCredentialSync({ localCloneApiKey: key });
-  };
-
   // Tải danh sách giọng đọc từ LucyLab
   const fetchLucyLabVoices = async (keyToUse) => {
     const key = keyToUse || lucyLabApiKey;
@@ -3429,7 +3464,17 @@ export default function App() {
   const handleSaveVoicefreeProvider = (provider) => {
     setVoicefreeProvider(provider);
     localStorage.setItem('voicefree_provider', provider);
-    scheduleTelegramCredentialSync({ voicefreeProvider: provider });
+
+    const defaultModels = {
+      elevenlabs: 'eleven_v3',
+      minimax: 'speech-2.8-hd',
+      capcut: 'capcut'
+    };
+    const defaultModel = defaultModels[provider] || 'eleven_v3';
+    setVoicefreeModelId(defaultModel);
+    localStorage.setItem('voicefree_model_id', defaultModel);
+
+    scheduleTelegramCredentialSync({ voicefreeProvider: provider, voicefreeModelId: defaultModel });
   };
 
   const handleSaveVoicefreeModelId = (modelId) => {
@@ -3440,42 +3485,6 @@ export default function App() {
 
   const handleGenerateVoiceVoicefree = async () => {
     return handleGenerateSegmentedVoice('voicefree');
-  };
-
-  const handleGenerateVoiceLocalClone = async () => {
-    return handleGenerateSegmentedVoice('localclone');
-  };
-
-  // Cache helper for Canvas drawing
-  const cacheImage = (key, url) => {
-    if (!url) return;
-    if (url.startsWith('idb:')) {
-      getImageFromStorage(url.slice(4)).then(blob => {
-        if (!blob) {
-          console.warn(`Image not found in IndexedDB: ${url}`);
-          return;
-        }
-        const objectUrl = URL.createObjectURL(blob);
-        cacheImage(key, objectUrl);
-      }).catch(err => {
-        console.warn(`Failed to restore image from IndexedDB: ${url}`, err);
-      });
-      return;
-    }
-
-    const img = new Image();
-    // Only use crossOrigin anonymous for external http/https URLs
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      img.crossOrigin = 'anonymous';
-    }
-    img.onload = () => {
-      loadedImagesRef.current[key] = img;
-      triggerCanvasRedraw();
-    };
-    img.onerror = (err) => {
-      console.error(`Failed to load image: ${url}`, err);
-    };
-    img.src = url;
   };
 
   // Pre-load default mascot images
@@ -3558,9 +3567,6 @@ export default function App() {
     localStorage.setItem('actionSfxEnabled', actionSfxEnabled.toString());
     localStorage.setItem('actionSfxVolume', actionSfxVolume.toString());
     localStorage.setItem('actionSfxPresets', JSON.stringify(actionSfxPresets));
-    localStorage.setItem('localclone_server_url', localCloneServerUrl);
-    localStorage.setItem('localclone_voice_id', localCloneVoiceId);
-    localStorage.setItem('localclone_api_key', localCloneApiKey);
     localStorage.setItem('mascotPoses', JSON.stringify(getPersistedMascotPoses()));
     localStorage.setItem('mascotScale', mascotScale.toString());
     if (headerLogoUrl && headerLogoUrl.startsWith('blob:')) {
@@ -3602,9 +3608,6 @@ export default function App() {
     actionSfxEnabled,
     actionSfxVolume,
     actionSfxPresets,
-    localCloneServerUrl,
-    localCloneVoiceId,
-    localCloneApiKey,
     mascotPoses,
     mascotScale,
     mascotChromaKey,
@@ -3623,6 +3626,7 @@ export default function App() {
 
   // Redraw canvas on frame state update
   const triggerCanvasRedraw = () => {
+    triggerCanvasRedrawRef.current = triggerCanvasRedraw;
     if (!canvasRef.current) return;
 
     const activeBlock = timelineBlocks.find(
@@ -4468,9 +4472,6 @@ export default function App() {
       voicefreeProvider,
       voicefreeModelId,
       voicefreeSpeed,
-      localCloneServerUrl,
-      localCloneVoiceId,
-      localCloneApiKey,
       ytClientId,
       ytClientSecret,
       ytRefreshToken,
@@ -4637,21 +4638,6 @@ export default function App() {
         setVoicefreeModelId(config.voicefreeModelId);
         localStorage.setItem('voicefree_model_id', config.voicefreeModelId);
         ttsCredentialOverrides.voicefreeModelId = config.voicefreeModelId;
-      }
-      if (config.localCloneServerUrl !== undefined) {
-        setLocalCloneServerUrl(config.localCloneServerUrl);
-        localStorage.setItem('localclone_server_url', config.localCloneServerUrl);
-        ttsCredentialOverrides.localCloneServerUrl = config.localCloneServerUrl;
-      }
-      if (config.localCloneVoiceId !== undefined) {
-        setLocalCloneVoiceId(config.localCloneVoiceId);
-        localStorage.setItem('localclone_voice_id', config.localCloneVoiceId);
-        ttsCredentialOverrides.localCloneVoiceId = config.localCloneVoiceId;
-      }
-      if (config.localCloneApiKey !== undefined) {
-        setLocalCloneApiKey(config.localCloneApiKey);
-        localStorage.setItem('localclone_api_key', config.localCloneApiKey);
-        ttsCredentialOverrides.localCloneApiKey = config.localCloneApiKey;
       }
       if (Object.keys(ttsCredentialOverrides).length > 0) {
         scheduleTelegramCredentialSync(ttsCredentialOverrides);
@@ -6837,15 +6823,39 @@ export default function App() {
                     </div>
 
                     <div className="form-group">
-                      <label>Model ID</label>
-                      <input
-                        type="text"
-                        value={voicefreeModelId}
-                        onChange={(e) => handleSaveVoicefreeModelId(e.target.value)}
-                        placeholder="Ví dụ: eleven_multilingual_v2, speech-2.8-turbo, capcut..."
+                      <label>Model ID ({voicefreeProvider === 'elevenlabs' ? 'ElevenLabs' : voicefreeProvider === 'minimax' ? 'MiniMax' : 'CapCut'})</label>
+                      <select
+                        value={
+                          (VOICEFREE_MODELS_BY_PROVIDER[voicefreeProvider] || []).some(m => m.value === voicefreeModelId)
+                            ? voicefreeModelId
+                            : 'custom'
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val !== 'custom') {
+                            handleSaveVoicefreeModelId(val);
+                          }
+                        }}
                         style={{ padding: '0.5rem', fontSize: '0.8rem' }}
-                      />
+                      >
+                        {(VOICEFREE_MODELS_BY_PROVIDER[voicefreeProvider] || VOICEFREE_MODELS_BY_PROVIDER.elevenlabs).map(m => (
+                          <option key={m.value} value={m.value}>{m.label}</option>
+                        ))}
+                      </select>
                     </div>
+
+                    {(!(VOICEFREE_MODELS_BY_PROVIDER[voicefreeProvider] || []).some(m => m.value === voicefreeModelId)) && (
+                      <div className="form-group">
+                        <label>Nhập Model ID tùy chỉnh</label>
+                        <input
+                          type="text"
+                          value={voicefreeModelId}
+                          onChange={(e) => handleSaveVoicefreeModelId(e.target.value)}
+                          placeholder="Ví dụ: eleven_multilingual_v2, speech-2.8-hd, capcut..."
+                          style={{ padding: '0.5rem', fontSize: '0.8rem' }}
+                        />
+                      </div>
+                    )}
 
                     <div className="form-group">
                       <label style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -8692,5 +8702,4 @@ export default function App() {
 
     </div>
   );
-}
 }

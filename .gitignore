@@ -41,3 +41,5 @@ ENV/
 local-voice-server/.venv/
 local-voice-server/data/
 local-voice-server/outputs/
+scratch/
+local-voice-server/vendors/
