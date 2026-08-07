@@ -615,31 +615,31 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
     ctx.restore();
 
-    // Draw VIBRANT NEON GLOWING AURA around card when active or fading in/out
-    const rawColor = side === 'left' ? activeComp.leftColor : activeComp.rightColor;
-    const fallbackCol = side === 'left' ? '#FF2D55' : '#00FF87';
-    const neonColor = getBrightNeonColor(rawColor, fallbackCol);
+    // Draw VIBRANT NEON GLOWING AURA around card when active (100% DYNAMICALLY MATCHES TITLE COLOR!)
+    const targetColor = side === 'left' 
+      ? (activeComp.leftColor || '#37E6C4') 
+      : (activeComp.rightColor || '#EC4899');
     const glowAlpha = side === 'left' ? leftGlowAlpha : rightGlowAlpha;
     
     if (glowAlpha > 0.01) {
       ctx.save();
       ctx.globalAlpha = glowAlpha;
-      ctx.strokeStyle = neonColor;
-      ctx.shadowColor = neonColor;
+      ctx.strokeStyle = targetColor;
+      ctx.shadowColor = targetColor;
       
-      // Layer 1: Wide soft ambient neon halo (35px blur)
+      // Layer 1: Wide soft ambient neon halo (35px blur) in exact title color
       ctx.lineWidth = 3.0;
       ctx.shadowBlur = 35;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
-      // Layer 2: Mid-range concentrated neon glow (18px blur)
+      // Layer 2: Mid-range concentrated neon glow (18px blur) in exact title color
       ctx.lineWidth = 3.0;
       ctx.shadowBlur = 18;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
-      // Layer 3: Crisp bright center neon stroke line (6px blur)
+      // Layer 3: Crisp bright center neon stroke line (6px blur) in exact title color
       ctx.lineWidth = 3.0;
       ctx.shadowBlur = 6;
       drawRoundedRect(ctx, x, y, width, height, 16);
