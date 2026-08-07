@@ -467,6 +467,15 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   const isLeftActive = currHighlight === 'left';
   const isRightActive = currHighlight === 'right';
 
+  // Smooth animated glow opacity during highlight transition
+  const leftGlowAlpha = currHighlight === 'left' 
+    ? (prevHighlight === 'left' ? 1.0 : t) 
+    : (prevHighlight === 'left' ? 1.0 - t : 0.0);
+
+  const rightGlowAlpha = currHighlight === 'right' 
+    ? (prevHighlight === 'right' ? 1.0 : t) 
+    : (prevHighlight === 'right' ? 1.0 - t : 0.0);
+
   const leftLayout = {
     ...getPanelRect(leftX, panelY, panelW, panelH, leftScale),
     scale: leftScale,
@@ -519,6 +528,15 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
   // Right Label
   drawFittedTitle(activeComp.rightTitle, rightLayout.x + rightLayout.w / 2, rightLayout.y - 25, rightScale, activeComp.rightColor || '#10B981', rightOpacity);
+
+  // Helper to ensure neon shadow is bright & glowing even for dark title colors
+  const getBrightNeonColor = (col, fallback) => {
+    if (!col) return fallback;
+    const lower = col.toLowerCase();
+    if (lower === '#d93025' || lower === '#8b0000' || lower === '#990000') return '#FF2D55'; // Vibrant Neon Red
+    if (lower === '#1b5e20' || lower === '#004d40' || lower === '#006064') return '#00FF87'; // Vibrant Neon Green
+    return col;
+  };
 
   // Helper to draw a panel image
   const drawPanelImage = (imgUrl, x, y, width, height, layout, side) => {
@@ -592,28 +610,32 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
     ctx.restore();
 
-    // Draw VIBRANT NEON GLOWING AURA around active zoomed card (matching title color!)
-    const panelColor = side === 'left' ? (activeComp.leftColor || '#37E6C4') : (activeComp.rightColor || '#EC4899');
+    // Draw VIBRANT NEON GLOWING AURA around card when active or fading in/out
+    const rawColor = side === 'left' ? activeComp.leftColor : activeComp.rightColor;
+    const fallbackCol = side === 'left' ? '#FF2D55' : '#00FF87';
+    const neonColor = getBrightNeonColor(rawColor, fallbackCol);
+    const glowAlpha = side === 'left' ? leftGlowAlpha : rightGlowAlpha;
     
-    if (layout.isActive && (currHighlight === side)) {
+    if (glowAlpha > 0.01) {
       ctx.save();
-      ctx.strokeStyle = panelColor;
-      ctx.shadowColor = panelColor;
+      ctx.globalAlpha = glowAlpha;
+      ctx.strokeStyle = neonColor;
+      ctx.shadowColor = neonColor;
       
       // Layer 1: Wide soft ambient neon halo (35px blur)
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 3.0;
       ctx.shadowBlur = 35;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
       // Layer 2: Mid-range concentrated neon glow (18px blur)
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 3.0;
       ctx.shadowBlur = 18;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
       // Layer 3: Crisp bright center neon stroke line (6px blur)
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 3.0;
       ctx.shadowBlur = 6;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
@@ -623,7 +645,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   };
 
   // Draw inactive panel first, active zoomed panel second so active card & neon glow are 100% on top!
-  if (currHighlight === 'right') {
+  if (rightGlowAlpha > leftGlowAlpha) {
     drawPanelImage(activeComp.leftImageUrl, leftLayout.x, leftLayout.y, leftLayout.w, leftLayout.h, leftLayout, 'left');
     drawPanelImage(activeComp.rightImageUrl, rightLayout.x, rightLayout.y, rightLayout.w, rightLayout.h, rightLayout, 'right');
   } else {
