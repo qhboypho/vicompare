@@ -615,8 +615,14 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     }
   };
 
-  drawPanelImage(activeComp.leftImageUrl, leftLayout.x, leftLayout.y, leftLayout.w, leftLayout.h, leftLayout, 'left');
-  drawPanelImage(activeComp.rightImageUrl, rightLayout.x, rightLayout.y, rightLayout.w, rightLayout.h, rightLayout, 'right');
+  // Draw inactive panel first, active zoomed panel second so active card & neon glow are 100% on top!
+  if (currHighlight === 'right') {
+    drawPanelImage(activeComp.leftImageUrl, leftLayout.x, leftLayout.y, leftLayout.w, leftLayout.h, leftLayout, 'left');
+    drawPanelImage(activeComp.rightImageUrl, rightLayout.x, rightLayout.y, rightLayout.w, rightLayout.h, rightLayout, 'right');
+  } else {
+    drawPanelImage(activeComp.rightImageUrl, rightLayout.x, rightLayout.y, rightLayout.w, rightLayout.h, rightLayout, 'right');
+    drawPanelImage(activeComp.leftImageUrl, leftLayout.x, leftLayout.y, leftLayout.w, leftLayout.h, leftLayout, 'left');
+  }
 
   // 4.5 Draw Central Glowing Neon "VS" Badge
   ctx.save();
