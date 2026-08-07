@@ -524,23 +524,24 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   const drawPanelImage = (imgUrl, x, y, width, height, layout, side) => {
     const panelColor = side === 'left' ? (activeComp.leftColor || '#37E6C4') : (activeComp.rightColor || '#EC4899');
     
-    // Draw pure soft ambient neon glow aura radiating behind card when active
-    if (layout.isActive && currHighlight === side) {
+    // Draw pure soft ambient neon glow aura radiating behind card when active (EXACTLY like VS badge - NO SOLID FILLED BOX, NO HARD LINE BORDER!)
+    if (layout.isActive && currHighlight === side && currentTime > 0.05) {
       ctx.save();
       ctx.shadowColor = panelColor;
       
-      // Layer 1: Wide soft ambient neon halo fading outward
+      // Layer 1: Wide soft ambient neon halo fading outward (thin 1px stroke + 45px blur)
+      ctx.strokeStyle = panelColor;
+      ctx.lineWidth = 1;
       ctx.shadowBlur = 45;
-      ctx.fillStyle = panelColor;
-      ctx.globalAlpha = 0.45;
-      drawRoundedRect(ctx, x - 3, y - 3, width + 6, height + 6, 18);
-      ctx.fill();
+      ctx.globalAlpha = 0.85;
+      drawRoundedRect(ctx, x, y, width, height, 16);
+      ctx.stroke();
 
-      // Layer 2: Inner concentrated neon glow ring
+      // Layer 2: Mid-range glowing neon halo (thin 1px stroke + 22px blur)
       ctx.shadowBlur = 22;
       ctx.globalAlpha = 0.65;
-      drawRoundedRect(ctx, x - 1, y - 1, width + 2, height + 2, 17);
-      ctx.fill();
+      drawRoundedRect(ctx, x, y, width, height, 16);
+      ctx.stroke();
 
       ctx.restore();
     }
