@@ -592,7 +592,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
     ctx.restore();
 
-    // Draw PURE SOFT NEON AURA fading outward (NO THICK HARD BORDER LINE BOX!)
+    // Draw VIBRANT NEON GLOWING AURA around active zoomed card (matching title color!)
     const panelColor = side === 'left' ? (activeComp.leftColor || '#37E6C4') : (activeComp.rightColor || '#EC4899');
     
     if (layout.isActive && (currHighlight === side)) {
@@ -600,16 +600,21 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
       ctx.strokeStyle = panelColor;
       ctx.shadowColor = panelColor;
       
-      // Layer 1: Wide soft ambient neon light fading smoothly outward
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.55;
-      ctx.shadowBlur = 50;
+      // Layer 1: Wide soft ambient neon halo (35px blur)
+      ctx.lineWidth = 2.5;
+      ctx.shadowBlur = 35;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
-      // Layer 2: Mid-range soft glow halo
-      ctx.globalAlpha = 0.35;
-      ctx.shadowBlur = 25;
+      // Layer 2: Mid-range concentrated neon glow (18px blur)
+      ctx.lineWidth = 2.5;
+      ctx.shadowBlur = 18;
+      drawRoundedRect(ctx, x, y, width, height, 16);
+      ctx.stroke();
+
+      // Layer 3: Crisp bright center neon stroke line (6px blur)
+      ctx.lineWidth = 2.5;
+      ctx.shadowBlur = 6;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
