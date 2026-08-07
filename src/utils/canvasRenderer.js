@@ -522,30 +522,6 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
   // Helper to draw a panel image
   const drawPanelImage = (imgUrl, x, y, width, height, layout, side) => {
-    const panelColor = side === 'left' ? (activeComp.leftColor || '#37E6C4') : (activeComp.rightColor || '#EC4899');
-    
-    // Draw pure soft ambient neon glow aura radiating behind card when active (EXACTLY like VS badge - NO SOLID FILLED BOX, NO HARD LINE BORDER!)
-    if (layout.isActive && currHighlight === side && currentTime > 0.05) {
-      ctx.save();
-      ctx.shadowColor = panelColor;
-      
-      // Layer 1: Wide soft ambient neon halo fading outward (thin 1px stroke + 45px blur)
-      ctx.strokeStyle = panelColor;
-      ctx.lineWidth = 1;
-      ctx.shadowBlur = 45;
-      ctx.globalAlpha = 0.85;
-      drawRoundedRect(ctx, x, y, width, height, 16);
-      ctx.stroke();
-
-      // Layer 2: Mid-range glowing neon halo (thin 1px stroke + 22px blur)
-      ctx.shadowBlur = 22;
-      ctx.globalAlpha = 0.65;
-      drawRoundedRect(ctx, x, y, width, height, 16);
-      ctx.stroke();
-
-      ctx.restore();
-    }
-
     ctx.save();
     
     // Apply blur filter if inactive
@@ -615,7 +591,28 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     }
 
     ctx.restore();
-    ctx.restore();
+
+    // Draw VIBRANT SOFT NEON GLOW AURA around active card when zoomed up (drawn AFTER image so it shines bright like VS badge!)
+    const panelColor = side === 'left' ? (activeComp.leftColor || '#37E6C4') : (activeComp.rightColor || '#EC4899');
+    
+    if (layout.isActive && (currHighlight === side)) {
+      ctx.save();
+      ctx.shadowColor = panelColor;
+      
+      // Layer 1: Wide soft ambient neon halo fading outward
+      ctx.strokeStyle = panelColor;
+      ctx.lineWidth = 3.5;
+      ctx.shadowBlur = 35;
+      drawRoundedRect(ctx, x, y, width, height, 16);
+      ctx.stroke();
+
+      // Layer 2: Concentrated neon glow ring
+      ctx.shadowBlur = 15;
+      drawRoundedRect(ctx, x, y, width, height, 16);
+      ctx.stroke();
+
+      ctx.restore();
+    }
   };
 
   drawPanelImage(activeComp.leftImageUrl, leftLayout.x, leftLayout.y, leftLayout.w, leftLayout.h, leftLayout, 'left');
