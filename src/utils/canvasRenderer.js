@@ -418,7 +418,12 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     currHighlight = getSmartHighlight(currentBlock);
     const timeInBlock = currentTime - currentBlock.start;
     const transitionDuration = 0.3; // 300ms transition
-    if (timeInBlock < transitionDuration) {
+
+    if (activeBlockIndex === 0 && currentBlock.start === 0) {
+      // First block starting at t=0: immediately active at full 1.08x zoom without initial scale delay
+      t = 1;
+      prevHighlight = currHighlight;
+    } else if (timeInBlock < transitionDuration) {
       t = timeInBlock / transitionDuration;
       // Ease-in-out curve
       t = t * t * (3 - 2 * t);
@@ -432,15 +437,15 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   // Helper to determine layout values (scale, opacity, blur) for left/right panels
   const getLayoutValues = (panelSide, highlightState) => {
     if (highlightState === 'none') {
-      // Mặc định ban đầu: cả hai bên đều nhỏ đi một chút (0.93)
-      return { scale: 0.93, opacity: 1.0, blur: 0 };
+      // Mặc định đứng yên không chỉ bên nào: cả 2 bên đều ở kích thước chuẩn (0.92)
+      return { scale: 0.92, opacity: 1.0, blur: 0 };
     }
     if (highlightState === panelSide) {
-      // Chỉ đến cái nào: zoom to nhẹ cái đó lên (1.0)
-      return { scale: 1.0, opacity: 1.0, blur: 0 };
+      // Bên được chỉ tới: ZOOM TO RÕ RÀNG VƯỢT TRỘI (1.08x)
+      return { scale: 1.08, opacity: 1.0, blur: 0 };
     } else {
-      // Cái còn lại: zoom bé đi một chút (0.86) và làm mờ hơn
-      return { scale: 0.86, opacity: 0.55, blur: 4 };
+      // Bên còn lại không được chỉ: Thu nhỏ lại (0.85x) và làm mờ nhẹ
+      return { scale: 0.85, opacity: 0.50, blur: 4 };
     }
   };
 
