@@ -621,8 +621,10 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
       if (imgRatio > targetRatio) {
         // Image is wider than container: crop left and right sides equally
         sw = naturalH * targetRatio;
+        sh = naturalH;
       } else {
         // Image is taller than container: crop top and bottom sides equally
+        sw = naturalW;
         sh = naturalW / targetRatio;
       }
 
@@ -630,15 +632,11 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
       sw = sw / userZoom;
       sh = sh / userZoom;
 
-      const sx = (naturalW - sw) / 2;
-      const sy = (naturalH - sh) / 2;
+      const sx = Math.max(0, (naturalW - sw) / 2);
+      const sy = Math.max(0, (naturalH - sh) / 2);
 
-      // Fill dark background inside rounded frame mask to prevent light canvas bleed
-      ctx.fillStyle = '#0B0F19';
-      ctx.fillRect(x - 1, y - 1, width + 2, height + 2);
-
-      // Draw 100% full flush to container bounds [x, y, width, height]
-      ctx.drawImage(img, sx, sy, sw, sh, x, y, width, height);
+      // Draw image 100% full flush cover edge-to-edge inside rounded frame mask
+      ctx.drawImage(img, sx, sy, sw, sh, x - 1, y - 1, width + 2, height + 2);
     } else {
       // Placeholder if no image
       ctx.fillStyle = '#E3DCD5';
