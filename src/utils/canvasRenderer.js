@@ -589,7 +589,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     return `rgb(${rgbR}, ${rgbG}, ${rgbB})`;
   };
 
-  // Helper to draw panel neon glowing aura (BEHIND the card image!)
+  // Helper to draw panel neon glowing aura (100% OUTSIDE THE CARD ONLY - ZERO INSIDE!)
   const drawPanelGlow = (side, layout) => {
     const glowAlpha = side === 'left' ? leftGlowAlpha : rightGlowAlpha;
     if (glowAlpha <= 0.01) return;
@@ -602,30 +602,47 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     ctx.globalAlpha = glowAlpha;
 
     const glowingShadow = getGlowingShadowColor(targetColor);
-    const offX = 10000;
 
+    // 1. Clip OUTSIDE the card boundary using 'evenodd' rule
+    // Anything inside [layout.x, layout.y, layout.w, layout.h] is 100% BLOCKED & CLIPPED OUT!
+    ctx.beginPath();
+    ctx.rect(-500, -500, 2000, 3000); // Covers entire canvas
+    drawRoundedRect(ctx, layout.x, layout.y, layout.w, layout.h, 16); // Card inner path
+    ctx.clip('evenodd');
+
+    // 2. Draw 3-tier expanding light bulb glow OUTWARDS into the surrounding space
+    // Pass 1: Soft ambient light radiating 60-80px outward
+    ctx.save();
     ctx.shadowColor = glowingShadow;
+    ctx.shadowBlur = 60;
     ctx.strokeStyle = glowingShadow;
-    ctx.shadowOffsetX = -offX;
-    ctx.shadowOffsetY = 0;
-
-    // PASS 1: Outermost Soft 85px Radiating Light Bleed (Radiating Outward into Background)
-    ctx.shadowBlur = 85;
-    ctx.lineWidth = 4.0;
-    drawRoundedRect(ctx, layout.x + offX, layout.y, layout.w, layout.h, 16);
+    ctx.globalAlpha = glowAlpha * 0.5;
+    ctx.lineWidth = 22.0;
+    drawRoundedRect(ctx, layout.x - 10, layout.y - 10, layout.w + 20, layout.h + 20, 24);
     ctx.stroke();
+    ctx.restore();
 
-    // PASS 2: Concentrated Mid-Range Light Halo (45px blur)
-    ctx.shadowBlur = 45;
-    ctx.lineWidth = 3.0;
-    drawRoundedRect(ctx, layout.x + offX, layout.y, layout.w, layout.h, 16);
+    // Pass 2: Mid-range vibrant light halo radiating 30-50px outward
+    ctx.save();
+    ctx.shadowColor = glowingShadow;
+    ctx.shadowBlur = 35;
+    ctx.strokeStyle = glowingShadow;
+    ctx.globalAlpha = glowAlpha * 0.75;
+    ctx.lineWidth = 14.0;
+    drawRoundedRect(ctx, layout.x - 5, layout.y - 5, layout.w + 10, layout.h + 10, 20);
     ctx.stroke();
+    ctx.restore();
 
-    // PASS 3: Soft Core Light Halo (22px blur)
-    ctx.shadowBlur = 22;
-    ctx.lineWidth = 2.0;
-    drawRoundedRect(ctx, layout.x + offX, layout.y, layout.w, layout.h, 16);
+    // Pass 3: Intense core light bulb aura right along the outer edge
+    ctx.save();
+    ctx.shadowColor = glowingShadow;
+    ctx.shadowBlur = 18;
+    ctx.strokeStyle = glowingShadow;
+    ctx.globalAlpha = glowAlpha * 0.95;
+    ctx.lineWidth = 6.0;
+    drawRoundedRect(ctx, layout.x - 1, layout.y - 1, layout.w + 2, layout.h + 2, 17);
     ctx.stroke();
+    ctx.restore();
 
     ctx.restore();
   };
