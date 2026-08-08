@@ -534,13 +534,59 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   // Right Label
   drawFittedTitle(activeComp.rightTitle, rightLayout.x + rightLayout.w / 2, rightLayout.y - 25, rightScale, activeComp.rightColor || '#10B981', rightOpacity);
 
-  // Helper to ensure neon shadow is bright & glowing even for dark title colors
-  const getBrightNeonColor = (col, fallback) => {
-    if (!col) return fallback;
-    const lower = col.toLowerCase();
-    if (lower === '#d93025' || lower === '#8b0000' || lower === '#990000') return '#FF2D55'; // Vibrant Neon Red
-    if (lower === '#1b5e20' || lower === '#004d40' || lower === '#006064') return '#00FF87'; // Vibrant Neon Green
-    return col;
+  // Helper to ensure neon shadow is bright & glowing like a light bulb even for dark title colors
+  const getGlowingShadowColor = (hexCol) => {
+    if (!hexCol) return '#FF2D55';
+    let hex = hexCol.replace('#', '').trim();
+    if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+    if (hex.length !== 6) return hexCol;
+    
+    const r = parseInt(hex.substring(0, 2), 16) || 0;
+    const g = parseInt(hex.substring(2, 4), 16) || 0;
+    const b = parseInt(hex.substring(4, 6), 16) || 0;
+
+    // Convert RGB to HSL
+    let rNorm = r / 255, gNorm = g / 255, bNorm = b / 255;
+    let max = Math.max(rNorm, gNorm, bNorm), min = Math.min(rNorm, gNorm, bNorm);
+    let h = 0, s = 0, l = (max + min) / 2;
+
+    if (max !== min) {
+      let d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) {
+        case rNorm: h = (gNorm - bNorm) / d + (gNorm < bNorm ? 6 : 0); break;
+        case gNorm: h = (bNorm - rNorm) / d + 2; break;
+        case bNorm: h = (rNorm - gNorm) / d + 4; break;
+      }
+      h /= 6;
+    }
+
+    // Boost lightness to at least 62% and saturation to at least 95% for light bulb neon glow
+    s = Math.max(s, 0.95);
+    l = Math.max(l, 0.62);
+
+    // Convert HSL back to RGB
+    const hslToRgb = (h, s, l) => {
+      if (s === 0) return [Math.round(l * 255), Math.round(l * 255), Math.round(l * 255)];
+      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+      const p = 2 * l - q;
+      const hue2rgb = (p, q, t) => {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1/6) return p + (q - p) * 6 * t;
+        if (t < 1/2) return q;
+        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+        return p;
+      };
+      return [
+        Math.round(hue2rgb(p, q, h + 1/3) * 255),
+        Math.round(hue2rgb(p, q, h) * 255),
+        Math.round(hue2rgb(p, q, h - 1/3) * 255)
+      ];
+    };
+
+    const [rgbR, rgbG, rgbB] = hslToRgb(h, s, l);
+    return `rgb(${rgbR}, ${rgbG}, ${rgbB})`;
   };
 
   // Helper to draw a panel image
@@ -615,7 +661,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
     ctx.restore();
 
-    // Draw VIBRANT NEON GLOWING AURA around card when active (100% DYNAMICALLY MATCHES TITLE COLOR!)
+    // Draw VIBRANT LIGHT-BULB NEON RADIATING AURA around card when active
     const targetColor = side === 'left' 
       ? (activeComp.leftColor || '#37E6C4') 
       : (activeComp.rightColor || '#EC4899');
@@ -624,24 +670,34 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     if (glowAlpha > 0.01) {
       ctx.save();
       ctx.globalAlpha = glowAlpha;
-      ctx.strokeStyle = targetColor;
-      ctx.shadowColor = targetColor;
-      
-      // Layer 1: Wide soft ambient neon halo (35px blur) in exact title color
-      ctx.lineWidth = 3.0;
-      ctx.shadowBlur = 35;
+
+      const glowingShadow = getGlowingShadowColor(targetColor);
+
+      // PASS 1: Massive 70px Ambient Radiating Light Halo (Light Bulb Bleed)
+      ctx.shadowColor = glowingShadow;
+      ctx.shadowBlur = 70;
+      ctx.strokeStyle = glowingShadow;
+      ctx.lineWidth = 6.0;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
-      // Layer 2: Mid-range concentrated neon glow (18px blur) in exact title color
-      ctx.lineWidth = 3.0;
+      // PASS 2: Strong Mid-Range Light Halo (40px blur)
+      ctx.shadowBlur = 40;
+      ctx.lineWidth = 4.0;
+      drawRoundedRect(ctx, x, y, width, height, 16);
+      ctx.stroke();
+
+      // PASS 3: Concentrated Tube Glow (18px blur)
       ctx.shadowBlur = 18;
+      ctx.lineWidth = 3.0;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
-      // Layer 3: Crisp bright center neon stroke line (6px blur) in exact title color
-      ctx.lineWidth = 3.0;
-      ctx.shadowBlur = 6;
+      // PASS 4: Hot White Center Neon Bulb Core (Hot Light Bulb Tube Effect!)
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = glowingShadow;
+      ctx.strokeStyle = '#FFFFFF'; // Hot white center core!
+      ctx.lineWidth = 2.0;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
