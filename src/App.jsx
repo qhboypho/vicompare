@@ -1,5 +1,6 @@
 // src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
+import { Agentation } from 'agentation';
 import {
   Play,
   Pause,
@@ -8711,6 +8712,7 @@ export default function App() {
         </div>
       )}
 
+      {import.meta.env.DEV && <Agentation endpoint="http://localhost:4747" />}
     </div>
   );
 }
