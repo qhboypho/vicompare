@@ -71,6 +71,9 @@ Trí tuệ nhân tạo xử lý dữ liệu với tốc độ cực nhanh và ch
 Trí tuệ con người sở hữu sự thấu cảm, ý thức, khả năng tư duy phản biện và sự sáng tạo vượt ra ngoài những quy tắc có sẵn.`;
 
 const DEFAULT_VIDEO_FONT = '"Be Vietnam Pro", Arial, sans-serif';
+const TELEGRAM_WORKER_BASE_URL = 'https://vicompare-telegram-bot.qhboypho.workers.dev';
+const CLOUD_APP_SETTINGS_URL = `${TELEGRAM_WORKER_BASE_URL}/api/app-settings`;
+const CLOUD_SETTINGS_LAST_SYNC_KEY = 'cloud_settings_last_sync';
 
 const VIETNAMESE_FONT_OPTIONS = [
   { value: '"Be Vietnam Pro", Arial, sans-serif', label: 'Be Vietnam Pro' },
@@ -510,6 +513,7 @@ export default function App() {
     setActiveTabState(tab);
     try { localStorage.setItem('activeTab', tab); } catch {}
   };
+  const [cloudSettingsSyncToken, setCloudSettingsSyncToken] = useState(() => localStorage.getItem('cloud_settings_sync_token') || '');
 
   // General Setup
   const [headerTitle, setHeaderTitle] = useState(() => localStorage.getItem('headerTitle') || 'Mèo Thông Thái');
@@ -857,9 +861,9 @@ export default function App() {
 
     const persisted = {};
     Object.entries(poses || {}).forEach(([pose, url]) => {
-      if (savedByPose[pose]?.startsWith?.('idb:')) {
+      if (savedByPose[pose]?.startsWith?.('idb:') || savedByPose[pose]?.startsWith?.('data:')) {
         persisted[pose] = savedByPose[pose];
-      } else if (url?.startsWith?.('idb:') || (!url?.startsWith?.('blob:') && !url?.startsWith?.('data:'))) {
+      } else if (url?.startsWith?.('idb:') || url?.startsWith?.('data:') || (!url?.startsWith?.('blob:') && !url?.startsWith?.('data:'))) {
         persisted[pose] = url;
       } else {
         persisted[pose] = `idb:${getMascotStorageKey(channelId, pose)}`;
@@ -1872,8 +1876,16 @@ export default function App() {
     };
 
     const boot = async () => {
-      const credentialOverrides = await loadFromDisk();
-      await syncChannelProfilesToTelegram(channelProfiles, credentialOverrides);
+      let cloudSettings = null;
+      try {
+        cloudSettings = await loadAppSettingsFromCloud();
+      } catch (err) {
+        console.warn('Không tải được cloud settings, dùng local/disk fallback:', err);
+      }
+      const credentialOverrides = cloudSettings?.credentials || await loadFromDisk();
+      await syncChannelProfilesToTelegram(cloudSettings?.channelProfiles || channelProfiles, credentialOverrides);
+      cloudSettingsBootedRef.current = true;
+      scheduleCloudSettingsSync(credentialOverrides);
       loadSessionFromTelegram();
     };
 
@@ -1881,6 +1893,8 @@ export default function App() {
   }, []);
 
   const telegramCredentialSyncTimerRef = useRef(null);
+  const cloudSettingsSyncTimerRef = useRef(null);
+  const cloudSettingsBootedRef = useRef(false);
 
   const sanitizeTelegramCredentials = (credentials) => ({
     ...credentials,
@@ -1911,15 +1925,192 @@ export default function App() {
     ttRefreshToken: ttRefreshToken || '',
     ttOpenId: ttOpenId || '',
     ttDisplayName: localStorage.getItem('tt_display_name') || DEFAULT_TT_DISPLAY_NAME,
+    commentAiApiKey: commentAiApiKey || '',
+    commentAiProvider: commentAiProvider || 'gemini',
+    fbPageId: fbPageId || '',
+    fbAccessToken: fbAccessToken || '',
+    ytChannelId: ytChannelId || '',
+    ytAccessToken: ytAccessToken || '',
+    ytClientId: ytClientId || '',
+    ytClientSecret: ytClientSecret || '',
+    ytRefreshToken: ytRefreshToken || '',
+    ytDisplayName: localStorage.getItem('yt_display_name') || DEFAULT_YT_DISPLAY_NAME,
     ...overrides
   });
+
+  const buildCloudAppSettings = (credentialOverrides = {}) => ({
+    version: '3.0',
+    activeChannelId,
+    channelProfiles,
+    headerTitle,
+    customFilename,
+    bgColor,
+    headerPosition,
+    headerTitleColor,
+    headerTitleFontSize,
+    headerLogoUrl: getPersistedHeaderLogoUrl(),
+    logoFileName,
+    mascotPoses: getPersistedMascotPoses(),
+    mascotScale,
+    mascotY,
+    mascotChromaKey,
+    mascotChromaThreshold,
+    mascotWhiteBacking,
+    spriteFileName,
+    showSubtitles,
+    subtitleY,
+    subtitleColor,
+    subtitleOutlineColor,
+    subtitleOutlineWidth,
+    subtitleFontSize,
+    subtitleFontFamily,
+    subtitleHighlightColor,
+    subtitleHighlightStyle,
+    subtitleMaxWidth,
+    subtitleMaxLines,
+    titleFontSize,
+    titleFontFamily,
+    titleOutlineColor,
+    titleOutlineWidth,
+    imageFrameWidth,
+    imageFrameHeight,
+    globalImageZoom,
+    ttsProvider,
+    selectedVoiceId,
+    vclipVoiceId,
+    vclipSpeed,
+    lucyLabVoiceId,
+    lucyLabSpeed,
+    voicefreeVoiceId,
+    voicefreeProvider,
+    voicefreeModelId,
+    voicefreeSpeed,
+    socialAccounts,
+    activeSocialAccountIds,
+    selectedSocialAccountIds,
+    fbConnected,
+    ytConnected,
+    ttConnected,
+    fbPageId,
+    ytChannelId,
+    ytClientId,
+    ttSessionId,
+    ttRedirectUri,
+    botEnabled,
+    commentAiProvider,
+    commentAiApiKey,
+    commentSystemPrompt,
+    credentials: buildTelegramCredentials(credentialOverrides)
+  });
+
+  const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+
+  const makeImageUrlCloudPortable = async (url) => {
+    if (typeof url !== 'string' || !url.startsWith('idb:')) return url;
+    try {
+      const blob = await getImageFromStorage(url.slice(4));
+      return blob ? await blobToDataUrl(blob) : url;
+    } catch (err) {
+      console.warn('Không chuyển được ảnh IndexedDB sang cloud portable:', err);
+      return url;
+    }
+  };
+
+  const makeMascotPosesCloudPortable = async (poses = {}) => {
+    const entries = await Promise.all(Object.entries(poses || {}).map(async ([pose, url]) => [
+      pose,
+      await makeImageUrlCloudPortable(url)
+    ]));
+    return Object.fromEntries(entries);
+  };
+
+  const makeCloudSettingsPortable = async (settings) => {
+    const portable = {
+      ...settings,
+      headerLogoUrl: await makeImageUrlCloudPortable(settings.headerLogoUrl),
+      mascotPoses: await makeMascotPosesCloudPortable(settings.mascotPoses)
+    };
+    if (Array.isArray(settings.channelProfiles)) {
+      portable.channelProfiles = await Promise.all(settings.channelProfiles.map(async (profile) => ({
+        ...profile,
+        headerLogoUrl: await makeImageUrlCloudPortable(profile.headerLogoUrl),
+        mascotPoses: await makeMascotPosesCloudPortable(profile.mascotPoses)
+      })));
+    }
+    return portable;
+  };
+
+  const syncAppSettingsToCloud = async (settings = null, credentialOverrides = {}) => {
+    const payload = await makeCloudSettingsPortable(settings || buildCloudAppSettings(credentialOverrides));
+    try {
+      const res = await fetch(CLOUD_APP_SETTINGS_URL, {
+        method: 'POST',
+        headers: buildCloudSettingsHeaders(true),
+        body: JSON.stringify({ settings: payload })
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      try { localStorage.setItem(CLOUD_SETTINGS_LAST_SYNC_KEY, new Date().toISOString()); } catch {}
+      return true;
+    } catch (err) {
+      console.warn('Cloud settings sync warning:', err);
+      return false;
+    }
+  };
+
+  const scheduleCloudSettingsSync = (credentialOverrides = {}) => {
+    if (!cloudSettingsBootedRef.current) return;
+    if (cloudSettingsSyncTimerRef.current) {
+      clearTimeout(cloudSettingsSyncTimerRef.current);
+    }
+    cloudSettingsSyncTimerRef.current = setTimeout(() => {
+      syncAppSettingsToCloud(null, credentialOverrides);
+    }, 1200);
+  };
+
+  const buildCloudSettingsHeaders = (json = false) => {
+    const headers = json ? { 'Content-Type': 'application/json' } : { 'Accept': 'application/json' };
+    const token = cloudSettingsSyncToken.trim();
+    if (token) headers['X-Sync-Token'] = token;
+    return headers;
+  };
+
+  const loadAppSettingsFromCloud = async () => {
+    const res = await fetch(CLOUD_APP_SETTINGS_URL, {
+      method: 'GET',
+      headers: buildCloudSettingsHeaders(false)
+    });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => ({}));
+    const settings = data.settings || null;
+    const cloudCredentials = data.credentials || {};
+    if ((!settings || typeof settings !== 'object') && Object.keys(cloudCredentials).length === 0) return null;
+
+    const mergedSettings = {
+      ...(settings && typeof settings === 'object' ? settings : {}),
+      credentials: {
+        ...cloudCredentials,
+        ...((settings && typeof settings === 'object' && settings.credentials) || {})
+      }
+    };
+    handleLoadProjectConfig(mergedSettings, { silent: true, skipAudio: true });
+    try { localStorage.setItem(CLOUD_SETTINGS_LAST_SYNC_KEY, settings?.updatedAt || new Date().toISOString()); } catch {}
+    return mergedSettings;
+  };
 
   // 1. Đồng bộ danh sách Mẫu Kênh sang Cloudflare Worker của Telegram Bot
   const syncChannelProfilesToTelegram = async (profiles, credentialOverrides = {}) => {
     const list = profiles || channelProfiles;
     if (!list || list.length === 0) return;
     try {
-      await fetch('https://vicompare-telegram-bot.qhboypho.workers.dev/api/sync-profiles', {
+      await fetch(`${TELEGRAM_WORKER_BASE_URL}/api/sync-profiles`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1927,6 +2118,7 @@ export default function App() {
           credentials: buildTelegramCredentials(credentialOverrides)
         })
       });
+      scheduleCloudSettingsSync(credentialOverrides);
     } catch (err) {
       console.warn('Sync profiles to Telegram warning:', err);
     }
@@ -1944,6 +2136,93 @@ export default function App() {
   useEffect(() => {
     scheduleTelegramCredentialSync({ voiceSyncMode, actionSfxEnabled, actionSfxVolume, actionSfxPresets });
   }, [voiceSyncMode, actionSfxEnabled, actionSfxVolume, actionSfxPresets]);
+
+  useEffect(() => {
+    scheduleCloudSettingsSync();
+  }, [
+    activeChannelId,
+    channelProfiles,
+    headerTitle,
+    customFilename,
+    bgColor,
+    headerPosition,
+    headerTitleColor,
+    headerTitleFontSize,
+    headerLogoUrl,
+    logoFileName,
+    mascotPoses,
+    mascotScale,
+    mascotY,
+    mascotChromaKey,
+    mascotChromaThreshold,
+    mascotWhiteBacking,
+    spriteFileName,
+    showSubtitles,
+    subtitleY,
+    subtitleColor,
+    subtitleOutlineColor,
+    subtitleOutlineWidth,
+    subtitleFontSize,
+    subtitleFontFamily,
+    subtitleHighlightColor,
+    subtitleHighlightStyle,
+    subtitleMaxWidth,
+    subtitleMaxLines,
+    titleFontSize,
+    titleFontFamily,
+    titleOutlineColor,
+    titleOutlineWidth,
+    imageFrameWidth,
+    imageFrameHeight,
+    globalImageZoom,
+    ttsProvider,
+    selectedVoiceId,
+    vclipApiKey,
+    vclipVoiceId,
+    vclipSpeed,
+    lucyLabApiKey,
+    lucyLabVoiceId,
+    lucyLabSpeed,
+    voicefreeApiKey,
+    voicefreeVoiceId,
+    voicefreeProvider,
+    voicefreeModelId,
+    voicefreeSpeed,
+    socialAccounts,
+    activeSocialAccountIds,
+    selectedSocialAccountIds,
+    fbConnected,
+    ytConnected,
+    ttConnected,
+    fbPageId,
+    fbAccessToken,
+    ytChannelId,
+    ytAccessToken,
+    ytClientId,
+    ytClientSecret,
+    ytRefreshToken,
+    ttSessionId,
+    ttAccessToken,
+    ttClientKey,
+    ttClientSecret,
+    ttRefreshToken,
+    ttOpenId,
+    ttRedirectUri,
+    botEnabled,
+    commentAiProvider,
+    commentAiApiKey,
+    commentSystemPrompt,
+    actionSfxEnabled,
+    actionSfxVolume,
+    actionSfxPresets
+  ]);
+
+  useEffect(() => {
+    try { localStorage.setItem('cloud_settings_sync_token', cloudSettingsSyncToken); } catch {}
+    if (cloudSettingsBootedRef.current) {
+      loadAppSettingsFromCloud().catch(err => console.warn('Cloud settings reload warning:', err));
+    }
+  }, [cloudSettingsSyncToken]);
 
   const normalizeCompareTitle = (value) => cleanTelegramScriptText(value)
     .toLowerCase()
@@ -4211,30 +4490,37 @@ export default function App() {
   const handleMascotPoseUpload = (poseKey, e) => {
     const file = e.target.files[0];
     if (file) {
-      const url = URL.createObjectURL(file);
       const dbKey = getMascotStorageKey(activeChannelId, poseKey);
       const storedUrl = `idb:${dbKey}`;
       saveImageToStorage(dbKey, file);
-      setMascotPoses(prev => {
-        const updatedPoses = { ...prev, [poseKey]: url };
-        const persistedPoses = { ...getPersistedMascotPoses(prev), [poseKey]: storedUrl };
-        localStorage.setItem('mascotPoses', JSON.stringify(persistedPoses));
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const dataUrl = evt.target.result;
+        setMascotPoses(prev => {
+          const updatedPoses = { ...prev, [poseKey]: dataUrl };
+          const persistedPoses = { ...getPersistedMascotPoses(prev), [poseKey]: dataUrl };
+          localStorage.setItem('mascotPoses', JSON.stringify(persistedPoses));
 
-        // Auto update active channel profile in channelProfiles array
-        setChannelProfiles(prevProfiles => {
-          const updated = prevProfiles.map(p => {
-            if (p.id === activeChannelId) {
-              return { ...p, mascotPoses: persistedPoses };
-            }
-            return p;
+          // Auto update active channel profile in channelProfiles array
+          setChannelProfiles(prevProfiles => {
+            const updated = prevProfiles.map(p => {
+              if (p.id === activeChannelId) {
+                return { ...p, mascotPoses: persistedPoses };
+              }
+              return p;
+            });
+            safeSaveChannelProfiles(updated);
+            return updated;
           });
-          safeSaveChannelProfiles(updated);
-          return updated;
-        });
 
-        return updatedPoses;
-      });
-      cacheImage(poseKey, url);
+          return updatedPoses;
+        });
+        cacheImage(poseKey, dataUrl);
+      };
+      reader.onerror = () => {
+        console.warn(`Không đọc được ảnh mascot ${storedUrl}`);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -4289,7 +4575,7 @@ export default function App() {
           const dataUrl = offCanvas.toDataURL('image/png');
           newPoses[posesKeys[idx]] = dataUrl;
           const dbKey = getMascotStorageKey(activeChannelId, posesKeys[idx]);
-          persistedPoses[posesKeys[idx]] = `idb:${dbKey}`;
+          persistedPoses[posesKeys[idx]] = dataUrl;
           fetch(dataUrl).then(r => r.blob()).then(blob => saveImageToStorage(dbKey, blob)).catch(() => {});
 
           // Cache the new image data URL
@@ -4322,28 +4608,35 @@ export default function App() {
   const handleLogoUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
-      const url = URL.createObjectURL(file);
       const dbKey = getLogoStorageKey(activeChannelId, file.name);
       const storedLogoUrl = `idb:${dbKey}`;
-      setHeaderLogoUrl(storedLogoUrl);
-      setLogoFileName(file.name);
-      localStorage.setItem('headerLogoUrl', storedLogoUrl);
-      localStorage.setItem('logoFileName', file.name);
-
-      // Auto update active channel profile in channelProfiles array
-      setChannelProfiles(prevProfiles => {
-        const updated = prevProfiles.map(p => {
-          if (p.id === activeChannelId) {
-            return { ...p, headerLogoUrl: storedLogoUrl, logoFileName: file.name };
-          }
-          return p;
-        });
-        safeSaveChannelProfiles(updated);
-        return updated;
-      });
-
-      cacheImage(storedLogoUrl, url);
       saveImageToStorage(dbKey, file);
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const dataUrl = evt.target.result;
+        setHeaderLogoUrl(dataUrl);
+        setLogoFileName(file.name);
+        localStorage.setItem('headerLogoUrl', dataUrl);
+        localStorage.setItem('logoFileName', file.name);
+
+        // Auto update active channel profile in channelProfiles array
+        setChannelProfiles(prevProfiles => {
+          const updated = prevProfiles.map(p => {
+            if (p.id === activeChannelId) {
+              return { ...p, headerLogoUrl: dataUrl, logoFileName: file.name };
+            }
+            return p;
+          });
+          safeSaveChannelProfiles(updated);
+          return updated;
+        });
+
+        cacheImage(dataUrl, dataUrl);
+      };
+      reader.onerror = () => {
+        console.warn(`Không đọc được logo ${storedLogoUrl}`);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -4582,9 +4875,27 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const handleLoadProjectConfig = (config) => {
+  const handleLoadProjectConfig = (config, options = {}) => {
     if (!config) return;
     try {
+      const { silent = false, skipAudio = false } = options;
+      const credentials = config.credentials || {};
+      const readConfigValue = (...keys) => {
+        for (const key of keys) {
+          if (Object.prototype.hasOwnProperty.call(config, key) && config[key] !== undefined) return config[key];
+          if (Object.prototype.hasOwnProperty.call(credentials, key) && credentials[key] !== undefined) return credentials[key];
+        }
+        return undefined;
+      };
+
+      if (Array.isArray(config.channelProfiles) && config.channelProfiles.length > 0) {
+        setChannelProfiles(config.channelProfiles);
+        safeSaveChannelProfiles(config.channelProfiles);
+      }
+      if (config.activeChannelId !== undefined) {
+        setActiveChannelId(config.activeChannelId);
+        localStorage.setItem('active_channel_id', config.activeChannelId);
+      }
       if (config.headerTitle !== undefined) setHeaderTitle(config.headerTitle);
       if (config.customFilename !== undefined) setCustomFilename(config.customFilename);
       if (config.logoFileName !== undefined) setLogoFileName(config.logoFileName);
@@ -4610,45 +4921,82 @@ export default function App() {
       if (config.mascotY !== undefined) setMascotY(config.mascotY);
       if (config.mascotChromaKey !== undefined) setMascotChromaKey(config.mascotChromaKey);
       if (config.mascotChromaThreshold !== undefined) setMascotChromaThreshold(config.mascotChromaThreshold);
-      if (config.ttsProvider !== undefined) setTtsProvider(config.ttsProvider);
+      if (config.mascotWhiteBacking !== undefined) setMascotWhiteBacking(config.mascotWhiteBacking);
+      if (config.ttsProvider !== undefined) {
+        setTtsProvider(config.ttsProvider);
+        localStorage.setItem('tts_provider', config.ttsProvider);
+      }
       const ttsCredentialOverrides = {};
-      if (config.selectedVoiceId !== undefined) {
-        setSelectedVoiceId(config.selectedVoiceId);
-        localStorage.setItem('elevenlabs_voice_id', config.selectedVoiceId);
-        ttsCredentialOverrides.elevenLabsVoiceId = config.selectedVoiceId;
-        ttsCredentialOverrides.selectedVoiceId = config.selectedVoiceId;
+      const elevenKey = readConfigValue('elevenLabsApiKey', 'elevenlabs_api_key', 'eleven_labs_api_key');
+      if (elevenKey !== undefined) {
+        setElevenLabsApiKey(elevenKey);
+        localStorage.setItem('elevenlabs_api_key', elevenKey);
+        ttsCredentialOverrides.elevenLabsApiKey = elevenKey;
       }
-      if (config.vclipVoiceId !== undefined) {
-        setVclipVoiceId(config.vclipVoiceId);
-        localStorage.setItem('vclip_voice_id', config.vclipVoiceId);
-        ttsCredentialOverrides.vclipVoiceId = config.vclipVoiceId;
+      const elevenVoiceId = readConfigValue('selectedVoiceId', 'elevenLabsVoiceId', 'elevenlabsVoiceId', 'elevenVoiceId', 'eleven_labs_voice_id', 'eleven_voice_id');
+      if (elevenVoiceId !== undefined) {
+        setSelectedVoiceId(elevenVoiceId);
+        localStorage.setItem('elevenlabs_voice_id', elevenVoiceId);
+        ttsCredentialOverrides.elevenLabsVoiceId = elevenVoiceId;
+        ttsCredentialOverrides.selectedVoiceId = elevenVoiceId;
       }
-      if (config.vclipSpeed !== undefined) setVclipSpeed(config.vclipSpeed);
-      if (config.lucyLabVoiceId !== undefined) {
-        setLucyLabVoiceId(config.lucyLabVoiceId);
-        localStorage.setItem('lucylab_voice_id', config.lucyLabVoiceId);
-        ttsCredentialOverrides.lucyLabVoiceId = config.lucyLabVoiceId;
+      const vclipKey = readConfigValue('vclipApiKey', 'vclip_api_key');
+      if (vclipKey !== undefined) {
+        setVclipApiKey(vclipKey);
+        localStorage.setItem('vclip_api_key', vclipKey);
+        ttsCredentialOverrides.vclipApiKey = vclipKey;
       }
-      if (config.voicefreeVoiceId !== undefined) {
-        setVoicefreeVoiceId(config.voicefreeVoiceId);
-        localStorage.setItem('voicefree_voice_id', config.voicefreeVoiceId);
-        ttsCredentialOverrides.voicefreeVoiceId = config.voicefreeVoiceId;
+      const nextVclipVoiceId = readConfigValue('vclipVoiceId', 'vclipUserVoiceId', 'vclip_voice_id', 'vclip_user_voice_id');
+      if (nextVclipVoiceId !== undefined) {
+        setVclipVoiceId(nextVclipVoiceId);
+        localStorage.setItem('vclip_voice_id', nextVclipVoiceId);
+        ttsCredentialOverrides.vclipVoiceId = nextVclipVoiceId;
       }
-      if (config.voicefreeProvider !== undefined) {
-        setVoicefreeProvider(config.voicefreeProvider);
-        localStorage.setItem('voicefree_provider', config.voicefreeProvider);
-        ttsCredentialOverrides.voicefreeProvider = config.voicefreeProvider;
+      const nextVclipSpeed = readConfigValue('vclipSpeed', 'vclip_speed');
+      if (nextVclipSpeed !== undefined) setVclipSpeed(nextVclipSpeed);
+      const lucyKey = readConfigValue('lucyLabApiKey', 'lucylab_api_key', 'lucy_lab_api_key');
+      if (lucyKey !== undefined) {
+        setLucyLabApiKey(lucyKey);
+        localStorage.setItem('lucylab_api_key', lucyKey);
+        ttsCredentialOverrides.lucyLabApiKey = lucyKey;
       }
-      if (config.voicefreeModelId !== undefined) {
-        setVoicefreeModelId(config.voicefreeModelId);
-        localStorage.setItem('voicefree_model_id', config.voicefreeModelId);
-        ttsCredentialOverrides.voicefreeModelId = config.voicefreeModelId;
+      const nextLucyVoiceId = readConfigValue('lucyLabVoiceId', 'lucylabVoiceId', 'lucyVoiceId', 'lucy_lab_voice_id', 'lucy_voice_id');
+      if (nextLucyVoiceId !== undefined) {
+        setLucyLabVoiceId(nextLucyVoiceId);
+        localStorage.setItem('lucylab_voice_id', nextLucyVoiceId);
+        ttsCredentialOverrides.lucyLabVoiceId = nextLucyVoiceId;
+      }
+      const voicefreeKey = readConfigValue('voicefreeApiKey', 'voicefree_api_key');
+      if (voicefreeKey !== undefined) {
+        setVoicefreeApiKey(voicefreeKey);
+        localStorage.setItem('voicefree_api_key', voicefreeKey);
+        ttsCredentialOverrides.voicefreeApiKey = voicefreeKey;
+      }
+      const nextVoicefreeVoiceId = readConfigValue('voicefreeVoiceId', 'voicefree_voice_id');
+      if (nextVoicefreeVoiceId !== undefined) {
+        setVoicefreeVoiceId(nextVoicefreeVoiceId);
+        localStorage.setItem('voicefree_voice_id', nextVoicefreeVoiceId);
+        ttsCredentialOverrides.voicefreeVoiceId = nextVoicefreeVoiceId;
+      }
+      const nextVoicefreeProvider = readConfigValue('voicefreeProvider', 'voicefree_provider');
+      if (nextVoicefreeProvider !== undefined) {
+        setVoicefreeProvider(nextVoicefreeProvider);
+        localStorage.setItem('voicefree_provider', nextVoicefreeProvider);
+        ttsCredentialOverrides.voicefreeProvider = nextVoicefreeProvider;
+      }
+      const nextVoicefreeModelId = readConfigValue('voicefreeModelId', 'voicefree_model_id');
+      if (nextVoicefreeModelId !== undefined) {
+        setVoicefreeModelId(nextVoicefreeModelId);
+        localStorage.setItem('voicefree_model_id', nextVoicefreeModelId);
+        ttsCredentialOverrides.voicefreeModelId = nextVoicefreeModelId;
       }
       if (Object.keys(ttsCredentialOverrides).length > 0) {
         scheduleTelegramCredentialSync(ttsCredentialOverrides);
       }
-      if (config.lucyLabSpeed !== undefined) setLucyLabSpeed(config.lucyLabSpeed);
-      if (config.voicefreeSpeed !== undefined) setVoicefreeSpeed(config.voicefreeSpeed);
+      const nextLucyLabSpeed = readConfigValue('lucyLabSpeed', 'lucylabSpeed', 'lucy_lab_speed');
+      const nextVoicefreeSpeed = readConfigValue('voicefreeSpeed', 'voicefree_speed');
+      if (nextLucyLabSpeed !== undefined) setLucyLabSpeed(nextLucyLabSpeed);
+      if (nextVoicefreeSpeed !== undefined) setVoicefreeSpeed(nextVoicefreeSpeed);
       if (config.stability !== undefined) setStability(config.stability);
       if (config.similarityBoost !== undefined) setSimilarityBoost(config.similarityBoost);
       if (config.styleExaggeration !== undefined) setStyleExaggeration(config.styleExaggeration);
@@ -4677,6 +5025,82 @@ export default function App() {
       if (config.imageFrameHeight !== undefined) setImageFrameHeight(config.imageFrameHeight);
       if (config.globalImageZoom !== undefined) setGlobalImageZoom(config.globalImageZoom);
 
+      if (Array.isArray(config.socialAccounts?.facebook) || Array.isArray(config.socialAccounts?.youtube) || Array.isArray(config.socialAccounts?.tiktok)) {
+        const normalizedAccounts = normalizeSocialAccounts(config.socialAccounts);
+        const normalizedActiveIds = getActiveSocialAccountIds(normalizedAccounts, config.activeSocialAccountIds || {});
+        const normalizedSelectedIds = getSelectedSocialAccountIds(normalizedAccounts, config.selectedSocialAccountIds || {});
+        setSocialAccounts(normalizedAccounts);
+        setActiveSocialAccountIds(normalizedActiveIds);
+        setSelectedSocialAccountIds(normalizedSelectedIds);
+        localStorage.setItem(SOCIAL_ACCOUNT_STORAGE_KEY, JSON.stringify(normalizedAccounts));
+        localStorage.setItem(ACTIVE_SOCIAL_ACCOUNT_STORAGE_KEY, JSON.stringify(normalizedActiveIds));
+        localStorage.setItem(SELECTED_SOCIAL_ACCOUNT_STORAGE_KEY, JSON.stringify(normalizedSelectedIds));
+
+        const pickAccount = (platform) => normalizedAccounts[platform]?.find(account => account.id === normalizedActiveIds[platform]) || normalizedAccounts[platform]?.[0];
+        const fbAccount = pickAccount('facebook');
+        const ytAccount = pickAccount('youtube');
+        const ttAccount = pickAccount('tiktok');
+        if (fbAccount?.credentials) {
+          setFbPageId(fbAccount.credentials.pageId || '');
+          setFbAccessToken(fbAccount.credentials.accessToken || '');
+        }
+        if (ytAccount?.credentials) {
+          setYtChannelId(ytAccount.credentials.channelId || '');
+          setYtAccessToken(ytAccount.credentials.accessToken || '');
+          setYtClientId(ytAccount.credentials.clientId || '');
+          setYtClientSecret(ytAccount.credentials.clientSecret || '');
+          setYtRefreshToken(ytAccount.credentials.refreshToken || '');
+          if (ytAccount.credentials.displayName) localStorage.setItem('yt_display_name', ytAccount.credentials.displayName);
+        }
+        if (ttAccount?.credentials) {
+          setTtSessionId(ttAccount.credentials.sessionId || '');
+          setTtAccessToken(ttAccount.credentials.accessToken || '');
+          setTtClientKey(ttAccount.credentials.clientKey || '');
+          setTtClientSecret(ttAccount.credentials.clientSecret || '');
+          setTtRefreshToken(ttAccount.credentials.refreshToken || '');
+          setTtOpenId(ttAccount.credentials.openId || '');
+          setTtRedirectUri(ttAccount.credentials.redirectUri || 'https://vicompare.pages.dev/');
+          if (ttAccount.credentials.displayName) localStorage.setItem('tt_display_name', ttAccount.credentials.displayName);
+        }
+      }
+      if (config.fbConnected !== undefined) setFbConnected(config.fbConnected);
+      if (config.ytConnected !== undefined) setYtConnected(config.ytConnected);
+      if (config.ttConnected !== undefined) setTtConnected(config.ttConnected);
+      const nextFbPageId = readConfigValue('fbPageId', 'fb_page_id');
+      const nextFbAccessToken = readConfigValue('fbAccessToken', 'fb_access_token');
+      const nextYtChannelId = readConfigValue('ytChannelId', 'yt_channel_id');
+      const nextYtAccessToken = readConfigValue('ytAccessToken', 'yt_access_token');
+      const nextYtClientId = readConfigValue('ytClientId', 'yt_client_id');
+      const nextYtClientSecret = readConfigValue('ytClientSecret', 'yt_client_secret');
+      const nextYtRefreshToken = readConfigValue('ytRefreshToken', 'yt_refresh_token');
+      const nextTtSessionId = readConfigValue('ttSessionId', 'tt_session_id');
+      const nextTtAccessToken = readConfigValue('ttAccessToken', 'tt_access_token');
+      const nextTtClientKey = readConfigValue('ttClientKey', 'tt_client_key');
+      const nextTtClientSecret = readConfigValue('ttClientSecret', 'tt_client_secret');
+      const nextTtRefreshToken = readConfigValue('ttRefreshToken', 'tt_refresh_token');
+      const nextTtOpenId = readConfigValue('ttOpenId', 'tt_open_id');
+      const nextTtRedirectUri = readConfigValue('ttRedirectUri', 'tt_redirect_uri');
+      if (nextFbPageId !== undefined) setFbPageId(nextFbPageId);
+      if (nextFbAccessToken !== undefined) setFbAccessToken(nextFbAccessToken);
+      if (nextYtChannelId !== undefined) setYtChannelId(nextYtChannelId);
+      if (nextYtAccessToken !== undefined) setYtAccessToken(nextYtAccessToken);
+      if (nextYtClientId !== undefined) setYtClientId(nextYtClientId);
+      if (nextYtClientSecret !== undefined) setYtClientSecret(nextYtClientSecret);
+      if (nextYtRefreshToken !== undefined) setYtRefreshToken(nextYtRefreshToken);
+      if (nextTtSessionId !== undefined) setTtSessionId(nextTtSessionId);
+      if (nextTtAccessToken !== undefined) setTtAccessToken(nextTtAccessToken);
+      if (nextTtClientKey !== undefined) setTtClientKey(nextTtClientKey);
+      if (nextTtClientSecret !== undefined) setTtClientSecret(nextTtClientSecret);
+      if (nextTtRefreshToken !== undefined) setTtRefreshToken(nextTtRefreshToken);
+      if (nextTtOpenId !== undefined) setTtOpenId(nextTtOpenId);
+      if (nextTtRedirectUri !== undefined) setTtRedirectUri(nextTtRedirectUri);
+      if (config.botEnabled !== undefined) setBotEnabled(config.botEnabled);
+      const nextCommentAiProvider = readConfigValue('commentAiProvider', 'comment_ai_provider');
+      const nextCommentAiApiKey = readConfigValue('commentAiApiKey', 'comment_ai_api_key');
+      if (nextCommentAiProvider !== undefined) setCommentAiProvider(nextCommentAiProvider);
+      if (nextCommentAiApiKey !== undefined) setCommentAiApiKey(nextCommentAiApiKey);
+      if (config.commentSystemPrompt !== undefined) setCommentSystemPrompt(config.commentSystemPrompt);
+
       if (config.mascotPoses) {
         if (Object.values(config.mascotPoses).some(url => typeof url === 'string' && url.startsWith('idb:'))) {
           restoreMascotPosesFromStorage(config.mascotPoses);
@@ -4688,7 +5112,7 @@ export default function App() {
         }
       }
 
-      if (config.audioFileName) {
+      if (!skipAudio && config.audioFileName) {
         getAudioFromStorage(config.audioFileName).then(record => {
           if (record && record.blob) {
             const localUrl = URL.createObjectURL(record.blob);
@@ -4715,10 +5139,13 @@ export default function App() {
 
       setCurrentTime(0);
       setIsPlaying(false);
-      alert('Đã khôi phục thành công cấu hình của bài đăng này vào Workflow!');
-      setActiveTab('content');
+      if (!silent) {
+        alert('Đã khôi phục thành công cấu hình của bài đăng này vào Workflow!');
+        setActiveTab('content');
+      }
     } catch (err) {
-      alert('Không thể khôi phục cấu hình: ' + err.message);
+      if (!options.silent) alert('Không thể khôi phục cấu hình: ' + err.message);
+      throw err;
     }
   };
 
@@ -6962,6 +7389,32 @@ export default function App() {
                 <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.75rem', lineHeight: '1.4' }}>
                   Chuyển đổi 1-Click toàn bộ <strong>Tiêu đề, Avatar, Mascot & Theme màu sắc</strong> giữa các kênh khác nhau (ví dụ: Mèo Thông Thái, Ngựa Biết Tuốt, Hổ Siberia,...). Tái sử dụng 100% codebase chung cho mọi kênh của bạn!
                 </p>
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <input
+                    type="password"
+                    value={cloudSettingsSyncToken}
+                    onChange={(e) => setCloudSettingsSyncToken(e.target.value)}
+                    placeholder="Cloud Sync Token (nếu Worker có APP_SETTINGS_SYNC_TOKEN)"
+                    style={{ fontSize: '0.75rem', flex: '1 1 220px', minWidth: 0 }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => loadAppSettingsFromCloud().then(ok => alert(ok ? 'Đã tải Cloud Settings về máy này.' : 'Chưa có Cloud Settings để tải.')).catch(err => alert(`Tải Cloud Settings lỗi: ${err.message}`))}
+                    style={{ fontSize: '0.72rem', padding: '0.35rem 0.65rem' }}
+                  >
+                    ⬇ Tải cloud
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => syncAppSettingsToCloud().then(ok => alert(ok ? 'Đã lưu Cloud Settings.' : 'Lưu Cloud Settings thất bại, xem console để biết chi tiết.'))}
+                    style={{ fontSize: '0.72rem', padding: '0.35rem 0.65rem' }}
+                  >
+                    ⬆ Lưu cloud
+                  </button>
+                </div>
 
                 {/* Preset List Chips */}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>

@@ -10,13 +10,22 @@ const DEFAULT_PROFILES = [
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization"
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Sync-Token"
 };
 
 const WORKER_PUBLIC_BASE_URL = "https://vicompare-telegram-bot.qhboypho.workers.dev";
 const IMAGE_SEARCH_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
 export const LEGACY_LUCYLAB_DEFAULT_VOICE_ID = "67e37e5c5ffbc46fa2e75e11";
+
+function isAuthorizedSettingsSyncRequest(request, env) {
+  const expected = cleanString(env.APP_SETTINGS_SYNC_TOKEN);
+  if (!expected) return true;
+  const auth = request.headers.get("Authorization") || "";
+  const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  const headerToken = request.headers.get("X-Sync-Token") || "";
+  return bearer === expected || headerToken === expected;
+}
 
 function cleanString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -896,6 +905,90 @@ export default {
       return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
+    }
+
+    if (url.pathname === "/api/app-settings" && request.method === "GET") {
+      try {
+        if (!isAuthorizedSettingsSyncRequest(request, env)) {
+          return new Response(JSON.stringify({ success: false, error: "Unauthorized app settings sync request." }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+        if (!env.VICOMPARE_KV) {
+          return new Response(JSON.stringify({ success: false, hasKv: false, settings: null }), {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        const settings = (await env.VICOMPARE_KV.get("app_settings", "json")) || null;
+        const credentials = (await env.VICOMPARE_KV.get("app_credentials", "json")) || {};
+        return new Response(JSON.stringify({ success: true, hasKv: true, settings, credentials }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ success: false, error: err.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    if (url.pathname === "/api/app-settings" && request.method === "POST") {
+      try {
+        if (!isAuthorizedSettingsSyncRequest(request, env)) {
+          return new Response(JSON.stringify({ success: false, error: "Unauthorized app settings sync request." }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+        if (!env.VICOMPARE_KV) {
+          return new Response(JSON.stringify({
+            success: false,
+            hasKv: false,
+            error: "Missing Cloudflare KV binding VICOMPARE_KV. Cannot persist Web Tool settings."
+          }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+
+        const body = await request.json();
+        const settings = body.settings || body;
+        const serialized = JSON.stringify(settings);
+        if (serialized.length > 20 * 1024 * 1024) {
+          return new Response(JSON.stringify({
+            success: false,
+            error: "App settings payload is too large for KV. Please remove oversized image/audio data."
+          }), { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+
+        await env.VICOMPARE_KV.put("app_settings", JSON.stringify({
+          ...settings,
+          updatedAt: new Date().toISOString()
+        }));
+
+        if (settings.credentials) {
+          const existingCredentials = (await env.VICOMPARE_KV.get("app_credentials", "json")) || {};
+          const mergedCredentials = mergeSyncedCredentials(existingCredentials, settings.credentials);
+          await env.VICOMPARE_KV.put("app_credentials", JSON.stringify(mergedCredentials));
+        }
+
+        if (Array.isArray(settings.channelProfiles)) {
+          const profilesToSave = settings.channelProfiles.map(p => ({
+            id: p.id,
+            name: p.name || p.headerTitle || p.id
+          }));
+          await env.VICOMPARE_KV.put("channel_profiles", JSON.stringify(profilesToSave));
+        }
+
+        return new Response(JSON.stringify({ success: true, hasKv: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ success: false, error: err.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
     }
 
     // 1. POST /api/sync-profiles - Đồng bộ danh sách Kênh & Thông tin API Key/VoiceID từ Web App
