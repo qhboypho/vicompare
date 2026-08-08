@@ -602,6 +602,10 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     drawRoundedRect(ctx, x, y, width, height, 16);
     ctx.clip();
 
+    // Fill dark background inside rounded frame mask so no light background can EVER leak through!
+    ctx.fillStyle = '#0B0F19';
+    ctx.fillRect(x - 2, y - 2, width + 4, height + 4);
+
     if (imgUrl && loadedImages[imgUrl]) {
       const img = loadedImages[imgUrl];
       
@@ -615,8 +619,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
       const sideZoomVal = side === 'left' ? (activeComp.leftZoom || 100) : (activeComp.rightZoom || 100);
       const userZoom = Math.max(1.0, (state.globalImageZoom !== undefined ? state.globalImageZoom : 100) / 100) * Math.max(1.0, sideZoomVal / 100);
 
-      let sw = naturalW;
-      let sh = naturalH;
+      let sw, sh;
 
       if (imgRatio > targetRatio) {
         // Image is wider than container: crop left and right sides equally
@@ -639,7 +642,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
       ctx.drawImage(img, sx, sy, sw, sh, x - 1, y - 1, width + 2, height + 2);
     } else {
       // Placeholder if no image
-      ctx.fillStyle = '#E3DCD5';
+      ctx.fillStyle = '#111827';
       ctx.fillRect(x, y, width, height);
       ctx.font = 'italic 18px sans-serif';
       ctx.fillStyle = '#888';
@@ -659,7 +662,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
     ctx.restore();
 
-    // Draw PURE SOFT RADIATING NEON GLOW (100% BLURRED AURA, NO SHARP INNER BORDER LINE!)
+    // Draw VIBRANT LIGHT-BULB NEON RADIATING AURA around card when active
     const targetColor = side === 'left' 
       ? (activeComp.leftColor || '#37E6C4') 
       : (activeComp.rightColor || '#EC4899');
@@ -671,23 +674,23 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
       const glowingShadow = getGlowingShadowColor(targetColor);
 
-      // PASS 1: Outermost Soft Ambient Light Bleed (75px blur)
+      // PASS 1: Massive 65px Ambient Radiating Light Bleed (Bulb Light Radiating Outward)
       ctx.shadowColor = glowingShadow;
-      ctx.shadowBlur = 75;
+      ctx.shadowBlur = 65;
       ctx.strokeStyle = glowingShadow;
-      ctx.lineWidth = 3.0;
+      ctx.lineWidth = 5.0;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
-      // PASS 2: Mid-Range Ambient Glow Halo (45px blur)
-      ctx.shadowBlur = 45;
-      ctx.lineWidth = 2.0;
+      // PASS 2: Strong Mid-Range Concentrated Light Halo (32px blur)
+      ctx.shadowBlur = 32;
+      ctx.lineWidth = 3.5;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
-      // PASS 3: Soft Concentrated Core Glow (25px blur - 100% soft & blurred, NO SHARP BORDER STROKE!)
-      ctx.shadowBlur = 25;
-      ctx.lineWidth = 1.5;
+      // PASS 3: Crisp Bright Core Neon Glow Line (12px blur)
+      ctx.shadowBlur = 12;
+      ctx.lineWidth = 2.5;
       drawRoundedRect(ctx, x, y, width, height, 16);
       ctx.stroke();
 
