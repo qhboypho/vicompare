@@ -589,7 +589,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     return `rgb(${rgbR}, ${rgbG}, ${rgbB})`;
   };
 
-  // Helper to draw panel neon glowing aura (100% PURE RADIATING LIGHT BULB AURA - ZERO BORDER LINES & ZERO GLOW INSIDE!)
+  // Helper to draw panel neon glowing aura (matching the VS badge outer radiating aura style!)
   const drawPanelGlow = (side, layout) => {
     const glowAlpha = side === 'left' ? leftGlowAlpha : rightGlowAlpha;
     if (glowAlpha <= 0.01) return;
@@ -601,47 +601,27 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     ctx.save();
     ctx.globalAlpha = glowAlpha;
 
-    // 1. Hard clip OUTSIDE the card rectangle using 'evenodd' rule
-    // Interior of [layout.x, layout.y, layout.w, layout.h] is 100% CLIPPED OUT (0% light inside!)
-    ctx.beginPath();
-    ctx.rect(-500, -500, 2000, 3000); // Covers entire canvas area
-    drawRoundedRect(ctx, layout.x, layout.y, layout.w, layout.h, 16); // Card inner rectangle
-    ctx.clip('evenodd');
+    const glowingColor = getGlowingShadowColor(targetColor);
 
-    // 2. Off-screen shadow offset technique:
-    // Solid stroke path lines are drawn at (layout.x + 10000), completely OFF-SCREEN!
-    // ONLY pure soft radiating shadow blur is shifted back to (layout.x, layout.y)!
-    // NO SOLID BORDER LINES EVER EXIST AT (layout.x, layout.y)!
-    const glowingShadow = getGlowingShadowColor(targetColor);
-    const offX = 10000;
+    // 1. Ambient outer radiating shadow glow (like the VS badge)
+    ctx.shadowColor = glowingColor;
+    ctx.shadowBlur = 45;
 
-    ctx.shadowColor = glowingShadow;
-    ctx.strokeStyle = glowingShadow;
-    ctx.shadowOffsetX = -offX;
-    ctx.shadowOffsetY = 0;
+    drawRoundedRect(ctx, layout.x, layout.y, layout.w, layout.h, 16);
+    ctx.fillStyle = '#0B0F19';
+    ctx.fill();
 
-    // Pass 1: Massive 100px Soft Ambient Light Bulb Bleed (Spill far into dark space)
-    ctx.shadowBlur = 100;
-    ctx.lineWidth = 16.0;
-    drawRoundedRect(ctx, layout.x + offX, layout.y, layout.w, layout.h, 16);
+    // 2. Vibrant 360-degree glowing neon stroke outline (like the VS badge border)
+    ctx.shadowColor = glowingColor;
+    ctx.shadowBlur = 25;
+    ctx.strokeStyle = glowingColor;
+    ctx.lineWidth = 5.0;
+    drawRoundedRect(ctx, layout.x, layout.y, layout.w, layout.h, 16);
     ctx.stroke();
 
-    // Pass 2: Vibrant 65px Mid-Range Light Bulb Halo
-    ctx.shadowBlur = 65;
-    ctx.lineWidth = 10.0;
-    drawRoundedRect(ctx, layout.x + offX, layout.y, layout.w, layout.h, 16);
-    ctx.stroke();
-
-    // Pass 3: Bright 35px Concentrated Electric Light Halo
-    ctx.shadowBlur = 35;
-    ctx.lineWidth = 6.0;
-    drawRoundedRect(ctx, layout.x + offX, layout.y, layout.w, layout.h, 16);
-    ctx.stroke();
-
-    // Pass 4: Intense 15px Core Bulb Light Aura right along outer edge
-    ctx.shadowBlur = 15;
-    ctx.lineWidth = 3.0;
-    drawRoundedRect(ctx, layout.x + offX, layout.y, layout.w, layout.h, 16);
+    ctx.shadowBlur = 12;
+    ctx.lineWidth = 2.5;
+    drawRoundedRect(ctx, layout.x, layout.y, layout.w, layout.h, 16);
     ctx.stroke();
 
     ctx.restore();
