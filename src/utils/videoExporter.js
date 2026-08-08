@@ -76,6 +76,8 @@ export async function preloadAllAssets(state, mascotPoses = {}) {
  * @param {Array} options.timelineBlocks - Array of timeline segments
  * @param {string} options.audioUrl - Main voiceover audio url
  * @param {Object} options.mascotPoses - Object mapping pose names to image urls
+ * @param {boolean} options.monitorAudio - Whether to play export preview audio through speakers while rendering
+ * @param {function} options.shouldMonitorAudio - Reads the latest monitor state while async audio setup is still running
  * @param {function} options.onProgress - Callback with progress percent (0 - 100)
  * @param {function} options.onComplete - Callback with blob URL
  * @param {function} options.onError - Callback with error message
@@ -86,18 +88,94 @@ export async function exportVideo({
   timelineBlocks,
   audioUrl,
   mascotPoses,
+  monitorAudio = false,
+  shouldMonitorAudio,
   onProgress,
   onComplete,
   onError
 }) {
   let audioContext = null;
-  let audioSource = null;
   let audioBufferSource = null;
   let audioDestination = null;
   let recorder = null;
   let animationFrameId = null;
   let audioEl = null;
+  let monitorAudioEl = null;
   let decodedAudioBuffer = null;
+  let exportFailed = false;
+  let errorReported = false;
+  let startTime = 0;
+
+  const reportErrorOnce = (err) => {
+    if (errorReported) return;
+    errorReported = true;
+    onError(err?.message || err || 'Lỗi xảy ra trong quá trình xuất video');
+  };
+
+  const stopAudioPlayback = () => {
+    if (audioEl) {
+      try {
+        audioEl.pause();
+      } catch {}
+    }
+    if (monitorAudioEl) {
+      try {
+        monitorAudioEl.pause();
+      } catch {}
+    }
+    if (audioBufferSource) {
+      try {
+        audioBufferSource.stop();
+      } catch {}
+    }
+    if (audioContext && audioContext.state !== 'closed') {
+      try {
+        audioContext.close();
+      } catch {}
+    }
+    window.exportMonitorGain = null;
+    window.exportPreviewAudio = null;
+    window.exportPreviewControls = null;
+  };
+
+  const getMonitorAudio = () => {
+    if (typeof shouldMonitorAudio === 'function') {
+      return !!shouldMonitorAudio();
+    }
+    return !!monitorAudio;
+  };
+
+  const setMonitorMuted = (muted) => {
+    const monitorVolume = muted ? 0 : 0.4;
+    if (window.exportMonitorGain?.gain) {
+      window.exportMonitorGain.gain.value = monitorVolume;
+    }
+    if (window.exportPreviewAudio) {
+      window.exportPreviewAudio.muted = muted;
+      window.exportPreviewAudio.volume = monitorVolume;
+    }
+  };
+
+  const resumeMonitorAudio = async () => {
+    const elapsed = startTime ? Math.max(0, (performance.now() - startTime) / 1000) : 0;
+    if (audioContext && audioContext.state === 'suspended') {
+      try {
+        await audioContext.resume();
+      } catch (err) {
+        console.warn('Failed to resume export monitor AudioContext:', err);
+      }
+    }
+    if (window.exportPreviewAudio && window.exportPreviewAudio.paused) {
+      try {
+        if (Number.isFinite(window.exportPreviewAudio.duration) && elapsed < window.exportPreviewAudio.duration) {
+          window.exportPreviewAudio.currentTime = elapsed;
+        }
+        await window.exportPreviewAudio.play();
+      } catch (err) {
+        console.warn('Failed to play export preview audio:', err);
+      }
+    }
+  };
 
   try {
     onProgress(1); // Start loading
@@ -114,7 +192,12 @@ export async function exportVideo({
 
     // Set up canvas stream (30 FPS)
     const canvasStream = canvas.captureStream(30);
-    const outputTracks = [...canvasStream.getVideoTracks()];
+    const videoTracks = canvasStream.getVideoTracks();
+    if (videoTracks.length === 0) {
+      throw new Error('Không tạo được video track từ canvas.');
+    }
+    const canvasVideoTrack = videoTracks[0];
+    const outputTracks = [...videoTracks];
 
     // 3. Set up Audio if available
     const hasAudio = !!audioUrl;
@@ -141,6 +224,16 @@ export async function exportVideo({
         if (decodedAudioBuffer.duration && !isNaN(decodedAudioBuffer.duration)) {
           duration = decodedAudioBuffer.duration;
         }
+
+        monitorAudioEl = new Audio(requestUrl);
+        monitorAudioEl.preload = 'auto';
+        monitorAudioEl.muted = !getMonitorAudio();
+        monitorAudioEl.volume = getMonitorAudio() ? 0.4 : 0;
+        window.exportPreviewAudio = monitorAudioEl;
+        window.exportPreviewControls = {
+          setMuted: setMonitorMuted,
+          resume: resumeMonitorAudio
+        };
 
         audioDestination = audioContext.createMediaStreamAudioDestination();
         audioDestination.stream.getAudioTracks().forEach(track => {
@@ -185,6 +278,9 @@ export async function exportVideo({
         }
       }
     }
+    if (hasAudio && !outputTracks.some(track => track.kind === 'audio')) {
+      throw new Error('Không gắn được âm thanh vào file export. Vui lòng thử render lại voice hoặc tải audio lên lại trước khi xuất video.');
+    }
 
     // 4. Create Combined Stream and Recorder
     const combinedStream = new MediaStream(outputTracks);
@@ -218,29 +314,26 @@ export async function exportVideo({
       }
     };
 
+    recorder.onerror = (event) => {
+      exportFailed = true;
+      console.error('MediaRecorder error:', event.error || event);
+      stopAudioPlayback();
+      reportErrorOnce(event.error || 'MediaRecorder gặp lỗi khi xuất video.');
+    };
+
     recorder.onstop = () => {
       // Clean up animation loop
       if (animationFrameId) {
         cancelAnimationFrame(animationFrameId);
       }
-      
-      // Clean up audio playback
-      if (audioEl) {
-        try {
-          audioEl.pause();
-        } catch (e) {}
+
+      stopAudioPlayback();
+
+      if (exportFailed) return;
+      if (chunks.length === 0) {
+        reportErrorOnce('Trình duyệt không ghi được dữ liệu video. Vui lòng thử xuất lại.');
+        return;
       }
-      if (audioBufferSource) {
-        try {
-          audioBufferSource.stop();
-        } catch (e) {}
-      }
-      if (audioContext) {
-        try {
-          audioContext.close();
-        } catch (e) {}
-      }
-      window.exportMonitorGain = null;
 
       const fileExtension = selectedMimeType.includes('mp4') ? 'mp4' : 'webm';
       const blob = new Blob(chunks, { type: selectedMimeType || 'video/webm' });
@@ -249,7 +342,7 @@ export async function exportVideo({
     };
 
     // 5. Start Rendering & Recording Loop
-    const startTime = Date.now();
+    startTime = performance.now();
     recorder.start();
 
     if (hasAudio && audioContext && decodedAudioBuffer && audioDestination) {
@@ -265,20 +358,34 @@ export async function exportVideo({
         audioBufferSource = audioContext.createBufferSource();
         audioBufferSource.buffer = decodedAudioBuffer;
         audioBufferSource.connect(audioDestination);
-
-        const monitorGain = audioContext.createGain();
-        const isMuted = !!window.isExportMuted;
-        monitorGain.gain.value = isMuted ? 0 : 0.4;
-        audioBufferSource.connect(monitorGain);
-        monitorGain.connect(audioContext.destination);
-        window.exportMonitorGain = monitorGain;
+        window.exportPreviewControls = {
+          setMuted: setMonitorMuted,
+          resume: resumeMonitorAudio
+        };
+        setMonitorMuted(!getMonitorAudio());
 
         audioBufferSource.start(0);
+        if (monitorAudioEl) {
+          monitorAudioEl.muted = !getMonitorAudio();
+          monitorAudioEl.volume = getMonitorAudio() ? 0.4 : 0;
+          if (getMonitorAudio()) {
+            await monitorAudioEl.play().catch((err) => {
+              console.warn('export monitor audio play warning:', err);
+            });
+          }
+        }
       } catch (sourceErr) {
         console.warn('decoded audio source start warning:', sourceErr);
       }
     } else if (hasAudio && audioEl) {
       try {
+        audioEl.muted = !getMonitorAudio();
+        audioEl.volume = getMonitorAudio() ? 0.4 : 0;
+        window.exportPreviewAudio = audioEl;
+        window.exportPreviewControls = {
+          setMuted: setMonitorMuted,
+          resume: resumeMonitorAudio
+        };
         await audioEl.play();
       } catch (playErr) {
         console.warn('audioEl play warning (rendering will continue):', playErr);
@@ -286,64 +393,73 @@ export async function exportVideo({
     }
 
     const renderLoop = () => {
-      // Use the system clock as the master time source for rendering.
-      // This is infinitely more robust than relying on audioEl.currentTime,
-      // which can freeze if audio is buffering, blocked by autoplay, or has CORS issues.
-      const relativeTime = (Date.now() - startTime) / 1000;
+      try {
+        if (exportFailed || recorder.state === 'inactive') return;
 
-      // Check if finished (reaches total duration)
-      const isFinished = relativeTime >= duration;
-      
-      if (isFinished) {
-        recorder.stop();
-        onProgress(100);
-        return;
+        // Use the system clock as the master time source for rendering.
+        // This is more robust than relying on audioEl.currentTime, which can freeze if audio is buffering or blocked.
+        const relativeTime = (performance.now() - startTime) / 1000;
+
+        // Check if finished (reaches total duration)
+        const isFinished = relativeTime >= duration;
+
+        if (isFinished) {
+          recorder.stop();
+          onProgress(100);
+          return;
+        }
+
+        // Find the active subtitle block
+        const activeBlock = timelineBlocks.find(
+          block => relativeTime >= block.start && relativeTime <= block.end
+        );
+
+        // Construct current state for drawFrame
+        const currentState = {
+          ...state,
+          subtitleText: activeBlock ? activeBlock.text : '',
+          mascotPose: activeBlock ? activeBlock.pose : 'default',
+          highlight: activeBlock ? activeBlock.highlight : 'none',
+          blockStart: activeBlock ? activeBlock.start : 0,
+          blockEnd: activeBlock ? activeBlock.end : 0
+        };
+
+        // Draw the frame. Keep this guarded because RAF exceptions are not caught by the outer export try/catch.
+        drawFrame(canvas, currentState, relativeTime, loadedImages);
+        if (typeof canvasVideoTrack.requestFrame === 'function') {
+          canvasVideoTrack.requestFrame();
+        }
+
+        // Report progress (scale between 10% and 99%)
+        const pct = 10 + Math.floor((relativeTime / duration) * 89);
+        onProgress(Math.min(pct, 99));
+
+        animationFrameId = requestAnimationFrame(renderLoop);
+      } catch (frameErr) {
+        exportFailed = true;
+        console.error('Frame rendering failed:', frameErr);
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
+        stopAudioPlayback();
+        if (recorder && recorder.state !== 'inactive') {
+          try {
+            recorder.stop();
+          } catch (stopErr) {
+            console.warn('Failed to stop recorder after frame error:', stopErr);
+          }
+        }
+        reportErrorOnce(frameErr);
       }
-
-      // Find the active subtitle block
-      const activeBlock = timelineBlocks.find(
-        block => relativeTime >= block.start && relativeTime <= block.end
-      );
-
-      // Construct current state for drawFrame
-      const currentState = {
-        ...state,
-        subtitleText: activeBlock ? activeBlock.text : '',
-        mascotPose: activeBlock ? activeBlock.pose : 'default',
-        highlight: activeBlock ? activeBlock.highlight : 'none',
-        blockStart: activeBlock ? activeBlock.start : 0,
-        blockEnd: activeBlock ? activeBlock.end : 0
-      };
-
-      // Draw the frame
-      drawFrame(canvas, currentState, relativeTime, loadedImages);
-
-      // Report progress (scale between 10% and 99%)
-      const pct = 10 + Math.floor((relativeTime / duration) * 89);
-      onProgress(Math.min(pct, 99));
-
-      animationFrameId = requestAnimationFrame(renderLoop);
     };
 
     // Begin loop
     renderLoop();
 
   } catch (err) {
+    exportFailed = true;
     console.error('Rendering failed:', err);
     if (animationFrameId) cancelAnimationFrame(animationFrameId);
-    if (audioEl) {
-      try {
-        audioEl.pause();
-      } catch (e) {}
-    }
-    if (audioBufferSource) {
-      try {
-        audioBufferSource.stop();
-      } catch (e) {}
-    }
+    stopAudioPlayback();
     if (recorder && recorder.state !== 'inactive') recorder.stop();
-    if (audioContext) audioContext.close();
-    window.exportMonitorGain = null;
-    onError(err.message || 'Lỗi xảy ra trong quá trình xuất video');
+    reportErrorOnce(err);
   }
 }

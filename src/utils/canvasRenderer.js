@@ -641,6 +641,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   const rightGlowAlpha = currHighlight === 'right'
     ? (prevHighlight === 'right' ? 1 : t)
     : (prevHighlight === 'right' ? 1 - t : 0);
+  const glowOpacity = Math.max(0, Math.min(100, Number(state.imageGlowOpacity ?? 100))) / 100;
 
   const leftLayout = {
     ...getPanelRect(leftX, panelY, panelW, panelH, leftScale),
@@ -696,9 +697,10 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   drawFittedTitle(activeComp.rightTitle, rightLayout.x + rightLayout.w / 2, rightLayout.y - 25, rightScale, activeComp.rightColor || '#10B981', rightOpacity);
 
   const drawPanelGlow = (layout, color, alpha) => {
-    if (!layout || alpha <= 0.02) return;
+    const effectiveAlpha = Math.max(0, Math.min(1, alpha * glowOpacity));
+    if (!layout || effectiveAlpha <= 0.02) return;
     ctx.save();
-    ctx.globalAlpha = Math.min(1, alpha);
+    ctx.globalAlpha = effectiveAlpha;
     ctx.shadowColor = color;
     ctx.shadowBlur = 34;
     ctx.shadowOffsetX = 0;
@@ -707,7 +709,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     ctx.fillStyle = panelBackgroundColor;
     ctx.fill();
     ctx.shadowBlur = 16;
-    ctx.globalAlpha = Math.min(0.75, alpha * 0.75);
+    ctx.globalAlpha = Math.min(0.75, effectiveAlpha * 0.75);
     drawRoundedRect(ctx, layout.x, layout.y, layout.w, layout.h, 16);
     ctx.fill();
     ctx.restore();

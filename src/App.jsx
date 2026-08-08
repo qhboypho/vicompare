@@ -723,7 +723,8 @@ export default function App() {
         titleOutlineWidth: 6,
         imageFrameWidth: 290,
         imageFrameHeight: 390,
-        globalImageZoom: 100
+        globalImageZoom: 100,
+        imageGlowOpacity: 100
       },
       {
         id: 'ngua-biet-tuot',
@@ -763,7 +764,8 @@ export default function App() {
         titleOutlineWidth: 6,
         imageFrameWidth: 290,
         imageFrameHeight: 390,
-        globalImageZoom: 100
+        globalImageZoom: 100,
+        imageGlowOpacity: 100
       }
     ];
 
@@ -789,7 +791,8 @@ export default function App() {
             titleOutlineWidth: 6,
             imageFrameWidth: 290,
             imageFrameHeight: 390,
-            globalImageZoom: 100
+            globalImageZoom: 100,
+            imageGlowOpacity: 100
           };
 
           let poses = p.mascotPoses;
@@ -1027,6 +1030,7 @@ export default function App() {
     updateImageFrameWidth(profile.imageFrameWidth !== undefined ? profile.imageFrameWidth : 290);
     updateImageFrameHeight(profile.imageFrameHeight !== undefined ? profile.imageFrameHeight : 390);
     updateGlobalImageZoom(profile.globalImageZoom !== undefined ? profile.globalImageZoom : 100);
+    updateImageGlowOpacity(profile.imageGlowOpacity !== undefined ? profile.imageGlowOpacity : 100);
 
     const isCat = profile.id === 'cat-thong-thai';
     const DEFAULT_MASCOT_POSES = {
@@ -1119,7 +1123,8 @@ export default function App() {
       titleOutlineWidth,
       imageFrameWidth,
       imageFrameHeight,
-      globalImageZoom
+      globalImageZoom,
+      imageGlowOpacity
     };
 
     const updated = [...channelProfiles, newProfile];
@@ -1171,7 +1176,8 @@ export default function App() {
           titleOutlineWidth,
           imageFrameWidth,
           imageFrameHeight,
-          globalImageZoom
+          globalImageZoom,
+          imageGlowOpacity
         };
       }
       return p;
@@ -1290,6 +1296,10 @@ export default function App() {
   });
   const [globalImageZoom, setGlobalImageZoom] = useState(() => {
     const saved = localStorage.getItem('globalImageZoom');
+    return saved !== null ? parseInt(saved, 10) : 100;
+  });
+  const [imageGlowOpacity, setImageGlowOpacity] = useState(() => {
+    const saved = localStorage.getItem('imageGlowOpacity');
     return saved !== null ? parseInt(saved, 10) : 100;
   });
 
@@ -1447,13 +1457,23 @@ export default function App() {
     try { localStorage.setItem('globalImageZoom', val.toString()); } catch {}
     updateActiveChannelProps({ globalImageZoom: val });
   };
+  const updateImageGlowOpacity = (val) => {
+    setImageGlowOpacity(val);
+    try { localStorage.setItem('imageGlowOpacity', val.toString()); } catch {}
+    updateActiveChannelProps({ imageGlowOpacity: val });
+  };
 
   // UI rendering & Export State
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportedVideoUrl, setExportedVideoUrl] = useState('');
   const [exportedExt, setExportedExt] = useState('webm');
-  const [isExportMuted, setIsExportMuted] = useState(false);
+  const [isExportMuted, setIsExportMuted] = useState(true);
+  const isExportMutedRef = useRef(true);
+
+  useEffect(() => {
+    isExportMutedRef.current = isExportMuted;
+  }, [isExportMuted]);
 
   // Social Media Publishing States
   const [fbConnected, setFbConnected] = useState(() => {
@@ -1598,6 +1618,7 @@ export default function App() {
 
   const [manualVideoId, setManualVideoId] = useState('');
   const [isScanning, setIsScanning] = useState(false);
+  const [commentBotStatus, setCommentBotStatus] = useState('Chưa quét bình luận.');
 
   useEffect(() => {
     const nextActiveIds = getActiveSocialAccountIds(socialAccounts, activeSocialAccountIds);
@@ -1675,6 +1696,7 @@ export default function App() {
     localStorage.setItem('imageFrameWidth', imageFrameWidth.toString());
     localStorage.setItem('imageFrameHeight', imageFrameHeight.toString());
     localStorage.setItem('globalImageZoom', globalImageZoom.toString());
+    localStorage.setItem('imageGlowOpacity', imageGlowOpacity.toString());
     localStorage.setItem('customFilename', customFilename);
   }, [
     fbConnected,
@@ -1710,6 +1732,7 @@ export default function App() {
     imageFrameWidth,
     imageFrameHeight,
     globalImageZoom,
+    imageGlowOpacity,
     customFilename
   ]);
 
@@ -1975,6 +1998,7 @@ export default function App() {
     imageFrameWidth,
     imageFrameHeight,
     globalImageZoom,
+    imageGlowOpacity,
     ttsProvider,
     selectedVoiceId,
     vclipVoiceId,
@@ -2175,6 +2199,7 @@ export default function App() {
     imageFrameWidth,
     imageFrameHeight,
     globalImageZoom,
+    imageGlowOpacity,
     ttsProvider,
     selectedVoiceId,
     vclipApiKey,
@@ -2466,64 +2491,107 @@ export default function App() {
     commentLogsRef.current = commentLogs;
   }, [commentLogs]);
 
+  const getFacebookCommentTargets = (post) => {
+    const rawFacebookRefs = post?.postIds?.facebook;
+    const refs = Array.isArray(rawFacebookRefs)
+      ? rawFacebookRefs
+      : rawFacebookRefs
+        ? [{ postId: rawFacebookRefs }]
+        : post?.postId
+          ? [{ postId: post.postId }]
+          : [];
+
+    const accountById = new Map((socialAccounts.facebook || []).map((account) => [account.id, account]));
+    const targets = refs
+      .map((ref) => {
+        const normalizedRef = typeof ref === 'string' ? { postId: ref } : (ref || {});
+        const account = normalizedRef.accountId ? accountById.get(normalizedRef.accountId) : null;
+        const credentials = account?.credentials || {};
+        const postId = String(normalizedRef.postId || '').trim();
+        return {
+          postId,
+          label: normalizedRef.label || account?.label || post?.headerTitle || 'Facebook Reel',
+          pageId: String(credentials.pageId || fbPageId || '').trim(),
+          accessToken: String(credentials.accessToken || fbAccessToken || '').trim()
+        };
+      })
+      .filter((target) => target.postId && target.pageId && target.accessToken);
+
+    const seen = new Set();
+    return targets.filter((target) => {
+      const key = `${target.postId}|${target.pageId}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
   // Reusable function to scan and reply to comments
   const scanComments = async (isManual = false) => {
-    const trimmedFbAccessToken = fbAccessToken.trim();
-    const trimmedFbPageId = fbPageId.trim();
     const trimmedAiApiKey = commentAiApiKey.trim();
+    const statusTime = () => new Date().toLocaleTimeString('vi-VN');
 
     if (!fbConnected) {
+      setCommentBotStatus(`Facebook chưa kết nối (${statusTime()}).`);
       if (isManual) alert('Vui lòng kết nối tài khoản Facebook (Page ID & Access Token) trước khi quét!');
       return;
     }
     if (!trimmedAiApiKey) {
+      setCommentBotStatus(`Thiếu API key AI để trả lời bình luận (${statusTime()}).`);
       if (isManual) alert('Vui lòng điền API Key của AI (Gemini hoặc OpenAI) trước khi quét!');
       return;
     }
-    if (!trimmedFbPageId || !trimmedFbAccessToken) {
+    const hasAnyFacebookCredentials = (socialAccounts.facebook || []).some((account) => account.credentials?.pageId && account.credentials?.accessToken)
+      || (fbPageId.trim() && fbAccessToken.trim());
+    if (!hasAnyFacebookCredentials) {
+      setCommentBotStatus(`Thiếu Page ID hoặc Access Token Facebook (${statusTime()}).`);
       if (isManual) alert('Thiếu thông tin xác thực Facebook (Page ID / Access Token)!');
       return;
     }
 
     setIsScanning(true);
+    setCommentBotStatus(`Đang quét bình luận Facebook... (${statusTime()})`);
     let scannedPostsCount = 0;
     let foundCommentsCount = 0;
     let repliedCommentsCount = 0;
     const errors = [];
 
     try {
-      const activePosts = scheduledPosts.filter(p => p.status === 'published' && p.postId && p.platforms && p.platforms.includes('facebook'));
+      const activePosts = scheduledPosts
+        .filter(p => p.status === 'published' && p.platforms && p.platforms.includes('facebook'))
+        .map((post) => ({ post, targets: getFacebookCommentTargets(post) }))
+        .filter(({ targets }) => targets.length > 0);
       if (activePosts.length === 0) {
+        setCommentBotStatus(`Không có video Facebook hợp lệ để quét (${statusTime()}).`);
         if (isManual) {
-          alert('Không tìm thấy video nào ở trạng thái "Đã đăng" có ID bài viết để quét. Vui lòng nhập ID Reel/Video cần theo dõi vào ô bên dưới rồi bấm "Theo dõi" trước!');
+          alert('Không tìm thấy video Facebook nào ở trạng thái "Đã đăng" có ID bài viết và token/page hợp lệ để quét. Nếu đăng từ Telegram, hãy dán Facebook Reel/Video ID vào ô theo dõi thủ công trước.');
         }
         setIsScanning(false);
         return;
       }
 
-      scannedPostsCount = activePosts.length;
+      scannedPostsCount = activePosts.reduce((sum, item) => sum + item.targets.length, 0);
 
-      for (const post of activePosts) {
+      for (const { post, targets } of activePosts) {
+        for (const target of targets) {
         try {
-          // Lấy chính xác ID bài đăng Facebook, nếu không có thì fallback về postId cũ
-          const fbPostId = Array.isArray(post.postIds?.facebook)
-            ? post.postIds.facebook[0]?.postId
-            : (post.postIds?.facebook || post.postId);
-          if (!fbPostId) continue;
-
           // Nếu ID không phải là số thuần túy (ví dụ ID YouTube dạng chữ O7x3jBu6jMI), hãy bỏ qua
-          if (!/^\d+$/.test(fbPostId)) {
-            console.log(`Skipping non-numeric Facebook ID: ${fbPostId} (likely YouTube or TikTok ID)`);
+          if (!/^\d+$/.test(target.postId)) {
+            console.log(`Skipping non-numeric Facebook ID: ${target.postId} (likely YouTube or TikTok ID)`);
             continue;
           }
 
-          console.log(`Scanning comments for Facebook post ID: ${fbPostId} (${post.headerTitle})...`);
-          const res = await fetch(`/fb-api/v21.0/${fbPostId}/comments?access_token=${trimmedFbAccessToken}`);
+          console.log(`Scanning comments for Facebook post ID: ${target.postId} (${target.label})...`);
+          const commentParams = new URLSearchParams({
+            fields: 'id,message,from,created_time',
+            access_token: target.accessToken
+          });
+          const res = await fetch(`/fb-api/v21.0/${encodeURIComponent(target.postId)}/comments?${commentParams.toString()}`);
           if (!res.ok) {
             const errData = await res.json().catch(() => ({}));
             const errMsg = errData.error?.message || res.statusText || 'Lỗi không xác định';
-            console.error(`FB read comments error for post ${post.postId}:`, errData);
-            errors.push(`${post.headerTitle || 'Video'}: ${errMsg}`);
+            console.error(`FB read comments error for post ${target.postId}:`, errData);
+            errors.push(`${target.label}: ${errMsg}`);
             continue;
           }
           const data = await res.json();
@@ -2537,7 +2605,7 @@ export default function App() {
 
             const alreadyReplied = commentLogsRef.current.some(log => log.commentId === commentId);
             if (alreadyReplied) continue;
-            if (comment.from?.id === trimmedFbPageId) continue;
+            if (comment.from?.id === target.pageId) continue;
 
             console.log(`Found new comment from ${commenterName}: "${commentText}". Generating AI response...`);
             let replyText = '';
@@ -2648,7 +2716,7 @@ export default function App() {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                access_token: trimmedFbAccessToken,
+                access_token: target.accessToken,
                 message: replyText.trim()
               })
             });
@@ -2663,7 +2731,7 @@ export default function App() {
                 replyText: replyText.trim(),
                 time: new Date().toLocaleTimeString('vi-VN') + ' ' + new Date().toLocaleDateString('vi-VN'),
                 status: 'success',
-                postTitle: post.headerTitle || 'Reel'
+                postTitle: target.label || post.headerTitle || 'Reel'
               };
               setCommentLogs(prev => [newLog, ...prev]);
             } else {
@@ -2674,8 +2742,9 @@ export default function App() {
             }
           }
         } catch (postErr) {
-          console.error(`Error scanning post ${post.postId}:`, postErr);
-          errors.push(`Quét video ${post.postId}: ${postErr.message}`);
+          console.error(`Error scanning post ${target.postId}:`, postErr);
+          errors.push(`Quét video ${target.postId}: ${postErr.message}`);
+        }
         }
       }
 
@@ -2692,8 +2761,10 @@ export default function App() {
         }
         alert(msg);
       }
+      setCommentBotStatus(`Quét xong ${scannedPostsCount} video, thấy ${foundCommentsCount} bình luận, trả lời ${repliedCommentsCount} bình luận mới (${statusTime()}).`);
     } catch (err) {
       console.error('General Comment Bot Error:', err);
+      setCommentBotStatus(`Lỗi quét bình luận: ${err.message} (${statusTime()}).`);
       if (isManual) alert(`Lỗi hệ thống trong quá trình quét bình luận: ${err.message}`);
     } finally {
       setIsScanning(false);
@@ -2719,6 +2790,7 @@ export default function App() {
     commentAiProvider,
     commentSystemPrompt,
     scheduledPosts,
+    socialAccounts,
     fbAccessToken,
     fbPageId
   ]);
@@ -2740,13 +2812,31 @@ export default function App() {
       const postIds = {};
 
       for (const platform of post.platforms) {
+        const scheduledRefs = post.selectedAccounts?.[platform] || [];
+        const selectedIds = scheduledRefs.map(item => item.id).filter(Boolean);
+        const platformAccounts = selectedIds.length > 0
+          ? (socialAccounts[platform] || []).filter(account => selectedIds.includes(account.id))
+          : getCheckedSocialAccounts(platform);
+        const accountsToPublish = platformAccounts.length > 0
+          ? platformAccounts
+          : (socialAccounts[platform] || []).slice(0, 1);
+
         if (platform === 'facebook') {
+          for (const account of accountsToPublish) {
+          const accountLabel = account?.label || 'Facebook Reels';
+          const credentials = account?.credentials || {};
+          const accountPageId = credentials.pageId || fbPageId;
+          const accountAccessToken = credentials.accessToken || fbAccessToken;
+          if (!accountPageId || !accountAccessToken) {
+            throw new Error(`Thiếu Page ID hoặc Access Token Facebook cho ${accountLabel}`);
+          }
+
           // 1. Khởi tạo phiên upload Reel lên Page
-          const startRes = await fetch(`/fb-api/v21.0/${fbPageId}/video_reels`, {
+          const startRes = await fetch(`/fb-api/v21.0/${accountPageId}/video_reels`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              access_token: fbAccessToken,
+              access_token: accountAccessToken,
               upload_phase: 'start'
             })
           });
@@ -2770,7 +2860,7 @@ export default function App() {
           const uploadRes = await fetch(proxyUploadUrl, {
             method: 'POST',
             headers: {
-              'Authorization': `OAuth ${fbAccessToken}`,
+              'Authorization': `OAuth ${accountAccessToken}`,
               'offset': '0',
               'file_size': videoBlob.size.toString(),
               'Content-Type': 'application/octet-stream'
@@ -2784,11 +2874,11 @@ export default function App() {
           }
 
           // 3. Hoàn tất & Xuất bản bài viết
-          const finishRes = await fetch(`/fb-api/v21.0/${fbPageId}/video_reels`, {
+          const finishRes = await fetch(`/fb-api/v21.0/${accountPageId}/video_reels`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              access_token: fbAccessToken,
+              access_token: accountAccessToken,
               upload_phase: 'finish',
               video_id: video_id,
               video_state: 'PUBLISHED',
@@ -2804,19 +2894,26 @@ export default function App() {
           const finishData = await finishRes.json();
           const fbPostIdValue = finishData.fb_id || finishData.id || video_id;
           fbPostId = fbPostIdValue;
-          postIds.facebook = fbPostIdValue;
+          postIds.facebook = [...(postIds.facebook || []), { accountId: account.id, label: accountLabel, postId: fbPostIdValue }];
+          }
 
         } else if (platform === 'youtube') {
-          let activeToken = ytAccessToken;
-          if (ytClientId.trim() && ytClientSecret.trim() && ytRefreshToken.trim()) {
+          for (const account of accountsToPublish) {
+          const accountLabel = account?.label || 'YouTube Shorts';
+          const credentials = account?.credentials || {};
+          let activeToken = credentials.accessToken || ytAccessToken;
+          const accountClientId = credentials.clientId || ytClientId;
+          const accountClientSecret = credentials.clientSecret || ytClientSecret;
+          const accountRefreshToken = credentials.refreshToken || ytRefreshToken;
+          if (accountClientId.trim() && accountClientSecret.trim() && accountRefreshToken.trim()) {
             try {
               const tokenRes = await fetch('/google-token/token', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: new URLSearchParams({
-                  client_id: ytClientId.trim(),
-                  client_secret: ytClientSecret.trim(),
-                  refresh_token: ytRefreshToken.trim(),
+                  client_id: accountClientId.trim(),
+                  client_secret: accountClientSecret.trim(),
+                  refresh_token: accountRefreshToken.trim(),
                   grant_type: 'refresh_token'
                 })
               });
@@ -2862,14 +2959,10 @@ export default function App() {
           }
 
           const uploadData = await uploadRes.json();
-          postIds.youtube = uploadData.id;
+          postIds.youtube = [...(postIds.youtube || []), { accountId: account.id, label: accountLabel, postId: uploadData.id }];
+          }
         } else if (platform === 'tiktok') {
-          const scheduledTikTokRefs = post.selectedAccounts?.tiktok || [];
-          const selectedIds = scheduledTikTokRefs.map(item => item.id).filter(Boolean);
-          const tiktokAccounts = selectedIds.length > 0
-            ? (socialAccounts.tiktok || []).filter(account => selectedIds.includes(account.id))
-            : getCheckedSocialAccounts('tiktok');
-          const account = tiktokAccounts[0] || (socialAccounts.tiktok || [])[0] || null;
+          const account = accountsToPublish[0] || null;
           const credentials = account?.credentials || {};
           const tiktokResult = await publishTikTokVideo({
             credentials: {
@@ -2884,7 +2977,13 @@ export default function App() {
             setStatus: () => {}
           });
           persistRefreshedTikTokToken(account, tiktokResult.refreshedTokenData);
-          postIds.tiktok = tiktokResult.publishId;
+          postIds.tiktok = [{
+            accountId: account?.id || '',
+            label: account?.label || 'TikTok Video',
+            postId: tiktokResult.publishId,
+            privacyLevel: tiktokResult.privacyLevel,
+            creator: tiktokResult.creatorInfo?.creator_username || tiktokResult.creatorInfo?.creator_nickname || ''
+          }];
         }
       }
 
@@ -2918,7 +3017,21 @@ export default function App() {
 
     const intervalId = setInterval(checkScheduledPosts, 30000); // Quét mỗi 30 giây
     return () => clearInterval(intervalId);
-  }, [scheduledPosts, fbPageId, fbAccessToken, ytAccessToken, ytClientId, ytClientSecret, ytRefreshToken]);
+  }, [
+    scheduledPosts,
+    socialAccounts,
+    selectedSocialAccountIds,
+    fbPageId,
+    fbAccessToken,
+    ytAccessToken,
+    ytClientId,
+    ytClientSecret,
+    ytRefreshToken,
+    ttAccessToken,
+    ttClientKey,
+    ttClientSecret,
+    ttRefreshToken
+  ]);
 
   // HTML Element Refs
   const canvasRef = useRef(null);
@@ -3869,6 +3982,7 @@ export default function App() {
     localStorage.setItem('imageFrameWidth', imageFrameWidth.toString());
     localStorage.setItem('imageFrameHeight', imageFrameHeight.toString());
     localStorage.setItem('globalImageZoom', globalImageZoom.toString());
+    localStorage.setItem('imageGlowOpacity', imageGlowOpacity.toString());
   }, [
     headerTitle,
     bgColor,
@@ -3905,7 +4019,8 @@ export default function App() {
     titleOutlineWidth,
     imageFrameWidth,
     imageFrameHeight,
-    globalImageZoom
+    globalImageZoom,
+    imageGlowOpacity
   ]);
 
   // Redraw canvas on frame state update
@@ -3956,7 +4071,8 @@ export default function App() {
       titleOutlineWidth,
       imageFrameWidth,
       imageFrameHeight,
-      globalImageZoom
+      globalImageZoom,
+      imageGlowOpacity
     };
 
     drawFrame(canvasRef.current, frameState, currentTime, loadedImagesRef.current);
@@ -3996,7 +4112,8 @@ export default function App() {
     titleOutlineWidth,
     imageFrameWidth,
     imageFrameHeight,
-    globalImageZoom
+    globalImageZoom,
+    imageGlowOpacity
   ]);
 
   // Helper tính trọng số âm tiết thực tế cho từ tiếng Anh, con số và từ tiếng Việt
@@ -4760,6 +4877,7 @@ export default function App() {
       imageFrameWidth,
       imageFrameHeight,
       globalImageZoom,
+      imageGlowOpacity,
       ttsProvider,
       selectedVoiceId,
       vclipVoiceId,
@@ -4836,6 +4954,7 @@ export default function App() {
         if (projectData.imageFrameWidth !== undefined) setImageFrameWidth(projectData.imageFrameWidth);
         if (projectData.imageFrameHeight !== undefined) setImageFrameHeight(projectData.imageFrameHeight);
         if (projectData.globalImageZoom !== undefined) setGlobalImageZoom(projectData.globalImageZoom);
+        if (projectData.imageGlowOpacity !== undefined) setImageGlowOpacity(projectData.imageGlowOpacity);
         if (projectData.ytClientId !== undefined) setYtClientId(projectData.ytClientId);
         if (projectData.ytClientSecret !== undefined) setYtClientSecret(projectData.ytClientSecret);
         if (projectData.ytRefreshToken !== undefined) setYtRefreshToken(projectData.ytRefreshToken);
@@ -5024,6 +5143,7 @@ export default function App() {
       if (config.imageFrameWidth !== undefined) setImageFrameWidth(config.imageFrameWidth);
       if (config.imageFrameHeight !== undefined) setImageFrameHeight(config.imageFrameHeight);
       if (config.globalImageZoom !== undefined) setGlobalImageZoom(config.globalImageZoom);
+      if (config.imageGlowOpacity !== undefined) setImageGlowOpacity(config.imageGlowOpacity);
 
       if (Array.isArray(config.socialAccounts?.facebook) || Array.isArray(config.socialAccounts?.youtube) || Array.isArray(config.socialAccounts?.tiktok)) {
         const normalizedAccounts = normalizeSocialAccounts(config.socialAccounts);
@@ -5152,15 +5272,26 @@ export default function App() {
   const exportCanvasRef = useRef(null);
 
   // Bật/Tắt âm thanh preview trong lúc render video
-  const handleToggleExportMute = () => {
+  const handleToggleExportMute = async () => {
     const newMuted = !isExportMuted;
+    isExportMutedRef.current = newMuted;
     setIsExportMuted(newMuted);
-    window.isExportMuted = newMuted;
+
+    if (window.exportPreviewControls) {
+      window.exportPreviewControls.setMuted(newMuted);
+      if (!newMuted) {
+        await window.exportPreviewControls.resume();
+      }
+      return;
+    }
+
     if (window.exportMonitorGain && window.exportMonitorGain.gain) {
       window.exportMonitorGain.gain.value = newMuted ? 0 : 0.4;
     }
     if (window.exportPreviewAudio) {
       window.exportPreviewAudio.muted = newMuted;
+      window.exportPreviewAudio.volume = newMuted ? 0 : 0.4;
+      if (!newMuted) await window.exportPreviewAudio.play().catch(() => {});
     }
   };
 
@@ -5245,11 +5376,14 @@ export default function App() {
           titleOutlineWidth,
           imageFrameWidth,
           imageFrameHeight,
-          globalImageZoom
+          globalImageZoom,
+          imageGlowOpacity
         },
         timelineBlocks,
         audioUrl,
         mascotPoses,
+        monitorAudio: !isExportMuted,
+        shouldMonitorAudio: () => !isExportMutedRef.current,
         onProgress: (progress) => setExportProgress(progress),
         onComplete: ({ url, extension }) => {
           setExportedVideoUrl(url);
@@ -5846,22 +5980,29 @@ export default function App() {
         imageFrameWidth,
         imageFrameHeight,
         globalImageZoom,
+        imageGlowOpacity,
         audioFileName,
         audioUrl,
         mascotPoses
       }
     };
 
-    // Thêm bài đăng vào danh sách hiển thị
-    setScheduledPosts(prev => [newPost, ...prev]);
-
     // Lưu tệp video vào IndexedDB dưới ổ cứng để phục vụ tính năng hẹn giờ đăng tự động
     try {
       const videoBlob = await fetch(exportedVideoUrl).then(r => r.blob());
       await saveVideoToStorage(newPostId, videoBlob);
+      const savedVideo = await getVideoFromStorage(newPostId);
+      if (!savedVideo) {
+        throw new Error('Không xác nhận được file video trong IndexedDB');
+      }
     } catch (err) {
       console.error('Lỗi khi lưu tệp video vào IndexedDB:', err);
+      alert(`Không thể lưu file video để đăng/hẹn giờ: ${err.message}`);
+      return;
     }
+
+    // Thêm bài đăng vào danh sách hiển thị sau khi chắc chắn đã lưu được file video.
+    setScheduledPosts(prev => [newPost, ...prev]);
 
     if (publishMode === 'schedule') {
       setPublishCaption('');
@@ -8146,6 +8287,24 @@ export default function App() {
                       />
                       <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mặc định 100%. Áp dụng cho tất cả hình so sánh.</span>
                     </div>
+
+                    {/* Neon Glow Opacity */}
+                    <div className="form-group">
+                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Độ sáng viền Neon khi chỉ ảnh</span>
+                        <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{imageGlowOpacity}%</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="5"
+                        value={imageGlowOpacity}
+                        onChange={(e) => updateImageGlowOpacity(parseInt(e.target.value, 10))}
+                        style={{ cursor: 'pointer', marginTop: '0.25rem' }}
+                      />
+                      <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Mặc định 100%. Màu glow lấy theo màu tiêu đề trái/phải; kéo về 0% để tắt hiệu ứng.</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -8522,6 +8681,9 @@ export default function App() {
                     </label>
                   </div>
                 </div>
+                <div style={{ marginTop: '-0.35rem', marginBottom: '0.75rem', fontSize: '0.72rem', color: botEnabled ? 'var(--accent-green)' : '#94a3b8' }}>
+                  Trạng thái: {commentBotStatus}
+                </div>
 
                 <div className="form-grid ai-responder-grid" style={{ gridTemplateColumns: '1.2fr 1fr', gap: '1rem' }}>
                   {/* Cấu hình Prompt và API Key */}
@@ -8734,7 +8896,7 @@ export default function App() {
                 }}
               >
                 {isExportMuted ? <VolumeX size={14} className="text-danger" style={{ color: 'var(--accent-red)' }} /> : <Volume2 size={14} className="text-success" style={{ color: 'var(--accent-green)' }} />}
-                {isExportMuted ? 'Bật âm thanh preview' : 'Tắt âm thanh preview'}
+                {isExportMuted ? 'Bật nghe khi render' : 'Tắt nghe khi render'}
               </button>
             </div>
 
