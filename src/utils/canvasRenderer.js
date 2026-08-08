@@ -377,12 +377,10 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   const leftX = 360 - midGap / 2 - panelW;
   const rightX = 360 + midGap / 2;
 
+  // Smart fallback keyword matching for highlight when block highlight is missing or 'none'
   const getSmartHighlight = (block) => {
     if (!block) return 'none';
-    // Respect explicit highlight setting ('none', 'left', 'right') 100%
-    if (block.highlight !== undefined && block.highlight !== null && block.highlight !== '') {
-      return block.highlight;
-    }
+    if (block.highlight && block.highlight !== 'none') return block.highlight;
     
     const textLower = (block.text || '').toLowerCase();
     if (!textLower) return 'none';
@@ -418,12 +416,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     currHighlight = getSmartHighlight(currentBlock);
     const timeInBlock = currentTime - currentBlock.start;
     const transitionDuration = 0.3; // 300ms transition
-
-    if (activeBlockIndex === 0 && currentBlock.start === 0) {
-      // First block starting at t=0: immediately active at full 1.08x zoom without initial scale delay
-      t = 1;
-      prevHighlight = currHighlight;
-    } else if (timeInBlock < transitionDuration) {
+    if (timeInBlock < transitionDuration) {
       t = timeInBlock / transitionDuration;
       // Ease-in-out curve
       t = t * t * (3 - 2 * t);
@@ -437,15 +430,15 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   // Helper to determine layout values (scale, opacity, blur) for left/right panels
   const getLayoutValues = (panelSide, highlightState) => {
     if (highlightState === 'none') {
-      // Mặc định đứng yên không chỉ bên nào: cả 2 bên đều ở kích thước chuẩn (0.92)
-      return { scale: 0.92, opacity: 1.0, blur: 0 };
+      // Mặc định ban đầu: cả hai bên đều nhỏ đi một chút (0.93)
+      return { scale: 0.93, opacity: 1.0, blur: 0 };
     }
     if (highlightState === panelSide) {
-      // Bên được chỉ tới: ZOOM TO RÕ RÀNG VƯỢT TRỘI (1.08x)
-      return { scale: 1.08, opacity: 1.0, blur: 0 };
+      // Chỉ đến cái nào: zoom to nhẹ cái đó lên (1.0)
+      return { scale: 1.0, opacity: 1.0, blur: 0 };
     } else {
-      // Bên còn lại không được chỉ: Thu nhỏ lại (0.85x) và làm mờ nhẹ
-      return { scale: 0.85, opacity: 0.50, blur: 4 };
+      // Cái còn lại: zoom bé đi một chút (0.86) và làm mờ hơn
+      return { scale: 0.86, opacity: 0.55, blur: 4 };
     }
   };
 
@@ -471,15 +464,6 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
   const isLeftActive = currHighlight === 'left';
   const isRightActive = currHighlight === 'right';
-
-  // Smooth animated glow opacity during highlight transition
-  const leftGlowAlpha = currHighlight === 'left' 
-    ? (prevHighlight === 'left' ? 1.0 : t) 
-    : (prevHighlight === 'left' ? 1.0 - t : 0.0);
-
-  const rightGlowAlpha = currHighlight === 'right' 
-    ? (prevHighlight === 'right' ? 1.0 : t) 
-    : (prevHighlight === 'right' ? 1.0 - t : 0.0);
 
   const leftLayout = {
     ...getPanelRect(leftX, panelY, panelW, panelH, leftScale),
@@ -534,63 +518,8 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   // Right Label
   drawFittedTitle(activeComp.rightTitle, rightLayout.x + rightLayout.w / 2, rightLayout.y - 25, rightScale, activeComp.rightColor || '#10B981', rightOpacity);
 
-  // Helper to ensure neon shadow is bright & glowing like a light bulb even for dark title colors
-  const getGlowingShadowColor = (hexCol) => {
-    if (!hexCol) return '#FF2D55';
-    let hex = hexCol.replace('#', '').trim();
-    if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
-    if (hex.length !== 6) return hexCol;
-    
-    const r = parseInt(hex.substring(0, 2), 16) || 0;
-    const g = parseInt(hex.substring(2, 4), 16) || 0;
-    const b = parseInt(hex.substring(4, 6), 16) || 0;
-
-    // Convert RGB to HSL
-    let rNorm = r / 255, gNorm = g / 255, bNorm = b / 255;
-    let max = Math.max(rNorm, gNorm, bNorm), min = Math.min(rNorm, gNorm, bNorm);
-    let h = 0, s = 0, l = (max + min) / 2;
-
-    if (max !== min) {
-      let d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-      switch (max) {
-        case rNorm: h = (gNorm - bNorm) / d + (gNorm < bNorm ? 6 : 0); break;
-        case gNorm: h = (bNorm - rNorm) / d + 2; break;
-        case bNorm: h = (rNorm - gNorm) / d + 4; break;
-      }
-      h /= 6;
-    }
-
-    // Boost lightness to at least 62% and saturation to at least 95% for light bulb neon glow
-    s = Math.max(s, 0.95);
-    l = Math.max(l, 0.62);
-
-    // Convert HSL back to RGB
-    const hslToRgb = (h, s, l) => {
-      if (s === 0) return [Math.round(l * 255), Math.round(l * 255), Math.round(l * 255)];
-      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-      const p = 2 * l - q;
-      const hue2rgb = (p, q, t) => {
-        if (t < 0) t += 1;
-        if (t > 1) t -= 1;
-        if (t < 1/6) return p + (q - p) * 6 * t;
-        if (t < 1/2) return q;
-        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-        return p;
-      };
-      return [
-        Math.round(hue2rgb(p, q, h + 1/3) * 255),
-        Math.round(hue2rgb(p, q, h) * 255),
-        Math.round(hue2rgb(p, q, h - 1/3) * 255)
-      ];
-    };
-
-    const [rgbR, rgbG, rgbB] = hslToRgb(h, s, l);
-    return `rgb(${rgbR}, ${rgbG}, ${rgbB})`;
-  };
-
   // Helper to draw a panel image
-  const drawPanelImage = (imgUrl, x, y, width, height, layout, side) => {
+  const drawPanelImage = (imgUrl, x, y, width, height, layout) => {
     ctx.save();
     
     // Apply blur filter if inactive
@@ -602,47 +531,36 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     drawRoundedRect(ctx, x, y, width, height, 16);
     ctx.clip();
 
-    // Fill dark background inside rounded frame mask so no light background can EVER leak through!
-    ctx.fillStyle = '#0B0F19';
-    ctx.fillRect(x - 2, y - 2, width + 4, height + 4);
-
     if (imgUrl && loadedImages[imgUrl]) {
       const img = loadedImages[imgUrl];
       
-      const naturalW = img.naturalWidth || img.width || 100;
-      const naturalH = img.naturalHeight || img.height || 100;
-
-      // Native Canvas implementation of CSS background-size: cover; background-position: center
-      const imgRatio = naturalW / naturalH;
+      // Calculate cover dimensions (aspect ratio preservation)
+      const imgRatio = img.width / img.height;
       const targetRatio = width / height;
-      
-      const sideZoomVal = side === 'left' ? (activeComp.leftZoom || 100) : (activeComp.rightZoom || 100);
-      const userZoom = Math.max(1.0, (state.globalImageZoom !== undefined ? state.globalImageZoom : 100) / 100) * Math.max(1.0, sideZoomVal / 100);
-
-      let sw, sh;
+      let drawW = width;
+      let drawH = height;
 
       if (imgRatio > targetRatio) {
-        // Image is wider than container: crop left and right sides equally
-        sw = naturalH * targetRatio;
-        sh = naturalH;
+        // Image is wider than frame, so match height and scale width
+        drawW = height * imgRatio;
       } else {
-        // Image is taller than container: crop top and bottom sides equally
-        sw = naturalW;
-        sh = naturalW / targetRatio;
+        // Image is taller than frame, so match width and scale height
+        drawH = width / imgRatio;
       }
 
-      // Apply zoom factor centered
-      sw = sw / userZoom;
-      sh = sh / userZoom;
+      // Apply Global Zoom factor
+      const zoomFactor = (state.globalImageZoom !== undefined ? state.globalImageZoom : 100) / 100;
+      const scaledW = drawW * zoomFactor;
+      const scaledH = drawH * zoomFactor;
 
-      const sx = Math.max(0, (naturalW - sw) / 2);
-      const sy = Math.max(0, (naturalH - sh) / 2);
+      // Center the scaled image inside the target frame bounds [x, y, width, height]
+      const drawX = x + (width - scaledW) / 2;
+      const drawY = y + (height - scaledH) / 2;
 
-      // Draw image 100% full flush cover edge-to-edge inside rounded frame mask
-      ctx.drawImage(img, sx, sy, sw, sh, x - 1, y - 1, width + 2, height + 2);
+      ctx.drawImage(img, drawX, drawY, scaledW, scaledH);
     } else {
       // Placeholder if no image
-      ctx.fillStyle = '#111827';
+      ctx.fillStyle = '#E3DCD5';
       ctx.fillRect(x, y, width, height);
       ctx.font = 'italic 18px sans-serif';
       ctx.fillStyle = '#888';
@@ -661,35 +579,44 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     }
 
     ctx.restore();
+
+    // Draw premium active/inactive borders
+    ctx.save();
+    if (layout.isActive && (currHighlight === 'left' || currHighlight === 'right')) {
+      // Active panel border: thicker white border with drop shadow
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 5;
+      ctx.shadowColor = 'rgba(255, 255, 255, 0.4)';
+      ctx.shadowBlur = 10;
+      drawRoundedRect(ctx, x, y, width, height, 16);
+      ctx.stroke();
+    } else {
+      // Inactive or default panel border
+      ctx.strokeStyle = layout.opacity < 1.0 ? 'rgba(208, 201, 192, 0.4)' : '#D0C9C0';
+      ctx.lineWidth = 2;
+      drawRoundedRect(ctx, x, y, width, height, 16);
+      ctx.stroke();
+    }
+    ctx.restore();
   };
 
-  // Draw inactive panel image first, active zoomed panel image ON TOP!
-  if (rightGlowAlpha > leftGlowAlpha) {
-    drawPanelImage(activeComp.leftImageUrl, leftLayout.x, leftLayout.y, leftLayout.w, leftLayout.h, leftLayout, 'left');
-    drawPanelImage(activeComp.rightImageUrl, rightLayout.x, rightLayout.y, rightLayout.w, rightLayout.h, rightLayout, 'right');
-  } else {
-    drawPanelImage(activeComp.rightImageUrl, rightLayout.x, rightLayout.y, rightLayout.w, rightLayout.h, rightLayout, 'right');
-    drawPanelImage(activeComp.leftImageUrl, leftLayout.x, leftLayout.y, leftLayout.w, leftLayout.h, leftLayout, 'left');
-  }
+  drawPanelImage(activeComp.leftImageUrl, leftLayout.x, leftLayout.y, leftLayout.w, leftLayout.h, leftLayout);
+  drawPanelImage(activeComp.rightImageUrl, rightLayout.x, rightLayout.y, rightLayout.w, rightLayout.h, rightLayout);
 
-  // 4.5 Draw Central Glowing Neon "VS" Badge
+  // Draw central VS badge only. Keep panel borders/images on the stable pre-neon renderer.
   ctx.save();
   const vsX = 360;
   const vsY = panelY + panelH / 2;
   const vsPulse = 1.0 + 0.035 * Math.sin(currentTime * Math.PI * 2.5);
   const vsRadius = 38 * vsPulse;
 
-  // Outer glowing gold aura
   ctx.shadowColor = '#FDE047';
   ctx.shadowBlur = 22;
-
-  // Dark circular badge background
   ctx.beginPath();
   ctx.arc(vsX, vsY, vsRadius, 0, Math.PI * 2);
   ctx.fillStyle = '#0B0F19';
   ctx.fill();
 
-  // Glowing gold border
   const vsGrad = ctx.createLinearGradient(vsX - vsRadius, vsY - vsRadius, vsX + vsRadius, vsY + vsRadius);
   vsGrad.addColorStop(0, '#FDE047');
   vsGrad.addColorStop(0.5, '#EAB308');
@@ -699,7 +626,6 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   ctx.strokeStyle = vsGrad;
   ctx.stroke();
 
-  // VS text
   ctx.font = `900 ${Math.round(34 * vsPulse)}px "Impact", "Arial Black", sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
