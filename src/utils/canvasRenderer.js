@@ -662,7 +662,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
     ctx.restore();
 
-    // Draw VIBRANT LIGHT-BULB NEON RADIATING AURA around card when active
+    // Draw PURE RADIATING NEON LIGHT BULB AURA (100% ZERO SOLID BORDER LINE!)
     const targetColor = side === 'left' 
       ? (activeComp.leftColor || '#37E6C4') 
       : (activeComp.rightColor || '#EC4899');
@@ -673,25 +673,29 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
       ctx.globalAlpha = glowAlpha;
 
       const glowingShadow = getGlowingShadowColor(targetColor);
+      const offX = 10000;
 
-      // PASS 1: Massive 65px Ambient Radiating Light Bleed (Bulb Light Radiating Outward)
       ctx.shadowColor = glowingShadow;
-      ctx.shadowBlur = 65;
       ctx.strokeStyle = glowingShadow;
-      ctx.lineWidth = 5.0;
-      drawRoundedRect(ctx, x, y, width, height, 16);
+      ctx.shadowOffsetX = -offX;
+      ctx.shadowOffsetY = 0;
+
+      // PASS 1: Outermost Soft 85px Radiating Light Bleed (Light Bulb Radiating Outward)
+      ctx.shadowBlur = 85;
+      ctx.lineWidth = 4.0;
+      drawRoundedRect(ctx, x + offX, y, width, height, 16);
       ctx.stroke();
 
-      // PASS 2: Strong Mid-Range Concentrated Light Halo (32px blur)
-      ctx.shadowBlur = 32;
-      ctx.lineWidth = 3.5;
-      drawRoundedRect(ctx, x, y, width, height, 16);
+      // PASS 2: Concentrated Mid-Range Light Halo (45px blur)
+      ctx.shadowBlur = 45;
+      ctx.lineWidth = 3.0;
+      drawRoundedRect(ctx, x + offX, y, width, height, 16);
       ctx.stroke();
 
-      // PASS 3: Crisp Bright Core Neon Glow Line (12px blur)
-      ctx.shadowBlur = 12;
-      ctx.lineWidth = 2.5;
-      drawRoundedRect(ctx, x, y, width, height, 16);
+      // PASS 3: Soft Core Glow (22px blur - 100% PURE SOFT LIGHT, ZERO SOLID BORDER LINE!)
+      ctx.shadowBlur = 22;
+      ctx.lineWidth = 2.0;
+      drawRoundedRect(ctx, x + offX, y, width, height, 16);
       ctx.stroke();
 
       ctx.restore();
