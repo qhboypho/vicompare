@@ -589,45 +589,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     return `rgb(${rgbR}, ${rgbG}, ${rgbB})`;
   };
 
-  // Helper to draw panel neon glowing aura (matching the VS badge outer radiating aura style!)
-  const drawPanelGlow = (side, layout) => {
-    const glowAlpha = side === 'left' ? leftGlowAlpha : rightGlowAlpha;
-    if (glowAlpha <= 0.01) return;
-
-    const targetColor = side === 'left' 
-      ? (activeComp.leftColor || '#37E6C4') 
-      : (activeComp.rightColor || '#EC4899');
-
-    ctx.save();
-    ctx.globalAlpha = glowAlpha * 0.65;
-
-    const glowingColor = getGlowingShadowColor(targetColor);
-
-    // 1. Ambient outer radiating shadow glow (like the VS badge)
-    ctx.shadowColor = glowingColor;
-    ctx.shadowBlur = 45;
-
-    drawRoundedRect(ctx, layout.x, layout.y, layout.w, layout.h, 16);
-    ctx.fillStyle = '#0B0F19';
-    ctx.fill();
-
-    // 2. Vibrant 360-degree glowing neon stroke outline (like the VS badge border)
-    ctx.shadowColor = glowingColor;
-    ctx.shadowBlur = 25;
-    ctx.strokeStyle = glowingColor;
-    ctx.lineWidth = 5.0;
-    drawRoundedRect(ctx, layout.x, layout.y, layout.w, layout.h, 16);
-    ctx.stroke();
-
-    ctx.shadowBlur = 12;
-    ctx.lineWidth = 2.5;
-    drawRoundedRect(ctx, layout.x, layout.y, layout.w, layout.h, 16);
-    ctx.stroke();
-
-    ctx.restore();
-  };
-
-  // Helper to draw a panel image (ON TOP of the glow!)
+  // Helper to draw a panel image
   const drawPanelImage = (imgUrl, x, y, width, height, layout, side) => {
     ctx.save();
     
@@ -701,11 +663,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     ctx.restore();
   };
 
-  // 1. Draw neon glows BEHIND panels first!
-  drawPanelGlow('left', leftLayout);
-  drawPanelGlow('right', rightLayout);
-
-  // 2. Draw inactive panel image next, active zoomed panel image ON TOP!
+  // Draw inactive panel image first, active zoomed panel image ON TOP!
   if (rightGlowAlpha > leftGlowAlpha) {
     drawPanelImage(activeComp.leftImageUrl, leftLayout.x, leftLayout.y, leftLayout.w, leftLayout.h, leftLayout, 'left');
     drawPanelImage(activeComp.rightImageUrl, rightLayout.x, rightLayout.y, rightLayout.w, rightLayout.h, rightLayout, 'right');
