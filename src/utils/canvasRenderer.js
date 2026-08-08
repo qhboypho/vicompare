@@ -589,7 +589,48 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     return `rgb(${rgbR}, ${rgbG}, ${rgbB})`;
   };
 
-  // Helper to draw a panel image
+  // Helper to draw panel neon glowing aura (BEHIND the card image!)
+  const drawPanelGlow = (side, layout) => {
+    const glowAlpha = side === 'left' ? leftGlowAlpha : rightGlowAlpha;
+    if (glowAlpha <= 0.01) return;
+
+    const targetColor = side === 'left' 
+      ? (activeComp.leftColor || '#37E6C4') 
+      : (activeComp.rightColor || '#EC4899');
+
+    ctx.save();
+    ctx.globalAlpha = glowAlpha;
+
+    const glowingShadow = getGlowingShadowColor(targetColor);
+    const offX = 10000;
+
+    ctx.shadowColor = glowingShadow;
+    ctx.strokeStyle = glowingShadow;
+    ctx.shadowOffsetX = -offX;
+    ctx.shadowOffsetY = 0;
+
+    // PASS 1: Outermost Soft 85px Radiating Light Bleed (Radiating Outward into Background)
+    ctx.shadowBlur = 85;
+    ctx.lineWidth = 4.0;
+    drawRoundedRect(ctx, layout.x + offX, layout.y, layout.w, layout.h, 16);
+    ctx.stroke();
+
+    // PASS 2: Concentrated Mid-Range Light Halo (45px blur)
+    ctx.shadowBlur = 45;
+    ctx.lineWidth = 3.0;
+    drawRoundedRect(ctx, layout.x + offX, layout.y, layout.w, layout.h, 16);
+    ctx.stroke();
+
+    // PASS 3: Soft Core Light Halo (22px blur)
+    ctx.shadowBlur = 22;
+    ctx.lineWidth = 2.0;
+    drawRoundedRect(ctx, layout.x + offX, layout.y, layout.w, layout.h, 16);
+    ctx.stroke();
+
+    ctx.restore();
+  };
+
+  // Helper to draw a panel image (ON TOP of the glow!)
   const drawPanelImage = (imgUrl, x, y, width, height, layout, side) => {
     ctx.save();
     
@@ -661,55 +702,13 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     }
 
     ctx.restore();
-
-    // Draw PURE RADIATING NEON LIGHT BULB AURA (100% OUTSIDE THE CARD ONLY - NO GLOW INSIDE PHOTO!)
-    const targetColor = side === 'left' 
-      ? (activeComp.leftColor || '#37E6C4') 
-      : (activeComp.rightColor || '#EC4899');
-    const glowAlpha = side === 'left' ? leftGlowAlpha : rightGlowAlpha;
-    
-    if (glowAlpha > 0.01) {
-      ctx.save();
-      ctx.globalAlpha = glowAlpha;
-
-      // 1. Create OUTSIDE-ONLY clipping mask using 'evenodd' rule (clips out the interior of the card 100%)
-      ctx.beginPath();
-      ctx.rect(-200, -200, 1200, 1800); // Outer canvas bounds
-      drawRoundedRect(ctx, x, y, width, height, 16); // Card inner bounds
-      ctx.clip('evenodd');
-
-      // 2. Draw radiating light bulb shadow glow outside the card bounds
-      const glowingShadow = getGlowingShadowColor(targetColor);
-      const offX = 10000;
-
-      ctx.shadowColor = glowingShadow;
-      ctx.strokeStyle = glowingShadow;
-      ctx.shadowOffsetX = -offX;
-      ctx.shadowOffsetY = 0;
-
-      // PASS 1: Outermost Soft 85px Radiating Light Bleed (Light Bulb Radiating Outward)
-      ctx.shadowBlur = 85;
-      ctx.lineWidth = 4.0;
-      drawRoundedRect(ctx, x + offX, y, width, height, 16);
-      ctx.stroke();
-
-      // PASS 2: Concentrated Mid-Range Light Halo (45px blur)
-      ctx.shadowBlur = 45;
-      ctx.lineWidth = 3.0;
-      drawRoundedRect(ctx, x + offX, y, width, height, 16);
-      ctx.stroke();
-
-      // PASS 3: Soft Core Glow (22px blur - 100% PURE SOFT LIGHT, ZERO SOLID BORDER LINE!)
-      ctx.shadowBlur = 22;
-      ctx.lineWidth = 2.0;
-      drawRoundedRect(ctx, x + offX, y, width, height, 16);
-      ctx.stroke();
-
-      ctx.restore();
-    }
   };
 
-  // Draw inactive panel first, active zoomed panel second so active card & neon glow are 100% on top!
+  // 1. Draw neon glows BEHIND panels first!
+  drawPanelGlow('left', leftLayout);
+  drawPanelGlow('right', rightLayout);
+
+  // 2. Draw inactive panel image next, active zoomed panel image ON TOP!
   if (rightGlowAlpha > leftGlowAlpha) {
     drawPanelImage(activeComp.leftImageUrl, leftLayout.x, leftLayout.y, leftLayout.w, leftLayout.h, leftLayout, 'left');
     drawPanelImage(activeComp.rightImageUrl, rightLayout.x, rightLayout.y, rightLayout.w, rightLayout.h, rightLayout, 'right');
