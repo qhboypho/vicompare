@@ -599,7 +599,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
       : (activeComp.rightColor || '#EC4899');
 
     ctx.save();
-    ctx.globalAlpha = glowAlpha * 0.82;
+    ctx.globalAlpha = glowAlpha * 0.65;
 
     const glowingColor = getGlowingShadowColor(targetColor);
 
