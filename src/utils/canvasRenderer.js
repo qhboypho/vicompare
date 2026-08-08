@@ -662,7 +662,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
     ctx.restore();
 
-    // Draw PURE RADIATING NEON LIGHT BULB AURA (100% ZERO SOLID BORDER LINE!)
+    // Draw PURE RADIATING NEON LIGHT BULB AURA (100% OUTSIDE THE CARD ONLY - NO GLOW INSIDE PHOTO!)
     const targetColor = side === 'left' 
       ? (activeComp.leftColor || '#37E6C4') 
       : (activeComp.rightColor || '#EC4899');
@@ -672,6 +672,13 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
       ctx.save();
       ctx.globalAlpha = glowAlpha;
 
+      // 1. Create OUTSIDE-ONLY clipping mask using 'evenodd' rule (clips out the interior of the card 100%)
+      ctx.beginPath();
+      ctx.rect(-200, -200, 1200, 1800); // Outer canvas bounds
+      drawRoundedRect(ctx, x, y, width, height, 16); // Card inner bounds
+      ctx.clip('evenodd');
+
+      // 2. Draw radiating light bulb shadow glow outside the card bounds
       const glowingShadow = getGlowingShadowColor(targetColor);
       const offX = 10000;
 
