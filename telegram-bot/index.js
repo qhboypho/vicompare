@@ -56,13 +56,15 @@ function normalizeVoicefreeModelId(modelId) {
   return candidate;
 }
 
-export function splitVoicefreeTextSegments(text) {
+export function splitScriptTextSegments(text) {
   return String(text || "")
     .split(/\r?\n+/)
     .map(line => line.trim())
     .filter(Boolean)
     .map(line => /[.!?:…]$/.test(line) ? line : `${line}.`);
 }
+
+export const splitVoicefreeTextSegments = splitScriptTextSegments;
 
 
 
@@ -943,7 +945,7 @@ async function requestVoicefreeAudioBufferWithFallback(ttsConfig, scriptText) {
   try {
     return await requestVoicefreeAudioBuffer(ttsConfig, scriptText);
   } catch (wholeTextErr) {
-    const segments = splitVoicefreeTextSegments(scriptText);
+    const segments = splitScriptTextSegments(scriptText);
     if (segments.length <= 1) {
       throw new Error(`Voicefree: ${wholeTextErr.message}`);
     }
@@ -964,12 +966,144 @@ async function requestVoicefreeAudioBufferWithFallback(ttsConfig, scriptText) {
   }
 }
 
+async function requestJsonRpcTtsAudioBuffer(ttsConfig, text, label) {
+  const normalizedText = String(text || "").trim();
+  let startRes = await fetch(`https://${ttsConfig.host}/json-rpc`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${ttsConfig.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      method: "ttsLongText",
+      input: {
+        text: normalizedText,
+        userVoiceId: ttsConfig.voiceId,
+        speed: ttsConfig.speed
+      }
+    })
+  });
+  let startData = await startRes.json();
+
+  if (startData.error) {
+    startRes = await fetch(`https://${ttsConfig.host}/json-rpc`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${ttsConfig.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        method: "ttsLongText",
+        input: {
+          text: normalizedText,
+          voiceId: ttsConfig.voiceId,
+          speed: ttsConfig.speed
+        }
+      })
+    });
+    const retryData = await startRes.json();
+    if (!retryData.error) {
+      startData = retryData;
+    }
+  }
+
+  if (startData.error) throw new Error(`${label} API: ${startData.error.message || JSON.stringify(startData.error)} (Dùng VoiceID: ${ttsConfig.voiceId})`);
+
+  const exportId = startData.result?.projectExportId;
+  if (!exportId) throw new Error(`${label}: Không nhận được export ID.`);
+
+  const audioUrl = await pollExportAudioUrl(ttsConfig.host, ttsConfig.apiKey, exportId, label);
+  const audioRes = await fetch(audioUrl);
+  if (!audioRes.ok) throw new Error(`${label}: Không tải được audio đã xuất.`);
+  return {
+    buffer: await audioRes.arrayBuffer(),
+    audioUrl
+  };
+}
+
+async function requestTtsAudioBufferForText(engineType, ttsConfig, text) {
+  if (engineType === "tts_eleven") {
+    const ttsRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ttsConfig.voiceId}`, {
+      method: "POST",
+      headers: {
+        "xi-api-key": ttsConfig.apiKey,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        text,
+        model_id: "eleven_multilingual_v2",
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 }
+      })
+    });
+
+    if (!ttsRes.ok) throw new Error(`ElevenLabs Error: ${ttsRes.statusText}`);
+    return { buffer: await ttsRes.arrayBuffer(), audioUrl: null };
+  }
+
+  if (engineType === "tts_lucy") {
+    return await requestJsonRpcTtsAudioBuffer(ttsConfig, text && !/[.!?:]$/.test(text.trim()) ? `${text.trim()}.` : text, "LucyLab");
+  }
+
+  if (engineType === "tts_vclip") {
+    return await requestJsonRpcTtsAudioBuffer(ttsConfig, text, "VClip");
+  }
+
+  if (engineType === "tts_voicefree") {
+    return { buffer: await requestVoicefreeAudioBufferWithFallback(ttsConfig, text), audioUrl: null };
+  }
+
+  throw new Error("Động cơ TTS không hợp lệ.");
+}
+
+function concatArrayBuffers(buffers) {
+  const chunks = buffers.map(buffer => new Uint8Array(buffer));
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  const merged = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged.buffer;
+}
+
+async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText) {
+  const segments = splitScriptTextSegments(scriptText);
+  if (segments.length <= 1) {
+    const result = await requestTtsAudioBufferForText(engineType, ttsConfig, scriptText);
+    return {
+      audioBuffer: result.buffer,
+      audioUrlResult: result.audioUrl,
+      audioSegments: [{
+        text: cleanString(scriptText),
+        base64: arrayBufferToBase64(result.buffer)
+      }]
+    };
+  }
+
+  const segmentResults = [];
+  for (const segment of segments) {
+    const result = await requestTtsAudioBufferForText(engineType, ttsConfig, segment);
+    segmentResults.push({
+      text: segment,
+      buffer: result.buffer,
+      audioUrl: result.audioUrl
+    });
+  }
+
+  const audioSegments = segmentResults.map(segment => ({
+    text: segment.text,
+    base64: arrayBufferToBase64(segment.buffer)
+  }));
+
+  return {
+    audioBuffer: concatArrayBuffers(segmentResults.map(segment => segment.buffer)),
+    audioUrlResult: segmentResults[segmentResults.length - 1]?.audioUrl || null,
+    audioSegments
+  };
+}
+
 export function buildWebAppUrls({
   sessionId,
   chatId,
   channelId,
   scriptText,
   audioUrl,
+  audioSegments = [],
   voiceSyncMode = "segment",
   actionSfxEnabled = true,
   actionSfxVolume = 0.2,
@@ -984,6 +1118,7 @@ export function buildWebAppUrls({
         channelId,
         scriptText: cleanTelegramScriptText(scriptText),
         audioUrl,
+        audioSegments,
         voiceSyncMode,
         actionSfxEnabled,
         actionSfxVolume,
@@ -1875,125 +2010,16 @@ async function handleCallbackQuery(callbackQuery, token, env) {
       let audioBuffer = null;
       let fileName = "voice.mp3";
       let audioUrlResult = null;
+      let audioSegments = [];
 
       const syncedCreds = await getSyncedCredentials(env);
+      const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
 
-      if (engineType === "tts_eleven") {
-        const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
-        
-        const ttsRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ttsConfig.voiceId}`, {
-          method: "POST",
-          headers: {
-            "xi-api-key": ttsConfig.apiKey,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            text: scriptText,
-            model_id: "eleven_multilingual_v2",
-            voice_settings: { stability: 0.5, similarity_boost: 0.75 }
-          })
-        });
-
-        if (!ttsRes.ok) throw new Error(`ElevenLabs Error: ${ttsRes.statusText}`);
-        audioBuffer = await ttsRes.arrayBuffer();
-        fileName = ttsConfig.fileName;
-
-      } else if (engineType === "tts_lucy") {
-        const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
-        
-        let startRes = await fetch("https://api.lucylab.io/json-rpc", {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${ttsConfig.apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            method: "ttsLongText",
-            input: {
-              text: String(scriptText).trim(),
-              userVoiceId: ttsConfig.voiceId,
-              speed: ttsConfig.speed
-            }
-          })
-        });
-        let startData = await startRes.json();
-
-        if (startData.error) {
-          startRes = await fetch("https://api.lucylab.io/json-rpc", {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${ttsConfig.apiKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              method: "ttsLongText",
-              input: {
-                text: String(scriptText).trim(),
-                voiceId: ttsConfig.voiceId,
-                speed: ttsConfig.speed
-              }
-            })
-          });
-          const retryData = await startRes.json();
-          if (!retryData.error) {
-            startData = retryData;
-          }
-        }
-
-        if (startData.error) throw new Error(`LucyLab API: ${startData.error.message || JSON.stringify(startData.error)} (Dùng VoiceID: ${ttsConfig.voiceId})`);
-
-        const exportId = startData.result?.projectExportId;
-        if (!exportId) throw new Error("LucyLab: Không nhận được export ID.");
-
-        audioUrlResult = await pollExportAudioUrl(ttsConfig.host, ttsConfig.apiKey, exportId, "LucyLab");
-        const audioRes = await fetch(audioUrlResult);
-        audioBuffer = await audioRes.arrayBuffer();
-        fileName = ttsConfig.fileName;
-
-      } else if (engineType === "tts_vclip") {
-        const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
-        
-        let startRes = await fetch("https://api-tts.vclip.io/json-rpc", {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${ttsConfig.apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            method: "ttsLongText",
-            input: {
-              text: String(scriptText).trim(),
-              userVoiceId: ttsConfig.voiceId,
-              speed: ttsConfig.speed
-            }
-          })
-        });
-        let startData = await startRes.json();
-
-        if (startData.error) {
-          startRes = await fetch("https://api-tts.vclip.io/json-rpc", {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${ttsConfig.apiKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              method: "ttsLongText",
-              input: {
-                text: String(scriptText).trim(),
-                voiceId: ttsConfig.voiceId,
-                speed: ttsConfig.speed
-              }
-            })
-          });
-          const retryData = await startRes.json();
-          if (!retryData.error) {
-            startData = retryData;
-          }
-        }
-
-        if (startData.error) throw new Error(`VClip API: ${startData.error.message || JSON.stringify(startData.error)} (Dùng VoiceID: ${ttsConfig.voiceId})`);
-
-        const exportId = startData.result?.projectExportId;
-        if (!exportId) throw new Error("VClip: Không nhận được export ID.");
-
-        audioUrlResult = await pollExportAudioUrl(ttsConfig.host, ttsConfig.apiKey, exportId, "VClip");
-        const audioRes = await fetch(audioUrlResult);
-        audioBuffer = await audioRes.arrayBuffer();
-        fileName = ttsConfig.fileName;
-      } else if (engineType === "tts_voicefree") {
-        const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
-        audioBuffer = await requestVoicefreeAudioBufferWithFallback(ttsConfig, scriptText);
-        fileName = ttsConfig.fileName;
-      }
+      const segmentedResult = await requestSegmentedTtsAudio(engineType, ttsConfig, scriptText);
+      audioBuffer = segmentedResult.audioBuffer;
+      audioUrlResult = segmentedResult.audioUrlResult;
+      audioSegments = segmentedResult.audioSegments;
+      fileName = ttsConfig.fileName;
 
       if (audioBuffer) {
         // Gửi tệp âm thanh nghe thử về Telegram
@@ -2006,19 +2032,21 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         const sessionId = `s_${Math.random().toString(36).substring(2, 10)}`;
         let base64Audio = "";
         try {
-          base64Audio = btoa(String.fromCharCode(...new Uint8Array(audioBuffer)));
+          base64Audio = arrayBufferToBase64(audioBuffer);
         } catch (e) {}
 
         const manualImageState = await readManualImageState(chatId, env);
         const autoComparisonImages = await fetchComparisonImages(scriptText);
         const comparisonImages = mergeManualComparisonImages(autoComparisonImages, manualImageState);
 
+        const compactAudioSegments = JSON.stringify(audioSegments).length <= 18 * 1024 * 1024 ? audioSegments : [];
         const sessionPayload = {
           sessionId,
           chatId,
           channelId,
           scriptText,
           audioBase64: base64Audio,
+          audioSegments: compactAudioSegments,
           audioUrl: webAudioUrl || null,
           voiceSyncMode: syncedCreds.voiceSyncMode || "segment",
           actionSfxEnabled: syncedCreds.actionSfxEnabled !== false,
@@ -2049,6 +2077,7 @@ async function handleCallbackQuery(callbackQuery, token, env) {
           channelId,
           scriptText,
           audioUrl: webAudioUrl || null,
+          audioSegments: compactAudioSegments,
           voiceSyncMode: syncedCreds.voiceSyncMode || "segment",
           actionSfxEnabled: syncedCreds.actionSfxEnabled !== false,
           actionSfxVolume: Number.isFinite(Number(syncedCreds.actionSfxVolume)) ? Number(syncedCreds.actionSfxVolume) : 0.2,

@@ -2356,7 +2356,7 @@ export default function App() {
       );
 
       if (session) {
-        const { scriptText, channelId, audioBase64, audioUrl, comparisonImages = [] } = session;
+        const { scriptText, channelId, audioBase64, audioUrl, audioSegments = [], comparisonImages = [] } = session;
         if (session.actionSfxEnabled !== undefined) setActionSfxEnabled(session.actionSfxEnabled);
         if (session.actionSfxVolume !== undefined) setActionSfxVolume(Number(session.actionSfxVolume) || 0.2);
         if (session.actionSfxPresets !== undefined) setActionSfxPresets(normalizeActionSfxPresets(session.actionSfxPresets));
@@ -2379,9 +2379,70 @@ export default function App() {
           }
         }
 
+        const loadSegmentedTelegramAudio = async () => {
+          if (!Array.isArray(audioSegments) || audioSegments.length === 0 || !parsedTelegramScript?.timelineBlocks?.length) {
+            return false;
+          }
+          try {
+            const sourceBlocks = parsedTelegramScript.timelineBlocks.filter(block => String(block.text || '').trim());
+            if (sourceBlocks.length !== audioSegments.length) return false;
+
+            const segmentBlobs = audioSegments.map((segment) => {
+              const cleanBase64 = String(segment?.base64 || '').replace(/^data:[^,]+,/, '');
+              const byteCharacters = atob(cleanBase64);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              return new Blob([new Uint8Array(byteNumbers)], { type: 'audio/mpeg' });
+            });
+
+            const audioBuffers = [];
+            for (const blob of segmentBlobs) {
+              audioBuffers.push(await decodeAudioBlob(blob));
+            }
+
+            const segmentDurations = audioBuffers.map(buffer => buffer.duration);
+            const timed = buildSegmentTimeline(sourceBlocks, segmentDurations, {
+              introDelay: 0,
+              segmentGap: 0.06,
+              outroPadding: 0.22
+            });
+            const actionEvents = buildActionSfxEvents(timed.blocks, {
+              enabled: session.actionSfxEnabled !== false,
+              offset: 0.02
+            });
+            const mergedBuffer = await renderSegmentedAudio({
+              audioBuffers,
+              timelineBlocks: timed.blocks,
+              actionEvents,
+              sfxVolume: Number(session.actionSfxVolume) || 0.2,
+              actionSfxPresets: normalizeActionSfxPresets(session.actionSfxPresets)
+            });
+            const mergedBlob = audioBufferToWavBlob(mergedBuffer);
+            const mergedUrl = URL.createObjectURL(mergedBlob);
+            const filename = 'telegram_segmented_voice.wav';
+
+            setAudioUrl(mergedUrl);
+            setAudioFileName(filename);
+            setTimelineBlocks(timed.blocks);
+            setDuration(Math.max(timed.duration, mergedBuffer.duration));
+            setCurrentTime(0);
+            setIsPlaying(false);
+            await saveAudioToStorage(mergedBlob, filename);
+            rememberCurrentAudioFileName(filename);
+            return true;
+          } catch (segmentErr) {
+            console.warn('Telegram segmented audio restore fallback:', segmentErr);
+            return false;
+          }
+        };
+
+        const restoredSegmentedAudio = await loadSegmentedTelegramAudio();
+
         let localAudioBlobUrl = audioUrl;
         let localAudioBlob = null;
-        if (audioBase64) {
+        if (!restoredSegmentedAudio && audioBase64) {
           try {
             const byteCharacters = atob(audioBase64);
             const byteNumbers = new Array(byteCharacters.length);
@@ -2397,7 +2458,7 @@ export default function App() {
           }
         }
 
-        if (localAudioBlobUrl) {
+        if (!restoredSegmentedAudio && localAudioBlobUrl) {
           const syncLoadedAudio = (targetUrl) => {
             const tempAudio = new Audio(targetUrl);
             tempAudio.onloadedmetadata = async () => {
