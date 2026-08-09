@@ -11,6 +11,7 @@ import {
   buildImageSearchQueries,
   buildManualImageTargetKeyboard,
   cleanTelegramScriptText,
+  splitVoicefreeTextSegments,
   extractComparisonPairs,
   getTelegramImageFileId,
   getTikTokApiErrorMessage,
@@ -117,6 +118,25 @@ describe("Telegram TTS config resolution", () => {
       () => resolveTtsConfig("tts_voicefree", { voicefreeApiKey: "voicefree-key" }, {}),
       /Chưa đồng bộ Voice ID Voicefree/
     );
+  });
+
+  it("uses Eleven v3 as the Voicefree default model to match the Web Tool", () => {
+    const config = resolveTtsConfig("tts_voicefree", {
+      voicefreeApiKey: "voicefree-key",
+      voicefreeVoiceId: "voicefree-id"
+    }, {});
+
+    assert.equal(config.modelId, "eleven_v3");
+  });
+});
+
+describe("Voicefree Telegram text segmentation", () => {
+  it("splits multi-line scripts into sentence-like Voicefree fallback segments", () => {
+    assert.deepEqual(splitVoicefreeTextSegments("Đây là A\n\nĐây là B.\nSự khác nhau là gì?"), [
+      "Đây là A.",
+      "Đây là B.",
+      "Sự khác nhau là gì?"
+    ]);
   });
 });
 

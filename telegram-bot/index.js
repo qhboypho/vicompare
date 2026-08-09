@@ -41,6 +41,20 @@ function firstFilledString(values, { rejectLegacyLucyDefault = false } = {}) {
   return "";
 }
 
+function normalizeVoicefreeModelId(modelId) {
+  const candidate = cleanString(modelId);
+  if (!candidate || candidate === "Eleven v3") return "eleven_v3";
+  return candidate;
+}
+
+export function splitVoicefreeTextSegments(text) {
+  return String(text || "")
+    .split(/\r?\n+/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => /[.!?:…]$/.test(line) ? line : `${line}.`);
+}
+
 
 
 function base64ToArrayBuffer(base64) {
@@ -276,7 +290,7 @@ export function resolveTtsConfig(engineType, syncedCreds = {}, env = {}) {
       host: "api.taovoicefree.com",
       fileName: "voicefree_voice.mp3",
       provider: firstFilledString([syncedCreds.voicefreeProvider, syncedCreds.voicefree_provider, env.VOICEFREE_PROVIDER]) || "elevenlabs",
-      modelId: firstFilledString([syncedCreds.voicefreeModelId, syncedCreds.voicefree_model_id, env.VOICEFREE_MODEL_ID]) || "eleven_multilingual_v2",
+      modelId: normalizeVoicefreeModelId(firstFilledString([syncedCreds.voicefreeModelId, syncedCreds.voicefree_model_id, env.VOICEFREE_MODEL_ID])),
       speed: Number.parseFloat(firstFilledString([syncedCreds.voicefreeSpeed, syncedCreds.voicefree_speed, env.VOICEFREE_SPEED])) || 1.0
     };
   }
@@ -852,6 +866,66 @@ async function pollVoicefreeAudioUrl(apiKey, taskId) {
     }
   }
   throw new Error("Voicefree: Quá thời gian tạo file.");
+}
+
+async function requestVoicefreeAudioBuffer(ttsConfig, text) {
+  const startRes = await fetch(`https://api.taovoicefree.com/v1/text-to-speech/${encodeURIComponent(ttsConfig.voiceId)}`, {
+    method: "POST",
+    headers: {
+      "accept": "application/json",
+      "xi-api-key": ttsConfig.apiKey,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      text: String(text).trim(),
+      provider: ttsConfig.provider || "elevenlabs",
+      model_id: ttsConfig.modelId || "eleven_v3",
+      language_code: "vi",
+      voice_settings: {
+        speed: ttsConfig.speed
+      }
+    })
+  });
+  const startData = await startRes.json().catch(() => ({}));
+  if (!startRes.ok || String(startData.status || "").toLowerCase() === "failed") {
+    throw new Error(startData.message || startData.error || JSON.stringify(startData) || startRes.statusText);
+  }
+
+  const taskId = startData.id || startData.result?.id;
+  if (!taskId) throw new Error("Không nhận được task ID.");
+
+  const audioUrl = await pollVoicefreeAudioUrl(ttsConfig.apiKey, taskId);
+  const audioRes = await fetch(audioUrl);
+  if (!audioRes.ok) {
+    const errText = await audioRes.text().catch(() => "");
+    throw new Error(`Không tải được audio Voicefree: ${errText || audioRes.statusText}`);
+  }
+  return await audioRes.arrayBuffer();
+}
+
+async function requestVoicefreeAudioBufferWithFallback(ttsConfig, scriptText) {
+  try {
+    return await requestVoicefreeAudioBuffer(ttsConfig, scriptText);
+  } catch (wholeTextErr) {
+    const segments = splitVoicefreeTextSegments(scriptText);
+    if (segments.length <= 1) {
+      throw new Error(`Voicefree: ${wholeTextErr.message}`);
+    }
+
+    const chunks = [];
+    for (const segment of segments) {
+      chunks.push(new Uint8Array(await requestVoicefreeAudioBuffer(ttsConfig, segment)));
+    }
+
+    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+    const merged = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return merged.buffer;
+  }
 }
 
 export function buildWebAppUrls({
@@ -1877,34 +1951,7 @@ async function handleCallbackQuery(callbackQuery, token, env) {
         fileName = ttsConfig.fileName;
       } else if (engineType === "tts_voicefree") {
         const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
-        const startRes = await fetch(`https://api.taovoicefree.com/v1/text-to-speech/${encodeURIComponent(ttsConfig.voiceId)}`, {
-          method: "POST",
-          headers: {
-            "accept": "application/json",
-            "xi-api-key": ttsConfig.apiKey,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            text: String(scriptText).trim(),
-            provider: ttsConfig.provider || "elevenlabs",
-            model_id: ttsConfig.modelId || "eleven_multilingual_v2",
-            language_code: "vi",
-            voice_settings: {
-              speed: ttsConfig.speed
-            }
-          })
-        });
-        const startData = await startRes.json().catch(() => ({}));
-        if (!startRes.ok || startData.status === "failed") {
-          throw new Error(`Voicefree API: ${startData.message || startData.error || JSON.stringify(startData) || startRes.statusText}`);
-        }
-
-        const taskId = startData.id || startData.result?.id;
-        if (!taskId) throw new Error("Voicefree: Không nhận được task ID.");
-
-        audioUrlResult = await pollVoicefreeAudioUrl(ttsConfig.apiKey, taskId);
-        const audioRes = await fetch(audioUrlResult);
-        audioBuffer = await audioRes.arrayBuffer();
+        audioBuffer = await requestVoicefreeAudioBufferWithFallback(ttsConfig, scriptText);
         fileName = ttsConfig.fileName;
       }
 
