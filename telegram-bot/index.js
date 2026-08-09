@@ -1053,7 +1053,7 @@ export default {
         }
 
         const settings = (await env.VICOMPARE_KV.get("app_settings", "json")) || null;
-        const credentials = (await env.VICOMPARE_KV.get("app_credentials", "json")) || {};
+        const credentials = await getSyncedCredentials(env);
         return new Response(JSON.stringify({ success: true, hasKv: true, settings, credentials }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
