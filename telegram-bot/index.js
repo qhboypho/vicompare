@@ -15,7 +15,6 @@ const corsHeaders = {
 
 const WORKER_PUBLIC_BASE_URL = "https://vicompare-telegram-bot.qhboypho.workers.dev";
 const IMAGE_SEARCH_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
-const MAX_TELEGRAM_SEGMENT_TTS_LINES = 4;
 
 export const LEGACY_LUCYLAB_DEFAULT_VOICE_ID = "67e37e5c5ffbc46fa2e75e11";
 
@@ -1062,7 +1061,7 @@ function concatArrayBuffers(buffers) {
   return merged.buffer;
 }
 
-async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText, options = {}) {
+async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText) {
   const segments = splitScriptTextSegments(scriptText);
   if (segments.length <= 1) {
     const result = await requestTtsAudioBufferForText(engineType, ttsConfig, scriptText);
@@ -1077,9 +1076,7 @@ async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText, optio
   }
 
   const segmentResults = [];
-  for (let index = 0; index < segments.length; index += 1) {
-    const segment = segments[index];
-    await options.onProgress?.({ index, total: segments.length, text: segment });
+  for (const segment of segments) {
     const result = await requestTtsAudioBufferForText(engineType, ttsConfig, segment);
     segmentResults.push({
       text: segment,
@@ -1097,15 +1094,6 @@ async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText, optio
     audioBuffer: concatArrayBuffers(segmentResults.map(segment => segment.buffer)),
     audioUrlResult: segmentResults[segmentResults.length - 1]?.audioUrl || null,
     audioSegments
-  };
-}
-
-async function requestLongTextTtsAudio(engineType, ttsConfig, scriptText) {
-  const result = await requestTtsAudioBufferForText(engineType, ttsConfig, scriptText);
-  return {
-    audioBuffer: result.buffer,
-    audioUrlResult: result.audioUrl,
-    audioSegments: []
   };
 }
 
@@ -2027,28 +2015,10 @@ async function handleCallbackQuery(callbackQuery, token, env) {
       const syncedCreds = await getSyncedCredentials(env);
       const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
 
-      const scriptSegments = splitScriptTextSegments(scriptText);
-      const shouldUseSegmentedTts = engineType === "tts_voicefree" && scriptSegments.length <= MAX_TELEGRAM_SEGMENT_TTS_LINES;
-      if (engineType === "tts_voicefree" && !shouldUseSegmentedTts) {
-        await sendTelegramMessage(
-          chatId,
-          `🎙️ Kịch bản có ${scriptSegments.length} dòng, tao tạo voice một lần để tránh treo Telegram. Web Tool sẽ tự căn lại nhịp khi mở preview.`,
-          token
-        );
-      }
-
-      const ttsResult = shouldUseSegmentedTts
-        ? await requestSegmentedTtsAudio(engineType, ttsConfig, scriptText, {
-            onProgress: async ({ index, total }) => {
-              if (index === 0 || index % 3 === 0) {
-                await sendTelegramMessage(chatId, `🎙️ Đang tạo voice từng câu ${index + 1}/${total} để khớp sub chuẩn...`, token);
-              }
-            }
-          })
-        : await requestLongTextTtsAudio(engineType, ttsConfig, scriptText);
-      audioBuffer = ttsResult.audioBuffer;
-      audioUrlResult = ttsResult.audioUrlResult;
-      audioSegments = ttsResult.audioSegments;
+      const segmentedResult = await requestSegmentedTtsAudio(engineType, ttsConfig, scriptText);
+      audioBuffer = segmentedResult.audioBuffer;
+      audioUrlResult = segmentedResult.audioUrlResult;
+      audioSegments = segmentedResult.audioSegments;
       fileName = ttsConfig.fileName;
 
       if (audioBuffer) {
