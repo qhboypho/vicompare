@@ -46,177 +46,8 @@ function getCanvasFontFamily(fontFamily, fallback = '"Be Vietnam Pro", Arial, sa
   return value.includes(',') ? value : `"${value.replace(/"/g, '\\"')}", Arial, sans-serif`;
 }
 
-const COMPARISON_IMAGE_CACHE_KEY = '_comparisonPreparedImage_v2';
 const MASCOT_TRANSPARENCY_VERSION = 'v22';
 const mascotTransparencyCache = new WeakMap();
-
-function parseHexColor(color) {
-  if (typeof color !== 'string') return null;
-  let hex = color.trim().replace('#', '');
-  if (hex.length === 3) hex = hex.split('').map(ch => ch + ch).join('');
-  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return null;
-  return {
-    r: parseInt(hex.slice(0, 2), 16),
-    g: parseInt(hex.slice(2, 4), 16),
-    b: parseInt(hex.slice(4, 6), 16)
-  };
-}
-
-function getPanelBackgroundColor(bgColorStr) {
-  const colorTokens = typeof bgColorStr === 'string'
-    ? bgColorStr.match(/#[0-9a-fA-F]{3,8}/g)
-    : null;
-  const base = parseHexColor(colorTokens?.[0] || bgColorStr) || { r: 15, g: 23, b: 42 };
-  const luminance = (0.2126 * base.r + 0.7152 * base.g + 0.0722 * base.b) / 255;
-
-  if (luminance > 0.55) return '#111827';
-
-  const factor = 0.62;
-  const r = Math.max(3, Math.round(base.r * factor));
-  const g = Math.max(4, Math.round(base.g * factor));
-  const b = Math.max(9, Math.round(base.b * factor));
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-function getPreparedComparisonImage(img) {
-  if (!img || !img.width || !img.height) return null;
-  if (img[COMPARISON_IMAGE_CACHE_KEY]) return img[COMPARISON_IMAGE_CACHE_KEY];
-
-  const naturalW = img.naturalWidth || img.videoWidth || img.width || 1;
-  const naturalH = img.naturalHeight || img.videoHeight || img.height || 1;
-  const canvas = document.createElement('canvas');
-  canvas.width = naturalW;
-  canvas.height = naturalH;
-  const trimCtx = canvas.getContext('2d', { willReadFrequently: true });
-
-  try {
-    trimCtx.drawImage(img, 0, 0, naturalW, naturalH);
-    const imgData = trimCtx.getImageData(0, 0, naturalW, naturalH);
-    const { data } = imgData;
-    const maxTrimX = Math.floor(naturalW * 0.28);
-    const maxTrimY = Math.floor(naturalH * 0.28);
-    const isBg = (index) => {
-      const r = data[index];
-      const g = data[index + 1];
-      const b = data[index + 2];
-      const a = data[index + 3];
-      const max = Math.max(r, g, b);
-      const min = Math.min(r, g, b);
-      const lowSaturation = max - min < 82;
-      const whiteOrLightGray = max > 166 && min > 138 && lowSaturation;
-      const brightWash = max > 196 && lowSaturation;
-      return a < 32 || whiteOrLightGray || brightWash;
-    };
-
-    const queue = [];
-    const seen = new Uint8Array(naturalW * naturalH);
-    const enqueue = (x, y) => {
-      if (x < 0 || y < 0 || x >= naturalW || y >= naturalH) return;
-      const pos = y * naturalW + x;
-      if (seen[pos]) return;
-      const index = pos * 4;
-      if (!isBg(index)) return;
-      seen[pos] = 1;
-      queue.push(pos);
-    };
-
-    for (let x = 0; x < naturalW; x += 1) {
-      enqueue(x, 0);
-      enqueue(x, naturalH - 1);
-    }
-    for (let y = 0; y < naturalH; y += 1) {
-      enqueue(0, y);
-      enqueue(naturalW - 1, y);
-    }
-
-    for (let cursor = 0; cursor < queue.length; cursor += 1) {
-      const pos = queue[cursor];
-      const x = pos % naturalW;
-      const y = Math.floor(pos / naturalW);
-      enqueue(x + 1, y);
-      enqueue(x - 1, y);
-      enqueue(x, y + 1);
-      enqueue(x, y - 1);
-    }
-
-    const edgeBg = new Set(queue);
-    for (const pos of queue) {
-      data[pos * 4 + 3] = 0;
-    }
-
-    const shouldRemoveFringe = (x, y) => {
-      const pos = y * naturalW + x;
-      if (edgeBg.has(pos)) return false;
-      if (!isBg(pos * 4)) return false;
-      for (let dy = -4; dy <= 4; dy += 1) {
-        for (let dx = -4; dx <= 4; dx += 1) {
-          if (dx === 0 && dy === 0) continue;
-          const nx = x + dx;
-          const ny = y + dy;
-          if (nx < 0 || ny < 0 || nx >= naturalW || ny >= naturalH) continue;
-          if (edgeBg.has(ny * naturalW + nx)) return true;
-        }
-      }
-      return false;
-    };
-
-    const fringe = [];
-    for (let y = 0; y < naturalH; y += 1) {
-      for (let x = 0; x < naturalW; x += 1) {
-        if (shouldRemoveFringe(x, y)) fringe.push(y * naturalW + x);
-      }
-    }
-    for (const pos of fringe) {
-      data[pos * 4 + 3] = 0;
-    }
-
-    trimCtx.putImageData(imgData, 0, 0);
-
-    const rowIsBg = (y) => {
-      let count = 0;
-      for (let x = 0; x < naturalW; x += 1) {
-        if (isBg((y * naturalW + x) * 4)) count += 1;
-      }
-      return count / naturalW > 0.72;
-    };
-    const colIsBg = (x) => {
-      let count = 0;
-      for (let y = 0; y < naturalH; y += 1) {
-        if (isBg((y * naturalW + x) * 4)) count += 1;
-      }
-      return count / naturalH > 0.72;
-    };
-
-    let left = 0;
-    let right = naturalW;
-    let top = 0;
-    let bottom = naturalH;
-
-    while (top < maxTrimY && rowIsBg(top)) top += 1;
-    while (bottom > naturalH - maxTrimY && rowIsBg(bottom - 1)) bottom -= 1;
-    while (left < maxTrimX && colIsBg(left)) left += 1;
-    while (right > naturalW - maxTrimX && colIsBg(right - 1)) right -= 1;
-
-    if (right - left < naturalW * 0.5 || bottom - top < naturalH * 0.5) {
-      img[COMPARISON_IMAGE_CACHE_KEY] = {
-        drawable: canvas,
-        bounds: { x: 0, y: 0, width: naturalW, height: naturalH }
-      };
-    } else {
-      img[COMPARISON_IMAGE_CACHE_KEY] = {
-        drawable: canvas,
-        bounds: { x: left, y: top, width: right - left, height: bottom - top }
-      };
-    }
-  } catch {
-    img[COMPARISON_IMAGE_CACHE_KEY] = {
-      drawable: img,
-      bounds: { x: 0, y: 0, width: naturalW, height: naturalH }
-    };
-  }
-
-  return img[COMPARISON_IMAGE_CACHE_KEY];
-}
 
 function rgbToHsv(r, g, b) {
   const red = r / 255;
@@ -855,7 +686,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
   // 2. Draw Background
   const bgColorStr = state.bgColor || '#FAF6F0';
-  const panelBackgroundColor = getPanelBackgroundColor(bgColorStr);
+  const comparisonPanelBackgroundColor = '#F8F4EC';
   if (bgColorStr.startsWith('linear-gradient')) {
     try {
       const colors = bgColorStr.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/g);
@@ -1088,7 +919,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 0;
     drawRoundedRect(ctx, layout.x, layout.y, layout.w, layout.h, 16);
-    ctx.fillStyle = panelBackgroundColor;
+    ctx.fillStyle = comparisonPanelBackgroundColor;
     ctx.fill();
     ctx.shadowBlur = 16;
     ctx.globalAlpha = Math.min(0.75, effectiveAlpha * 0.75);
@@ -1109,7 +940,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     // Draw rounded clipping mask (acts as overflow: hidden)
     drawRoundedRect(ctx, x, y, width, height, 16);
     ctx.clip();
-    ctx.fillStyle = panelBackgroundColor;
+    ctx.fillStyle = comparisonPanelBackgroundColor;
     ctx.fillRect(x - 2, y - 2, width + 4, height + 4);
 
     const hasImage = Boolean(imgUrl && loadedImages[imgUrl]);
@@ -1119,40 +950,35 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
 
       const naturalW = img.naturalWidth || img.videoWidth || img.width || 1;
       const naturalH = img.naturalHeight || img.videoHeight || img.height || 1;
-      const prepared = getPreparedComparisonImage(img) || {
-        drawable: img,
-        bounds: { x: 0, y: 0, width: naturalW, height: naturalH }
-      };
-      const trimBounds = prepared.bounds;
       const edgeBleed = Math.max(4, Math.ceil(Math.max(width, height) * 0.025));
       const destX = x - edgeBleed;
       const destY = y - edgeBleed;
       const destW = width + edgeBleed * 2;
       const destH = height + edgeBleed * 2;
       const targetRatio = destW / destH;
-      const imgRatio = trimBounds.width / trimBounds.height;
+      const imgRatio = naturalW / naturalH;
       const sideZoom = side === 'left' ? (activeComp.leftZoom || 100) : (activeComp.rightZoom || 100);
       const zoomFactor = Math.max(1, (state.globalImageZoom ?? 100) / 100) * Math.max(1, sideZoom / 100);
 
-      let sourceW = trimBounds.width;
-      let sourceH = trimBounds.height;
+      let sourceW = naturalW;
+      let sourceH = naturalH;
       if (imgRatio > targetRatio) {
-        sourceW = trimBounds.height * targetRatio;
+        sourceW = naturalH * targetRatio;
       } else {
-        sourceH = trimBounds.width / targetRatio;
+        sourceH = naturalW / targetRatio;
       }
 
-      sourceW = Math.max(1, Math.min(trimBounds.width, sourceW / zoomFactor));
-      sourceH = Math.max(1, Math.min(trimBounds.height, sourceH / zoomFactor));
+      sourceW = Math.max(1, Math.min(naturalW, sourceW / zoomFactor));
+      sourceH = Math.max(1, Math.min(naturalH, sourceH / zoomFactor));
 
-      const sourceX = trimBounds.x + Math.max(0, (trimBounds.width - sourceW) / 2);
-      const sourceY = trimBounds.y + Math.max(0, (trimBounds.height - sourceH) / 2);
+      const sourceX = Math.max(0, (naturalW - sourceW) / 2);
+      const sourceY = Math.max(0, (naturalH - sourceH) / 2);
 
-      ctx.drawImage(prepared.drawable, sourceX, sourceY, sourceW, sourceH, destX, destY, destW, destH);
+      ctx.drawImage(img, sourceX, sourceY, sourceW, sourceH, destX, destY, destW, destH);
     } else {
       // Placeholder if no image
       ctx.font = 'italic 18px sans-serif';
-      ctx.fillStyle = 'rgba(226, 232, 240, 0.58)';
+      ctx.fillStyle = 'rgba(31, 41, 55, 0.55)';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('Chưa tải ảnh', x + width / 2, y + height / 2);
