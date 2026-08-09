@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   LEGACY_LUCYLAB_DEFAULT_VOICE_ID,
+  buildCredentialsFromAppSettings,
   resolveTtsConfig,
   pickVoiceCandidate,
   readExportResult,
@@ -175,6 +176,27 @@ describe("synced credential merging", () => {
     assert.equal(merged.vclipApiKey, "old-vclip-key");
     assert.equal(merged.vclipVoiceId, "8GNXzqzEk4AXq64rmSwqtW");
     assert.equal(merged.lucyLabVoiceId, "new-lucy-voice");
+  });
+
+  it("mirrors current Voicefree app settings over stale Telegram credentials", () => {
+    const mirrored = buildCredentialsFromAppSettings({
+      credentials: {
+        voicefreeApiKey: "voicefree-key",
+        voicefreeVoiceId: "voice-id",
+        voicefreeProvider: "elevenlabs",
+        voicefreeModelId: "eleven_v3",
+        voicefreeSpeed: 1
+      },
+      voicefreeVoiceId: "voice-id",
+      voicefreeProvider: "minimax",
+      voicefreeModelId: "speech-2.8-hd",
+      voicefreeSpeed: 0.95
+    });
+
+    const config = resolveTtsConfig("tts_voicefree", mirrored, {});
+    assert.equal(config.provider, "minimax");
+    assert.equal(config.modelId, "speech-2.8-hd");
+    assert.equal(config.speed, 0.95);
   });
 });
 

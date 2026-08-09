@@ -41,6 +41,15 @@ function firstFilledString(values, { rejectLegacyLucyDefault = false } = {}) {
   return "";
 }
 
+function firstFiniteNumber(values, fallback = 1.0) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") continue;
+    const candidate = typeof value === "number" ? value : Number.parseFloat(value);
+    if (Number.isFinite(candidate)) return candidate;
+  }
+  return fallback;
+}
+
 function normalizeVoicefreeModelId(modelId) {
   const candidate = cleanString(modelId);
   if (!candidate || candidate === "Eleven v3") return "eleven_v3";
@@ -83,6 +92,33 @@ export function mergeSyncedCredentials(existing = {}, incoming = {}) {
   }
 
   return next;
+}
+
+export function buildCredentialsFromAppSettings(settings = {}) {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return {};
+  const credentials = settings.credentials && typeof settings.credentials === "object" && !Array.isArray(settings.credentials)
+    ? { ...settings.credentials }
+    : {};
+
+  const mirrorSetting = (settingsKey, credentialKey) => {
+    const value = settings[settingsKey];
+    if (value === undefined || value === null) return;
+    if (typeof value === "string" && cleanString(value) === "") return;
+    credentials[credentialKey] = value;
+  };
+
+  mirrorSetting("selectedVoiceId", "selectedVoiceId");
+  mirrorSetting("selectedVoiceId", "elevenLabsVoiceId");
+  mirrorSetting("vclipVoiceId", "vclipVoiceId");
+  mirrorSetting("vclipSpeed", "vclipSpeed");
+  mirrorSetting("lucyLabVoiceId", "lucyLabVoiceId");
+  mirrorSetting("lucyLabSpeed", "lucyLabSpeed");
+  mirrorSetting("voicefreeVoiceId", "voicefreeVoiceId");
+  mirrorSetting("voicefreeProvider", "voicefreeProvider");
+  mirrorSetting("voicefreeModelId", "voicefreeModelId");
+  mirrorSetting("voicefreeSpeed", "voicefreeSpeed");
+
+  return credentials;
 }
 
 export function cleanTelegramScriptText(text) {
@@ -291,7 +327,7 @@ export function resolveTtsConfig(engineType, syncedCreds = {}, env = {}) {
       fileName: "voicefree_voice.mp3",
       provider: firstFilledString([syncedCreds.voicefreeProvider, syncedCreds.voicefree_provider, env.VOICEFREE_PROVIDER]) || "elevenlabs",
       modelId: normalizeVoicefreeModelId(firstFilledString([syncedCreds.voicefreeModelId, syncedCreds.voicefree_model_id, env.VOICEFREE_MODEL_ID])),
-      speed: Number.parseFloat(firstFilledString([syncedCreds.voicefreeSpeed, syncedCreds.voicefree_speed, env.VOICEFREE_SPEED])) || 1.0
+      speed: firstFiniteNumber([syncedCreds.voicefreeSpeed, syncedCreds.voicefree_speed, env.VOICEFREE_SPEED], 1.0)
     };
   }
 
@@ -1060,9 +1096,10 @@ export default {
           updatedAt: new Date().toISOString()
         }));
 
-        if (settings.credentials) {
+        const settingsCredentials = buildCredentialsFromAppSettings(settings);
+        if (Object.keys(settingsCredentials).length > 0) {
           const existingCredentials = (await env.VICOMPARE_KV.get("app_credentials", "json")) || {};
-          const mergedCredentials = mergeSyncedCredentials(existingCredentials, settings.credentials);
+          const mergedCredentials = mergeSyncedCredentials(existingCredentials, settingsCredentials);
           await env.VICOMPARE_KV.put("app_credentials", JSON.stringify(mergedCredentials));
         }
 
@@ -1134,7 +1171,7 @@ export default {
       };
 
       if (env.VICOMPARE_KV) {
-        const credentials = (await env.VICOMPARE_KV.get("app_credentials", "json")) || {};
+        const credentials = await getSyncedCredentials(env);
         status.hasCredentials = Object.keys(credentials).length > 0;
         status.hasVclipApiKey = Boolean(cleanString(credentials.vclipApiKey));
         status.vclipVoiceId = resolveSyncedVoiceId("tts_vclip", credentials);
@@ -1144,6 +1181,9 @@ export default {
         status.elevenLabsVoiceId = resolveSyncedVoiceId("tts_eleven", credentials);
         status.hasVoicefreeApiKey = Boolean(cleanString(credentials.voicefreeApiKey || credentials.voicefree_api_key));
         status.voicefreeVoiceId = resolveSyncedVoiceId("tts_voicefree", credentials);
+        status.voicefreeProvider = firstFilledString([credentials.voicefreeProvider, credentials.voicefree_provider]);
+        status.voicefreeModelId = firstFilledString([credentials.voicefreeModelId, credentials.voicefree_model_id]);
+        status.voicefreeSpeed = credentials.voicefreeSpeed ?? credentials.voicefree_speed ?? null;
       }
 
       return new Response(JSON.stringify(status), {
@@ -2331,7 +2371,9 @@ export function resolveTikTokCredentials(syncedCreds = {}, env = {}) {
 async function getSyncedCredentials(env) {
   try {
     if (env.VICOMPARE_KV) {
-      return (await env.VICOMPARE_KV.get("app_credentials", "json")) || {};
+      const storedCredentials = (await env.VICOMPARE_KV.get("app_credentials", "json")) || {};
+      const settings = (await env.VICOMPARE_KV.get("app_settings", "json")) || {};
+      return mergeSyncedCredentials(storedCredentials, buildCredentialsFromAppSettings(settings));
     }
   } catch (e) {}
   return {};
