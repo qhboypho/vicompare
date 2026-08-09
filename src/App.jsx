@@ -5088,7 +5088,13 @@ export default function App() {
         ttsCredentialOverrides.vclipVoiceId = nextVclipVoiceId;
       }
       const nextVclipSpeed = readConfigValue('vclipSpeed', 'vclip_speed');
-      if (nextVclipSpeed !== undefined) setVclipSpeed(nextVclipSpeed);
+      if (nextVclipSpeed !== undefined) {
+        const normalizedVclipSpeed = Number.parseFloat(nextVclipSpeed);
+        const speedToUse = Number.isFinite(normalizedVclipSpeed) ? normalizedVclipSpeed : nextVclipSpeed;
+        setVclipSpeed(speedToUse);
+        localStorage.setItem('vclipSpeed', speedToUse.toString());
+        ttsCredentialOverrides.vclipSpeed = speedToUse;
+      }
       const lucyKey = readConfigValue('lucyLabApiKey', 'lucylab_api_key', 'lucy_lab_api_key');
       if (lucyKey !== undefined) {
         setLucyLabApiKey(lucyKey);
@@ -5125,13 +5131,25 @@ export default function App() {
         localStorage.setItem('voicefree_model_id', nextVoicefreeModelId);
         ttsCredentialOverrides.voicefreeModelId = nextVoicefreeModelId;
       }
+      const nextLucyLabSpeed = readConfigValue('lucyLabSpeed', 'lucylabSpeed', 'lucy_lab_speed');
+      const nextVoicefreeSpeed = readConfigValue('voicefreeSpeed', 'voicefree_speed');
+      if (nextLucyLabSpeed !== undefined) {
+        const normalizedLucySpeed = Number.parseFloat(nextLucyLabSpeed);
+        const speedToUse = Number.isFinite(normalizedLucySpeed) ? normalizedLucySpeed : nextLucyLabSpeed;
+        setLucyLabSpeed(speedToUse);
+        localStorage.setItem('lucyLabSpeed', speedToUse.toString());
+        ttsCredentialOverrides.lucyLabSpeed = speedToUse;
+      }
+      if (nextVoicefreeSpeed !== undefined) {
+        const normalizedVoicefreeSpeed = Number.parseFloat(nextVoicefreeSpeed);
+        const speedToUse = Number.isFinite(normalizedVoicefreeSpeed) ? normalizedVoicefreeSpeed : nextVoicefreeSpeed;
+        setVoicefreeSpeed(speedToUse);
+        localStorage.setItem('voicefree_speed', speedToUse.toString());
+        ttsCredentialOverrides.voicefreeSpeed = speedToUse;
+      }
       if (Object.keys(ttsCredentialOverrides).length > 0) {
         scheduleTelegramCredentialSync(ttsCredentialOverrides);
       }
-      const nextLucyLabSpeed = readConfigValue('lucyLabSpeed', 'lucylabSpeed', 'lucy_lab_speed');
-      const nextVoicefreeSpeed = readConfigValue('voicefreeSpeed', 'voicefree_speed');
-      if (nextLucyLabSpeed !== undefined) setLucyLabSpeed(nextLucyLabSpeed);
-      if (nextVoicefreeSpeed !== undefined) setVoicefreeSpeed(nextVoicefreeSpeed);
       if (config.stability !== undefined) setStability(config.stability);
       if (config.similarityBoost !== undefined) setSimilarityBoost(config.similarityBoost);
       if (config.styleExaggeration !== undefined) setStyleExaggeration(config.styleExaggeration);

@@ -7,6 +7,7 @@ import {
   pickVoiceCandidate,
   readExportResult,
   buildWebAppUrls,
+  buildTtsEngineKeyboard,
   buildImageSearchQueries,
   buildManualImageTargetKeyboard,
   cleanTelegramScriptText,
@@ -116,6 +117,15 @@ describe("Telegram TTS config resolution", () => {
       () => resolveTtsConfig("tts_voicefree", { voicefreeApiKey: "voicefree-key" }, {}),
       /Chưa đồng bộ Voice ID Voicefree/
     );
+  });
+});
+
+describe("Telegram TTS engine keyboard", () => {
+  it("includes Voicefree as a selectable Telegram TTS engine", () => {
+    const keyboard = buildTtsEngineKeyboard("cat-thong-thai");
+    const callbackData = keyboard.inline_keyboard.flat().map(button => button.callback_data);
+
+    assert.ok(callbackData.includes("tts_voicefree|cat-thong-thai"));
   });
 });
 

@@ -197,6 +197,26 @@ function resolveSyncedVoiceId(engineType, syncedCreds = {}) {
   return "";
 }
 
+export function buildTtsEngineKeyboard(channelId) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "🎙️ ElevenLabs", callback_data: `tts_eleven|${channelId}` },
+        { text: "🎙️ LucyLab", callback_data: `tts_lucy|${channelId}` }
+      ],
+      [
+        { text: "🎙️ VClip", callback_data: `tts_vclip|${channelId}` }
+      ],
+      [
+        { text: "🎙️ Voicefree", callback_data: `tts_voicefree|${channelId}` }
+      ],
+      [
+        { text: "🎙️ Local Clone", callback_data: `tts_local|${channelId}` }
+      ]
+    ]
+  };
+}
+
 export function resolveTtsConfig(engineType, syncedCreds = {}, env = {}) {
   if (engineType === "tts_eleven") {
     const voiceId = resolveSyncedVoiceId(engineType, syncedCreds);
@@ -1706,23 +1726,7 @@ async function handleCallbackQuery(callbackQuery, token, env) {
     // Trích xuất kịch bản từ nội dung tin nhắn cũ
     const scriptText = cleanTelegramScriptText(messageText);
 
-    const voiceMarkup = {
-      inline_keyboard: [
-        [
-          { text: "🎙️ ElevenLabs", callback_data: `tts_eleven|${channelId}` },
-          { text: "🎙️ LucyLab", callback_data: `tts_lucy|${channelId}` }
-        ],
-        [
-          { text: "🎙️ VClip", callback_data: `tts_vclip|${channelId}` }
-        ],
-        [
-          { text: "🎙️ Voicefree", callback_data: `tts_voicefree|${channelId}` }
-        ],
-        [
-          { text: "🎙️ Local Clone", callback_data: `tts_local|${channelId}` }
-        ]
-      ]
-    };
+    const voiceMarkup = buildTtsEngineKeyboard(channelId);
 
     const nextText = `📝 **Kịch bản đề xuất:**\n\n${scriptText}\n\n📺 **Kênh đã chọn:** ${selectedProfile.name}\n👇 **Bước 2/2: Chọn Động cơ Giọng đọc TTS:**`;
     const edited = await editTelegramMessageText(
