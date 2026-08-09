@@ -47,6 +47,8 @@ function getCanvasFontFamily(fontFamily, fallback = '"Be Vietnam Pro", Arial, sa
 }
 
 const COMPARISON_IMAGE_CACHE_KEY = '_comparisonPreparedImage_v2';
+const MASCOT_TRANSPARENCY_VERSION = 'v22';
+const mascotTransparencyCache = new WeakMap();
 
 function parseHexColor(color) {
   if (typeof color !== 'string') return null;
@@ -216,6 +218,432 @@ function getPreparedComparisonImage(img) {
   return img[COMPARISON_IMAGE_CACHE_KEY];
 }
 
+function rgbToHsv(r, g, b) {
+  const red = r / 255;
+  const green = g / 255;
+  const blue = b / 255;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const delta = max - min;
+  let hue = 0;
+
+  if (delta > 0) {
+    if (max === red) hue = 60 * (((green - blue) / delta) % 6);
+    else if (max === green) hue = 60 * (((blue - red) / delta) + 2);
+    else hue = 60 * (((red - green) / delta) + 4);
+  }
+  if (hue < 0) hue += 360;
+
+  return { hue, saturation: max === 0 ? 0 : delta / max, value: max };
+}
+
+function hueDistance(left, right) {
+  const distance = Math.abs(left - right);
+  return Math.min(distance, 360 - distance);
+}
+
+function isGreenCandidate(r, g, b) {
+  const hsv = rgbToHsv(r, g, b);
+  return hsv.hue >= 72 && hsv.hue <= 168 && hsv.saturation >= 0.28 && g - Math.max(r, b) >= 8;
+}
+
+function isWhiteCandidate(r, g, b, threshold = 230) {
+  const hsv = rgbToHsv(r, g, b);
+  return hsv.value >= Math.max(0.72, (threshold - 18) / 255) && hsv.saturation <= 0.2;
+}
+
+function getBorderPositions(width, height) {
+  const positions = [];
+  const inset = Math.max(1, Math.min(5, Math.floor(Math.min(width, height) * 0.01)));
+  for (let offset = 0; offset < inset; offset += 1) {
+    for (let x = offset; x < width - offset; x += 1) {
+      positions.push(offset * width + x, (height - 1 - offset) * width + x);
+    }
+    for (let y = offset + 1; y < height - 1 - offset; y += 1) {
+      positions.push(y * width + offset, y * width + (width - 1 - offset));
+    }
+  }
+  return positions;
+}
+
+function detectMascotBackgroundMode(data, borderPositions, requestedMode = 'auto', threshold = 230) {
+  if (requestedMode === 'green' || requestedMode === 'white' || requestedMode === 'none') {
+    return requestedMode;
+  }
+
+  let green = 0;
+  let white = 0;
+  let visible = 0;
+  for (const pos of borderPositions) {
+    const i = pos * 4;
+    if (data[i + 3] < 10) continue;
+    visible += 1;
+    if (isGreenCandidate(data[i], data[i + 1], data[i + 2])) green += 1;
+    if (isWhiteCandidate(data[i], data[i + 1], data[i + 2], threshold)) white += 1;
+  }
+
+  if (!visible) return 'none';
+  if (white > green && white / visible >= 0.12) return 'white';
+  if (green / visible >= 0.12) return 'green';
+  return 'none';
+}
+
+function buildGreenBackgroundModel(data, borderPositions) {
+  let hueX = 0;
+  let hueY = 0;
+  let saturation = 0;
+  let value = 0;
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  let count = 0;
+
+  for (const pos of borderPositions) {
+    const i = pos * 4;
+    if (data[i + 3] < 10 || !isGreenCandidate(data[i], data[i + 1], data[i + 2])) continue;
+    const hsv = rgbToHsv(data[i], data[i + 1], data[i + 2]);
+    const radians = hsv.hue * Math.PI / 180;
+    hueX += Math.cos(radians);
+    hueY += Math.sin(radians);
+    saturation += hsv.saturation;
+    value += hsv.value;
+    red += data[i];
+    green += data[i + 1];
+    blue += data[i + 2];
+    count += 1;
+  }
+
+  if (!count) {
+    return {
+      hue: 120,
+      saturation: 0.75,
+      value: 0.75,
+      red: 0,
+      green: 220,
+      blue: 25,
+      colorRadius: 42
+    };
+  }
+  let hue = Math.atan2(hueY / count, hueX / count) * 180 / Math.PI;
+  if (hue < 0) hue += 360;
+  const model = {
+    hue,
+    saturation: saturation / count,
+    value: value / count,
+    red: red / count,
+    green: green / count,
+    blue: blue / count
+  };
+  let totalDistance = 0;
+  let totalDistanceSquared = 0;
+  for (const pos of borderPositions) {
+    const i = pos * 4;
+    if (data[i + 3] < 10 || !isGreenCandidate(data[i], data[i + 1], data[i + 2])) continue;
+    const distance = Math.hypot(data[i] - model.red, data[i + 1] - model.green, data[i + 2] - model.blue);
+    totalDistance += distance;
+    totalDistanceSquared += distance * distance;
+  }
+  const averageDistance = totalDistance / count;
+  const standardDeviation = Math.sqrt(Math.max(0, (totalDistanceSquared / count) - (averageDistance * averageDistance)));
+  model.colorRadius = Math.min(78, Math.max(26, averageDistance + standardDeviation * 2.2 + 12));
+  return model;
+}
+
+export function processMascotTransparencyImageData(imgData, width, height, options = {}) {
+  if (!imgData || !imgData.data || !width || !height) return imgData;
+
+  const threshold = Number.isFinite(options.threshold) ? options.threshold : 230;
+  const borderPositions = getBorderPositions(width, height);
+  const effectiveMode = detectMascotBackgroundMode(
+    imgData.data,
+    borderPositions,
+    options.mode || 'auto',
+    threshold
+  );
+  if (effectiveMode === 'none') return imgData;
+
+  const data = imgData.data;
+  const pixelCount = width * height;
+  const removed = new Uint8Array(pixelCount);
+  const visited = new Uint8Array(pixelCount);
+  const queue = new Int32Array(pixelCount);
+  let queueHead = 0;
+  let queueTail = 0;
+  const greenModel = effectiveMode === 'green'
+    ? buildGreenBackgroundModel(data, borderPositions)
+    : null;
+
+  const matchesBorderGreen = (pos) => {
+    const i = pos * 4;
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    if (!isGreenCandidate(r, g, b)) return false;
+    const hsv = rgbToHsv(r, g, b);
+    const colorDistance = Math.hypot(r - greenModel.red, g - greenModel.green, b - greenModel.blue);
+    return (
+      hueDistance(hsv.hue, greenModel.hue) <= 30 &&
+      hsv.saturation >= Math.max(0.24, greenModel.saturation * 0.32) &&
+      hsv.value >= Math.max(0.18, greenModel.value * 0.2) &&
+      colorDistance <= greenModel.colorRadius
+    );
+  };
+
+  const isBackground = (pos, fromPos = null) => {
+    const i = pos * 4;
+    const a = data[i + 3];
+    if (a < 12) return true;
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    if (effectiveMode === 'white') return isWhiteCandidate(r, g, b, threshold);
+
+    const matchesBorderColor = matchesBorderGreen(pos);
+    if (matchesBorderColor || fromPos === null) return matchesBorderColor;
+
+    const hsv = rgbToHsv(r, g, b);
+    const fromIndex = fromPos * 4;
+    const fromHsv = rgbToHsv(data[fromIndex], data[fromIndex + 1], data[fromIndex + 2]);
+    const localColorDistance = Math.hypot(r - data[fromIndex], g - data[fromIndex + 1], b - data[fromIndex + 2]);
+    return (
+      hueDistance(hsv.hue, fromHsv.hue) <= 12 &&
+      localColorDistance <= 34 &&
+      hsv.saturation >= 0.24 &&
+      g - Math.max(r, b) >= 8
+    );
+  };
+
+  const isPotentialEnclosedGreenBackground = (pos) => {
+    const i = pos * 4;
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    if (!isGreenCandidate(r, g, b)) return false;
+    const hsv = rgbToHsv(r, g, b);
+    const colorDistance = Math.hypot(r - greenModel.red, g - greenModel.green, b - greenModel.blue);
+    return (
+      hueDistance(hsv.hue, greenModel.hue) <= 34 &&
+      hsv.saturation >= Math.max(0.4, greenModel.saturation * 0.42) &&
+      hsv.value >= 0.04 &&
+      colorDistance <= Math.max(230, greenModel.colorRadius * 7)
+    );
+  };
+
+  const enqueue = (pos, fromPos = null) => {
+    if (pos < 0 || pos >= pixelCount) return;
+    if (visited[pos] || !isBackground(pos, fromPos)) return;
+    visited[pos] = 1;
+    removed[pos] = 1;
+    queue[queueTail] = pos;
+    queueTail += 1;
+  };
+
+  for (const pos of borderPositions) enqueue(pos);
+
+  while (queueHead < queueTail) {
+    const pos = queue[queueHead];
+    queueHead += 1;
+    const x = pos % width;
+    const y = Math.floor(pos / width);
+    if (x + 1 < width) enqueue(pos + 1, pos);
+    if (x > 0) enqueue(pos - 1, pos);
+    if (y + 1 < height) enqueue(pos + width, pos);
+    if (y > 0) enqueue(pos - width, pos);
+  }
+
+  // Remove enclosed pockets only when their pixels still match the exact border-screen model.
+  // A greener/darker object detail is deliberately excluded from this pass.
+  if (effectiveMode === 'green') {
+    const componentVisited = new Uint8Array(pixelCount);
+    const componentQueue = new Int32Array(pixelCount);
+    for (let start = 0; start < pixelCount; start += 1) {
+      if (removed[start] || componentVisited[start] || !isPotentialEnclosedGreenBackground(start)) continue;
+      let head = 0;
+      let tail = 0;
+      componentQueue[tail++] = start;
+      componentVisited[start] = 1;
+      while (head < tail) {
+        const pos = componentQueue[head++];
+        const x = pos % width;
+        const y = Math.floor(pos / width);
+        const neighbors = [
+          x + 1 < width ? pos + 1 : -1,
+          x > 0 ? pos - 1 : -1,
+          y + 1 < height ? pos + width : -1,
+          y > 0 ? pos - width : -1
+        ];
+        for (const next of neighbors) {
+          if (
+            next < 0 ||
+            removed[next] ||
+            componentVisited[next] ||
+            !isPotentialEnclosedGreenBackground(next)
+          ) continue;
+          componentVisited[next] = 1;
+          componentQueue[tail++] = next;
+        }
+      }
+      let screenLikePixels = 0;
+      let shadowPixels = 0;
+      for (let index = 0; index < tail; index += 1) {
+        const pos = componentQueue[index];
+        const i = pos * 4;
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const hsv = rgbToHsv(r, g, b);
+        const modelDistance = Math.hypot(
+          r - greenModel.red,
+          g - greenModel.green,
+          b - greenModel.blue
+        );
+        if (
+          modelDistance <= greenModel.colorRadius * 1.18 &&
+          hsv.value >= greenModel.value * 0.62
+        ) {
+          screenLikePixels += 1;
+        }
+        if (
+          hueDistance(hsv.hue, greenModel.hue) <= 24 &&
+          hsv.saturation >= Math.max(0.55, greenModel.saturation * 0.58) &&
+          hsv.value <= greenModel.value * 0.78
+        ) {
+          shadowPixels += 1;
+        }
+      }
+
+      const screenLikeRatio = screenLikePixels / tail;
+      const shadowRatio = shadowPixels / tail;
+      // Trapped screen areas either retain a strong sample of the calibrated
+      // border color or form a consistently darker shadow of that same chroma.
+      // Component size alone is never evidence: a mascot may contain green props.
+      if (tail >= 5 && (screenLikeRatio >= 0.35 || shadowRatio >= 0.68)) {
+        for (let index = 0; index < tail; index += 1) removed[componentQueue[index]] = 1;
+      }
+    }
+
+    // A narrow chair/desk gap can mix near-black and bright screen pixels into
+    // a small island that a broader foreground-colored component protects.
+    // Clean only compact, two-dimensional islands with a large screen-shadow
+    // luminance range; uniform green props and one-pixel neon trims are kept.
+    const residualVisited = new Uint8Array(pixelCount);
+    const residualQueue = new Int32Array(pixelCount);
+    for (let start = 0; start < pixelCount; start += 1) {
+      if (removed[start] || residualVisited[start]) continue;
+      const startIndex = start * 4;
+      if (!isGreenCandidate(data[startIndex], data[startIndex + 1], data[startIndex + 2])) continue;
+
+      let head = 0;
+      let tail = 0;
+      let minX = width;
+      let minY = height;
+      let maxX = 0;
+      let maxY = 0;
+      let minValue = 1;
+      let maxValue = 0;
+      let valueSum = 0;
+      let screenHuePixels = 0;
+      residualQueue[tail++] = start;
+      residualVisited[start] = 1;
+
+      while (head < tail) {
+        const pos = residualQueue[head++];
+        const x = pos % width;
+        const y = Math.floor(pos / width);
+        const i = pos * 4;
+        const hsv = rgbToHsv(data[i], data[i + 1], data[i + 2]);
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+        minValue = Math.min(minValue, hsv.value);
+        maxValue = Math.max(maxValue, hsv.value);
+        valueSum += hsv.value;
+        if (hueDistance(hsv.hue, greenModel.hue) <= 30) screenHuePixels += 1;
+
+        const neighbors = [
+          x + 1 < width ? pos + 1 : -1,
+          x > 0 ? pos - 1 : -1,
+          y + 1 < height ? pos + width : -1,
+          y > 0 ? pos - width : -1
+        ];
+        for (const next of neighbors) {
+          if (next < 0 || removed[next] || residualVisited[next]) continue;
+          const nextIndex = next * 4;
+          if (!isGreenCandidate(data[nextIndex], data[nextIndex + 1], data[nextIndex + 2])) continue;
+          residualVisited[next] = 1;
+          residualQueue[tail++] = next;
+        }
+      }
+
+      const componentWidth = maxX - minX + 1;
+      const componentHeight = maxY - minY + 1;
+      const componentAspect = componentWidth / componentHeight;
+      const averageValue = valueSum / tail;
+      const screenHueRatio = screenHuePixels / tail;
+      const isTrappedScreenShadow = (
+        tail >= 5 &&
+        tail <= 5000 &&
+        componentWidth >= 2 &&
+        componentHeight >= 2 &&
+        componentAspect >= 0.25 &&
+        componentAspect <= 3.5 &&
+        screenHueRatio >= 0.8 &&
+        averageValue <= greenModel.value * 0.72 &&
+        maxValue - minValue >= 0.25
+      );
+      if (isTrappedScreenShadow) {
+        for (let index = 0; index < tail; index += 1) removed[residualQueue[index]] = 1;
+      }
+    }
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const pos = y * width + x;
+      const i = pos * 4;
+
+      if (removed[pos]) {
+        data[i + 3] = 0;
+      } else if (effectiveMode === 'green') {
+        let touchesRemovedBackground = false;
+        for (let offsetY = -2; offsetY <= 2 && !touchesRemovedBackground; offsetY += 1) {
+          const neighborY = y + offsetY;
+          if (neighborY < 0 || neighborY >= height) continue;
+          for (let offsetX = -2; offsetX <= 2; offsetX += 1) {
+            if (offsetX === 0 && offsetY === 0) continue;
+            const neighborX = x + offsetX;
+            if (neighborX < 0 || neighborX >= width) continue;
+            if (removed[neighborY * width + neighborX]) {
+              touchesRemovedBackground = true;
+              break;
+            }
+          }
+        }
+
+        if (touchesRemovedBackground) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const hsv = rgbToHsv(r, g, b);
+          const neutralGreen = Math.max(r, b) + 8;
+          const greenExcess = g - neutralGreen;
+          if (
+            greenExcess > 0 &&
+            hsv.saturation >= 0.28 &&
+            hueDistance(hsv.hue, greenModel.hue) <= 62
+          ) {
+            const spillStrength = Math.min(1, greenExcess / 72);
+            data[i + 1] = Math.round(g + (neutralGreen - g) * spillStrength * 0.9);
+          }
+        }
+      }
+    }
+  }
+
+  return imgData;
+}
+
 /**
  * Helper to capitalize the first letter of a string
  */
@@ -234,9 +662,10 @@ export function getTransparentMascotCanvas(img, mode = 'green', threshold = 230)
   if (!img || !img.width || !img.height) return img;
   if (mode === 'none') return img;
 
-  const cacheKey = `_transparent_${mode}_${threshold}`;
-  if (img[cacheKey]) {
-    return img[cacheKey];
+  const cacheKey = `${MASCOT_TRANSPARENCY_VERSION}_${mode}_${threshold}_${img.currentSrc || img.src || ''}_${img.width}x${img.height}`;
+  const cached = mascotTransparencyCache.get(img);
+  if (cached?.key === cacheKey) {
+    return cached.canvas;
   }
 
   const canvas = document.createElement('canvas');
@@ -247,85 +676,9 @@ export function getTransparentMascotCanvas(img, mode = 'green', threshold = 230)
   try {
     ctx.drawImage(img, 0, 0);
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imgData.data;
-    const len = data.length;
-
-    // Detect if image background is Green Screen by sampling 4 corner pixels
-    const w = canvas.width;
-    const h = canvas.height;
-    const cornerIndices = [
-      0, // top-left
-      (w - 1) * 4, // top-right
-      (h - 1) * w * 4, // bottom-left
-      (h - 1) * w * 4 + (w - 1) * 4 // bottom-right
-    ];
-
-    let greenCornerCount = 0;
-    let whiteCornerCount = 0;
-
-    for (const idx of cornerIndices) {
-      if (idx >= 0 && idx < len) {
-        const cr = data[idx];
-        const cg = data[idx + 1];
-        const cb = data[idx + 2];
-        const ca = data[idx + 3];
-        if (ca > 10) {
-          if (cg > 80 && cg > cr * 1.25 && cg > cb * 1.25) {
-            greenCornerCount++;
-          } else if (cr >= 210 && cg >= 210 && cb >= 210) {
-            whiteCornerCount++;
-          }
-        }
-      }
-    }
-
-    // Determine actual effective mode
-    let effectiveMode = mode;
-    if (mode === 'auto') {
-      if (greenCornerCount > 0) {
-        effectiveMode = 'green';
-      } else if (whiteCornerCount > 0) {
-        effectiveMode = 'white';
-      } else {
-        effectiveMode = 'green';
-      }
-    }
-
-    for (let i = 0; i < len; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      const a = data[i + 3];
-
-      if (a < 10) continue;
-
-      if (effectiveMode === 'green') {
-        // Strict Green Screen Background Detection:
-        // Pure Green background has HIGH green AND LOW red/blue (r < 130 and b < 140)
-        // White shirt/fur pixels have HIGH red and HIGH blue (r > 130 or b > 140), so they will NEVER be deleted!
-        const isGreenBackground = (g > 80 && r < 130 && b < 140 && (g - r > 35) && (g - b > 35)) ||
-                                  (g > 150 && r < 100 && b < 100);
-
-        if (isGreenBackground) {
-          data[i + 3] = 0; // Make background transparent
-        } else {
-          // Despill green light reflection on white shirt / fur
-          if (g > r && g > b && r > 110 && b > 110) {
-            data[i + 1] = Math.round((r + b) / 2); // Neutralize green spill to crisp white
-          }
-        }
-      } else if (effectiveMode === 'white') {
-        // WHITE REMOVAL ONLY
-        if (r >= threshold && g >= threshold && b >= threshold) {
-          data[i + 3] = 0;
-        } else if (r > 195 && g > 195 && b > 195 && Math.abs(r - g) < 20 && Math.abs(g - b) < 20 && Math.abs(r - b) < 20) {
-          data[i + 3] = 0;
-        }
-      }
-    }
-
+    processMascotTransparencyImageData(imgData, canvas.width, canvas.height, { mode, threshold });
     ctx.putImageData(imgData, 0, 0);
-    img[cacheKey] = canvas;
+    mascotTransparencyCache.set(img, { key: cacheKey, canvas });
     return canvas;
   } catch (e) {
     console.warn('Mascot transparency processing failed:', e);
@@ -337,10 +690,112 @@ export function getTransparentMascotCanvas(img, mode = 'green', threshold = 230)
  * Creates a solid white silhouette backing inside the mascot body
  * Fills any semi-transparent holes in shirt, beard, collar, etc. caused by external image cutters
  */
+export function buildMascotWhiteBackingImageData(imgData, width, height) {
+  if (!imgData?.data || !width || !height) return imgData;
+
+  const data = imgData.data;
+  const pixelCount = width * height;
+  const exterior = new Uint8Array(pixelCount);
+  const queue = new Int32Array(pixelCount);
+  let head = 0;
+  let tail = 0;
+
+  const enqueue = (pos) => {
+    if (pos < 0 || pos >= pixelCount || exterior[pos] || data[pos * 4 + 3] >= 220) return;
+    exterior[pos] = 1;
+    queue[tail++] = pos;
+  };
+
+  for (let x = 0; x < width; x += 1) {
+    enqueue(x);
+    enqueue((height - 1) * width + x);
+  }
+  for (let y = 0; y < height; y += 1) {
+    enqueue(y * width);
+    enqueue(y * width + width - 1);
+  }
+
+  while (head < tail) {
+    const pos = queue[head++];
+    const x = pos % width;
+    const y = Math.floor(pos / width);
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height) enqueue(ny * width + nx);
+      }
+    }
+  }
+
+  const inspected = exterior.slice();
+  const fillWhite = new Uint8Array(pixelCount);
+  const componentQueue = new Int32Array(pixelCount);
+
+  for (let start = 0; start < pixelCount; start += 1) {
+    if (inspected[start] || data[start * 4 + 3] >= 220) continue;
+
+    let componentHead = 0;
+    let componentTail = 0;
+    let boundaryPixels = 0;
+    let lightBoundaryPixels = 0;
+    componentQueue[componentTail++] = start;
+    inspected[start] = 1;
+
+    while (componentHead < componentTail) {
+      const pos = componentQueue[componentHead++];
+      const x = pos % width;
+      const y = Math.floor(pos / width);
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+          const next = ny * width + nx;
+          const nextIndex = next * 4;
+          if (data[nextIndex + 3] < 220) {
+            if (!inspected[next]) {
+              inspected[next] = 1;
+              componentQueue[componentTail++] = next;
+            }
+          } else {
+            boundaryPixels += 1;
+            const minChannel = Math.min(data[nextIndex], data[nextIndex + 1], data[nextIndex + 2]);
+            if (minChannel >= 165) lightBoundaryPixels += 1;
+          }
+        }
+      }
+    }
+
+    if (boundaryPixels > 0 && lightBoundaryPixels / boundaryPixels >= 0.58) {
+      for (let index = 0; index < componentTail; index += 1) fillWhite[componentQueue[index]] = 1;
+    }
+  }
+
+  for (let pos = 0; pos < pixelCount; pos += 1) {
+    const i = pos * 4;
+    if (fillWhite[pos]) {
+      data[i] = 255;
+      data[i + 1] = 255;
+      data[i + 2] = 255;
+      data[i + 3] = 255;
+    } else {
+      data[i] = 0;
+      data[i + 1] = 0;
+      data[i + 2] = 0;
+      data[i + 3] = 0;
+    }
+  }
+
+  return imgData;
+}
+
 export function getMascotWithWhiteBacking(mascotCanvas) {
   if (!mascotCanvas || !mascotCanvas.width || !mascotCanvas.height) return mascotCanvas;
 
-  const cacheKey = '_white_backed_v3';
+  const cacheKey = '_white_backed_v5';
   if (mascotCanvas[cacheKey]) {
     return mascotCanvas[cacheKey];
   }
@@ -361,88 +816,7 @@ export function getMascotWithWhiteBacking(mascotCanvas) {
     
     maskCtx.drawImage(mascotCanvas, 0, 0);
     const imgData = maskCtx.getImageData(0, 0, w, h);
-    const data = imgData.data;
-
-    // 1. BFS Flood Fill from all border pixels to identify the true outer background
-    const visited = new Uint8Array(w * h);
-    const queue = [];
-
-    // Top and Bottom borders
-    for (let x = 0; x < w; x++) {
-      let idx = x * 4;
-      if (data[idx + 3] < 50) {
-        visited[x] = 1;
-        queue.push(x, 0);
-      }
-      idx = ((h - 1) * w + x) * 4;
-      if (data[idx + 3] < 50) {
-        visited[(h - 1) * w + x] = 1;
-        queue.push(x, h - 1);
-      }
-    }
-    // Left and Right borders
-    for (let y = 0; y < h; y++) {
-      let idx = (y * w) * 4;
-      if (data[idx + 3] < 50) {
-        if (!visited[y * w]) {
-          visited[y * w] = 1;
-          queue.push(0, y);
-        }
-      }
-      idx = (y * w + (w - 1)) * 4;
-      if (data[idx + 3] < 50) {
-        if (!visited[y * w + (w - 1)]) {
-          visited[y * w + (w - 1)] = 1;
-          queue.push(w - 1, y);
-        }
-      }
-    }
-
-    // Perform BFS Flood Fill for outer background
-    let qHead = 0;
-    while (qHead < queue.length) {
-      const cx = queue[qHead++];
-      const cy = queue[qHead++];
-
-      const neighbors = [
-        [cx - 1, cy],
-        [cx + 1, cy],
-        [cx, cy - 1],
-        [cx, cy + 1]
-      ];
-
-      for (let i = 0; i < 4; i++) {
-        const nx = neighbors[i][0];
-        const ny = neighbors[i][1];
-
-        if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-          const nPos = ny * w + nx;
-          if (!visited[nPos]) {
-            const nIdx = nPos * 4;
-            if (data[nIdx + 3] < 50) {
-              visited[nPos] = 1;
-              queue.push(nx, ny);
-            }
-          }
-        }
-      }
-    }
-
-    // 2. Fill all non-background interior pixels (body + holes) with solid white
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const pos = y * w + x;
-        const idx = pos * 4;
-        if (!visited[pos]) {
-          data[idx] = 255;     // R
-          data[idx + 1] = 255; // G
-          data[idx + 2] = 255; // B
-          data[idx + 3] = 255; // Opaque Alpha
-        } else {
-          data[idx + 3] = 0;   // Outer background is 100% transparent
-        }
-      }
-    }
+    buildMascotWhiteBackingImageData(imgData, w, h);
     maskCtx.putImageData(imgData, 0, 0);
 
     // 3. Render solid white body backing first
@@ -471,7 +845,15 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   const w = canvas.width; // 720
   const h = canvas.height; // 1280
 
-  // 1. Draw Background
+  // 1. Start every frame from a neutral drawing state. A leaked alpha, clip, filter or
+  // composite mode otherwise leaves pixels from the previous mascot frame visible.
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.filter = 'none';
+  ctx.clearRect(0, 0, w, h);
+
+  // 2. Draw Background
   const bgColorStr = state.bgColor || '#FAF6F0';
   const panelBackgroundColor = getPanelBackgroundColor(bgColorStr);
   if (bgColorStr.startsWith('linear-gradient')) {
@@ -851,7 +1233,9 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
       state.mascotChromaThreshold !== undefined ? state.mascotChromaThreshold : 230
     );
 
-    if (state.mascotWhiteBacking !== false) {
+    // Safely restore only light enclosed holes left by old background-removal passes.
+    // Dark chair/desk gaps remain transparent, so this is safe for green and white inputs.
+    if (state.mascotChromaKey !== 'none') {
       renderMascotDrawable = getMascotWithWhiteBacking(renderMascotDrawable);
     }
 

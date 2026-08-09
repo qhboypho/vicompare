@@ -74,6 +74,7 @@ const DEFAULT_VIDEO_FONT = '"Be Vietnam Pro", Arial, sans-serif';
 const TELEGRAM_WORKER_BASE_URL = 'https://vicompare-telegram-bot.qhboypho.workers.dev';
 const CLOUD_APP_SETTINGS_URL = `${TELEGRAM_WORKER_BASE_URL}/api/app-settings`;
 const CLOUD_SETTINGS_LAST_SYNC_KEY = 'cloud_settings_last_sync';
+const CURRENT_AUDIO_FILE_NAME_KEY = 'current_audio_file_name';
 
 const VIETNAMESE_FONT_OPTIONS = [
   { value: '"Be Vietnam Pro", Arial, sans-serif', label: 'Be Vietnam Pro' },
@@ -486,7 +487,14 @@ export default function App() {
     if (url.startsWith('http://') || url.startsWith('https://')) {
       img.crossOrigin = 'anonymous';
     }
-    img.onload = () => {
+    img.onload = async () => {
+      // A sprite can be paintable at onload while its full pixel data is still decoding.
+      // Wait for decode before the renderer creates its reusable transparency canvas.
+      try {
+        await img.decode?.();
+      } catch {
+        // Some browsers reject decode for already-decoded or SVG resources; onload is enough then.
+      }
       loadedImagesRef.current[key] = img;
       if (triggerCanvasRedrawRef.current) triggerCanvasRedrawRef.current();
     };
@@ -588,7 +596,7 @@ export default function App() {
   });
   const [mascotWhiteBacking, setMascotWhiteBacking] = useState(() => {
     const saved = localStorage.getItem('mascotWhiteBacking');
-    return saved !== null ? saved === 'true' : true;
+    return saved !== null ? saved === 'true' : false;
   });
 
   // Audio Playback
@@ -605,6 +613,16 @@ export default function App() {
     }
   });
   const [volume, setVolume] = useState(0.8);
+
+  const rememberCurrentAudioFileName = (fileName) => {
+    try {
+      if (fileName) {
+        localStorage.setItem(CURRENT_AUDIO_FILE_NAME_KEY, fileName);
+      } else {
+        localStorage.removeItem(CURRENT_AUDIO_FILE_NAME_KEY);
+      }
+    } catch {}
+  };
 
   // ElevenLabs TTS State (split base64 decoded fallback)
   const DEFAULT_ELEVEN_KEY = safeAtob(['c2tfNjFkMTVmZDdlMDBlZDZlZGJmM2Vm', 'ZDY3MWJlNjhiMzc2ZmM2ZDViY2VhYzZhNTI0'].join(''));
@@ -697,7 +715,7 @@ export default function App() {
         mascotY: 1280,
         mascotChromaKey: 'green',
         mascotChromaThreshold: 230,
-        mascotWhiteBacking: true,
+        mascotWhiteBacking: false,
         logoFileName: '',
         headerLogoUrl: '',
         spriteFileName: '',
@@ -738,7 +756,7 @@ export default function App() {
         mascotY: 1280,
         mascotChromaKey: 'green',
         mascotChromaThreshold: 230,
-        mascotWhiteBacking: true,
+        mascotWhiteBacking: false,
         logoFileName: '',
         headerLogoUrl: '',
         spriteFileName: '',
@@ -991,8 +1009,8 @@ export default function App() {
     setMascotChromaThreshold(profile.mascotChromaThreshold !== undefined ? profile.mascotChromaThreshold : 230);
     try { localStorage.setItem('mascotChromaThreshold', (profile.mascotChromaThreshold !== undefined ? profile.mascotChromaThreshold : 230).toString()); } catch {}
 
-    setMascotWhiteBacking(profile.mascotWhiteBacking !== undefined ? profile.mascotWhiteBacking : true);
-    try { localStorage.setItem('mascotWhiteBacking', (profile.mascotWhiteBacking !== undefined ? profile.mascotWhiteBacking : true).toString()); } catch {}
+    setMascotWhiteBacking(profile.mascotWhiteBacking !== undefined ? profile.mascotWhiteBacking : false);
+    try { localStorage.setItem('mascotWhiteBacking', (profile.mascotWhiteBacking !== undefined ? profile.mascotWhiteBacking : false).toString()); } catch {}
 
     if (profile.headerLogoUrl !== undefined) {
       if (profile.headerLogoUrl && profile.headerLogoUrl.startsWith('idb:')) {
@@ -2354,6 +2372,7 @@ export default function App() {
         }
 
         let localAudioBlobUrl = audioUrl;
+        let localAudioBlob = null;
         if (audioBase64) {
           try {
             const byteCharacters = atob(audioBase64);
@@ -2363,6 +2382,7 @@ export default function App() {
             }
             const byteArray = new Uint8Array(byteNumbers);
             const blob = new Blob([byteArray], { type: 'audio/mpeg' });
+            localAudioBlob = blob;
             localAudioBlobUrl = URL.createObjectURL(blob);
           } catch (bErr) {
             console.warn('Base64 decode audio fallback:', bErr);
@@ -2388,6 +2408,7 @@ export default function App() {
               clearTimeout(timeoutId);
               if (directRes.ok) {
                 const audioBlob = await directRes.blob();
+                localAudioBlob = audioBlob;
                 localAudioBlobUrl = URL.createObjectURL(audioBlob);
                 setAudioUrl(localAudioBlobUrl);
               }
@@ -2396,6 +2417,10 @@ export default function App() {
             }
           }
 
+          if (localAudioBlob) {
+            await saveAudioToStorage(localAudioBlob, 'telegram_voice.mp3');
+            rememberCurrentAudioFileName('telegram_voice.mp3');
+          }
           syncLoadedAudio(localAudioBlobUrl);
         }
 
@@ -3090,11 +3115,16 @@ export default function App() {
     const restoreAssets = async () => {
       // 1. Khôi phục âm thanh
       try {
-        const cached = await getAudioFromStorage();
+        const savedAudioFileName = localStorage.getItem(CURRENT_AUDIO_FILE_NAME_KEY) || '';
+        let cached = await getAudioFromStorage();
+        if (!cached?.blob && savedAudioFileName) {
+          cached = await getAudioFromStorage(savedAudioFileName);
+        }
         if (cached && cached.blob) {
           const url = URL.createObjectURL(cached.blob);
           setAudioUrl(url);
           setAudioFileName(cached.fileName || 'cached_audio.mp3');
+          rememberCurrentAudioFileName(cached.fileName || savedAudioFileName || 'cached_audio.mp3');
         }
       } catch (err) {
         console.error('Lỗi khôi phục âm thanh từ IndexedDB:', err);
@@ -3548,6 +3578,7 @@ export default function App() {
       setIsPlaying(false);
       setCurrentTime(0);
       await saveAudioToStorage(mergedBlob, filename);
+      rememberCurrentAudioFileName(filename);
       alert(`Đã tạo giọng theo từng câu, khớp sub bằng duration thật${actionEvents.length ? ` và thêm ${actionEvents.length} hiệu ứng hành động` : ''}!`);
     } catch (err) {
       alert('Lỗi tạo Voice theo từng câu: ' + err.message);
@@ -4670,25 +4701,8 @@ export default function App() {
           // Draw the segment
           offCtx.drawImage(img, idx * segmentW, 0, segmentW, segmentH, 0, 0, segmentW, segmentH);
 
-          // Clear white background with smooth feathering
-          const imgData = offCtx.getImageData(0, 0, segmentW, segmentH);
-          const data = imgData.data;
-
-          for (let i = 0; i < data.length; i += 4) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-
-            // White-key thresholding with transparency falloff
-            const minColor = Math.min(r, g, b);
-            if (minColor > 215) {
-              const alphaFactor = (255 - minColor) / (255 - 215); // 0 (at 255) to 1 (at 215)
-              data[i + 3] = Math.min(data[i + 3], Math.floor(alphaFactor * 255));
-            }
-          }
-          offCtx.putImageData(imgData, 0, 0);
-
-          // Convert to data url
+          // Keep the cropped source intact. Background removal happens at render time,
+          // so switching modes never permanently damages white or green mascot details.
           const dataUrl = offCanvas.toDataURL('image/png');
           newPoses[posesKeys[idx]] = dataUrl;
           const dbKey = getMascotStorageKey(activeChannelId, posesKeys[idx]);
@@ -4769,6 +4783,7 @@ export default function App() {
 
       // Persist to IndexedDB
       saveAudioToStorage(file, file.name);
+      rememberCurrentAudioFileName(file.name);
 
       // Đọc thời lượng âm thanh và tự động căn khớp nhịp khoảng lặng
       const tempAudio = new Audio(url);
@@ -4912,6 +4927,7 @@ export default function App() {
     clearAudioFromStorage();
     setAudioUrl('');
     setAudioFileName('');
+    rememberCurrentAudioFileName('');
 
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -5238,23 +5254,29 @@ export default function App() {
             const localUrl = URL.createObjectURL(record.blob);
             setAudioUrl(localUrl);
             setAudioFileName(config.audioFileName);
+            rememberCurrentAudioFileName(config.audioFileName);
           } else {
             if (config.audioUrl && config.audioUrl.startsWith('data:')) {
               setAudioUrl(config.audioUrl);
               setAudioFileName(config.audioFileName);
+              rememberCurrentAudioFileName(config.audioFileName);
             } else {
               setAudioUrl('');
               setAudioFileName('');
+              rememberCurrentAudioFileName('');
               alert('Lưu ý: Không tìm thấy tệp âm thanh gốc trong bộ nhớ tạm trình duyệt (do tệp được tạo trước khi nâng cấp hệ thống). Bạn vui lòng bấm nút "Tạo Voice AI" để tạo lại âm thanh trước khi xuất video nhé!');
             }
           }
         }).catch(() => {
           setAudioUrl('');
           setAudioFileName('');
+          rememberCurrentAudioFileName('');
         });
-      } else {
-        setAudioUrl('');
-        setAudioFileName('');
+      } else if (!skipAudio && config.audioUrl && config.audioUrl.startsWith('data:')) {
+        const fallbackAudioName = config.audioFileName || 'project_audio.mp3';
+        setAudioUrl(config.audioUrl);
+        setAudioFileName(fallbackAudioName);
+        rememberCurrentAudioFileName(fallbackAudioName);
       }
 
       setCurrentTime(0);
@@ -7942,21 +7964,25 @@ export default function App() {
                     <option value="none">🚫 Tắt tách nền (Dùng phông PNG trong suốt gốc)</option>
                   </select>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.1)', marginTop: '0.5rem' }}>
-                    <input
-                      type="checkbox"
-                      id="mascot_white_backing_chk"
-                      checked={mascotWhiteBacking}
-                      onChange={(e) => updateMascotWhiteBacking(e.target.checked)}
-                      style={{ width: '16px', height: '16px', cursor: 'pointer', margin: 0 }}
-                    />
-                    <label htmlFor="mascot_white_backing_chk" style={{ fontSize: '0.75rem', color: '#fff', cursor: 'pointer', userSelect: 'none', margin: 0, fontWeight: 'bold' }}>
-                      🛡️ Khôi phục áo trắng & chi tiết Mascot (Bù nền trắng lót phía sau thân)
-                    </label>
-                  </div>
-                  <span style={{ fontSize: '0.65rem', color: '#888', display: 'block', marginTop: '0.25rem', lineHeight: '1.3' }}>
-                    * Tự động bù lớp lót màu trắng bên trong thân Mascot để khắc phục triệt để hiện tượng áo trắng/cổ áo bị thủng mờ do file ảnh gốc tải lên bị tách lẹm từ trước.
-                  </span>
+                  {mascotChromaKey === 'white' && (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.1)', marginTop: '0.5rem' }}>
+                        <input
+                          type="checkbox"
+                          id="mascot_white_backing_chk"
+                          checked={mascotWhiteBacking}
+                          onChange={(e) => updateMascotWhiteBacking(e.target.checked)}
+                          style={{ width: '16px', height: '16px', cursor: 'pointer', margin: 0 }}
+                        />
+                        <label htmlFor="mascot_white_backing_chk" style={{ fontSize: '0.75rem', color: '#fff', cursor: 'pointer', userSelect: 'none', margin: 0, fontWeight: 'bold' }}>
+                          Sửa lỗ trong chi tiết trắng của ảnh cũ
+                        </label>
+                      </div>
+                      <span style={{ fontSize: '0.65rem', color: '#888', display: 'block', marginTop: '0.25rem', lineHeight: '1.3' }}>
+                        Chỉ bật khi ảnh nền trắng cũ đã bị thủng. Phông xanh và chế độ tự động không dùng lớp bù này để bảo toàn mắt, áo và các chi tiết mascot.
+                      </span>
+                    </>
+                  )}
 
                   {mascotChromaKey !== 'none' && (
                     <div style={{ marginTop: '0.5rem' }}>
