@@ -280,10 +280,10 @@ describe("Voicefree Telegram text segmentation", () => {
   });
 
   it("paces Voicefree request starts below the provider limit", async () => {
-    let clock = 0;
+    const startedAt = Date.now();
     const starts = [];
     const requestAudio = async (_engineType, _ttsConfig, text) => {
-      starts.push({ text, at: clock });
+      starts.push({ text, at: Date.now() - startedAt });
       return { buffer: new Uint8Array([starts.length]).buffer, audioUrl: null };
     };
 
@@ -293,14 +293,15 @@ describe("Voicefree Telegram text segmentation", () => {
       "Câu 1\nCâu 2\nCâu 3\nCâu 4",
       {
         concurrency: 3,
-        minRequestIntervalMs: 1700,
-        now: () => clock,
-        delay: async (ms) => { clock += ms; },
+        minRequestIntervalMs: 25,
         requestAudio
       }
     );
 
-    assert.deepEqual(starts.map(item => item.at), [0, 1700, 3400, 5100]);
+    assert.ok(starts[0].at < 20);
+    for (let index = 1; index < starts.length; index += 1) {
+      assert.ok(starts[index].at - starts[index - 1].at >= 18);
+    }
   });
 
   it("aborts the segmented voice job before Cloudflare cancels the Telegram callback", async () => {

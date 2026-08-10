@@ -1198,6 +1198,25 @@ async function mapWithConcurrency(items, concurrency, worker) {
   return results;
 }
 
+function createRequestStartGate(intervalMs, options = {}) {
+  if (!(intervalMs > 0)) return async () => {};
+
+  const now = options.now ?? Date.now;
+  const delay = options.delay || ((ms) => delayWithSignal(ms, options.signal));
+  let nextStartAt = 0;
+  let queue = Promise.resolve();
+
+  return async () => {
+    const turn = queue.then(async () => {
+      const waitMs = Math.max(0, nextStartAt - now());
+      if (waitMs > 0) await delay(waitMs, options.signal);
+      nextStartAt = now() + intervalMs;
+    });
+    queue = turn.catch(() => {});
+    await turn;
+  };
+}
+
 export async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText, options = {}) {
   const timeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 18000;
   const controller = new AbortController();
@@ -1208,7 +1227,17 @@ export async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText
   try {
     const segments = splitScriptTextSegments(scriptText);
     const requestAudio = options.requestAudio || requestTtsAudioBufferForText;
+    const defaultIntervalMs = engineType === "tts_voicefree" ? 1700 : 0;
+    const minRequestIntervalMs = Number.isFinite(Number(options.minRequestIntervalMs))
+      ? Number(options.minRequestIntervalMs)
+      : defaultIntervalMs;
+    const waitForRequestStart = createRequestStartGate(minRequestIntervalMs, {
+      now: options.now,
+      delay: options.delay,
+      signal: controller.signal
+    });
     if (segments.length <= 1) {
+      await waitForRequestStart();
       const result = await requestAudio(engineType, ttsConfig, scriptText, { signal: controller.signal });
       return {
         audioBuffer: result.buffer,
@@ -1224,6 +1253,7 @@ export async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText
       segments,
       options.concurrency || 5,
       async (segment) => {
+        await waitForRequestStart();
         const result = await requestAudio(engineType, ttsConfig, segment, { signal: controller.signal });
         return {
           text: segment,
