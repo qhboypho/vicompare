@@ -66,6 +66,96 @@ export function splitScriptTextSegments(text) {
 
 export const splitVoicefreeTextSegments = splitScriptTextSegments;
 
+const TELEGRAM_GEMINI_MODELS = ["gemini-3.5-flash", "gemini-3.1-flash-lite"];
+const TELEGRAM_GEMINI_TIMEOUT_MS = 9000;
+
+export function buildGeminiGenerationBody(parts, { maxOutputTokens = 1400 } = {}) {
+  return {
+    contents: [{ parts }],
+    generationConfig: {
+      maxOutputTokens,
+      thinkingConfig: {
+        thinkingLevel: "minimal"
+      }
+    }
+  };
+}
+
+function isRetryableGeminiStatus(status) {
+  return status === 404 || status === 408 || status === 429 || status >= 500;
+}
+
+export async function requestGeminiContent({
+  apiKey,
+  parts,
+  fetchImpl = fetch,
+  timeoutMs = TELEGRAM_GEMINI_TIMEOUT_MS,
+  maxOutputTokens = 1400,
+  models = TELEGRAM_GEMINI_MODELS
+}) {
+  let lastError = null;
+
+  for (let index = 0; index < models.length; index += 1) {
+    const model = models[index];
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const startedAt = Date.now();
+
+    try {
+      const response = await fetchImpl(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey
+          },
+          body: JSON.stringify(buildGeminiGenerationBody(parts, { maxOutputTokens })),
+          signal: controller.signal
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        const error = new Error(`Gemini ${model} lỗi ${response.status}: ${errorText || response.statusText}`);
+        error.status = response.status;
+        throw error;
+      }
+
+      const data = await response.json();
+      const result = (data.candidates?.[0]?.content?.parts || [])
+        .map(part => cleanString(part?.text))
+        .filter(Boolean)
+        .join("\n")
+        .trim();
+
+      if (!result) {
+        const finishReason = data.candidates?.[0]?.finishReason || "EMPTY_RESPONSE";
+        const error = new Error(`Gemini ${model} không trả nội dung (${finishReason}).`);
+        error.status = 503;
+        throw error;
+      }
+
+      console.log(`Gemini ${model} completed in ${Date.now() - startedAt}ms.`);
+      return result;
+    } catch (error) {
+      const timedOut = error?.name === "AbortError";
+      lastError = timedOut
+        ? new Error(`Gemini ${model} phản hồi quá ${Math.ceil(timeoutMs / 1000)} giây.`)
+        : error;
+      const canTryFallback = index < models.length - 1
+        && (timedOut || isRetryableGeminiStatus(Number(error?.status)));
+
+      console.warn(`Gemini ${model} failed after ${Date.now() - startedAt}ms: ${lastError.message}`);
+      if (!canTryFallback) throw lastError;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  throw lastError || new Error("Gemini tạm thời không phản hồi.");
+}
+
 
 
 function base64ToArrayBuffer(base64) {
@@ -1608,46 +1698,26 @@ async function classifyTelegramImageForTargets(photoBuffer, contentType, targets
     .join("\n");
   const base64Image = arrayBufferToBase64(photoBuffer);
   const mimeType = inferImageMimeType(contentType);
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key=${geminiKey}`;
-
-  const res = await fetch(geminiUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text:
-                "Identify which target this image best represents for a Vietnamese short comparison video. " +
-                "Pick the closest target even for symbolic or documentary images. " +
-                "Return only compact JSON like {\"pairIndex\":0,\"side\":\"left\",\"title\":\"Dân quân\",\"confidence\":0.91}. " +
-                "pairIndex is zero-based. Use side left/right. Return confidence 0 only when the image is completely unrelated.\n\n" +
-                `Targets:\n${targetText}`
-            },
-            {
-              inlineData: {
-                mimeType,
-                data: base64Image
-              }
-            }
-          ]
+  const text = await requestGeminiContent({
+    apiKey: geminiKey,
+    maxOutputTokens: 80,
+    parts: [
+      {
+        text:
+          "Identify which target this image best represents for a Vietnamese short comparison video. " +
+          "Pick the closest target even for symbolic or documentary images. " +
+          "Return only compact JSON like {\"pairIndex\":0,\"side\":\"left\",\"title\":\"Dân quân\",\"confidence\":0.91}. " +
+          "pairIndex is zero-based. Use side left/right. Return confidence 0 only when the image is completely unrelated.\n\n" +
+          `Targets:\n${targetText}`
+      },
+      {
+        inlineData: {
+          mimeType,
+          data: base64Image
         }
-      ],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 80
       }
-    })
+    ]
   });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Gemini nhận diện ảnh lỗi ${res.status}: ${errText || res.statusText}`);
-  }
-
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
   return readImageClassificationResult(text, targets);
 }
 
@@ -1788,60 +1858,31 @@ async function handleMessage(message, token, env) {
       }
 
       const imgRes = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+      if (!imgRes.ok) {
+        throw new Error("Không tải được ảnh từ Telegram CDN.");
+      }
       const imgBuffer = await imgRes.arrayBuffer();
-      const base64Image = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
+      const base64Image = arrayBufferToBase64(imgBuffer);
 
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key=${geminiKey}`;
-      const geminiRes = await fetch(geminiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: `${promptInstruction}\n\nChủ đề: ${message.caption || "Phân tích và viết kịch bản so sánh dựa trên hình ảnh này"}` },
-                {
-                  inlineData: {
-                    mimeType: "image/jpeg",
-                    data: base64Image
-                  }
-                }
-              ]
+      scriptResult = await requestGeminiContent({
+        apiKey: geminiKey,
+        parts: [
+          { text: `${promptInstruction}\n\nChủ đề: ${message.caption || "Phân tích và viết kịch bản so sánh dựa trên hình ảnh này"}` },
+          {
+            inlineData: {
+              mimeType: inferImageMimeType(imgRes.headers.get("Content-Type"), filePath),
+              data: base64Image
             }
-          ]
-        })
+          }
+        ]
       });
-
-      if (!geminiRes.ok) {
-        const errText = await geminiRes.text();
-        throw new Error(`Gemini API error (Multimodal) ${geminiRes.status}: ${errText}`);
-      }
-
-      const geminiData = await geminiRes.json();
-      scriptResult = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
     } else {
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key=${geminiKey}`;
-      const geminiRes = await fetch(geminiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: `${promptInstruction}\n\nChủ đề: ${text}` }
-              ]
-            }
-          ]
-        })
+      scriptResult = await requestGeminiContent({
+        apiKey: geminiKey,
+        parts: [
+          { text: `${promptInstruction}\n\nChủ đề: ${text}` }
+        ]
       });
-
-      if (!geminiRes.ok) {
-        const errText = await geminiRes.text();
-        throw new Error(`Gemini API error (Text) ${geminiRes.status}: ${errText}`);
-      }
-
-      const geminiData = await geminiRes.json();
-      scriptResult = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
     }
 
     if (!scriptResult) {
