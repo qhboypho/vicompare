@@ -25,8 +25,71 @@ import {
   arrayBufferToBase64,
   readImageClassificationResult,
   requestSegmentedTtsAudio,
-  resolveTikTokCredentials
+  resolveTikTokCredentials,
+  enqueueTelegramUpdate,
+  processTelegramQueueBatch
 } from "./index.js";
+
+describe("Telegram background queue", () => {
+  it("enqueues the complete Telegram update for background processing", async () => {
+    const sent = [];
+    const update = { update_id: 123, callback_query: { id: "callback-1" } };
+
+    const queued = await enqueueTelegramUpdate(update, {
+      TELEGRAM_JOBS: {
+        send: async (body) => sent.push(body)
+      }
+    });
+
+    assert.equal(queued, true);
+    assert.deepEqual(sent, [{ update }]);
+  });
+
+  it("uses a long TTS deadline and acknowledges a processed queue message", async () => {
+    const calls = [];
+    let acknowledged = false;
+    const message = {
+      body: { update: { update_id: 456, callback_query: { id: "callback-2" } } },
+      ack: () => { acknowledged = true; }
+    };
+
+    await processTelegramQueueBatch({ messages: [message] }, {
+      TELEGRAM_BOT_TOKEN: "telegram-token"
+    }, {
+      dispatchUpdate: async (_update, _token, _env, options) => calls.push(options)
+    });
+
+    assert.equal(acknowledged, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].ttsTimeoutMs, 120000);
+    assert.equal(calls[0].answerCallback, false);
+  });
+
+  it("does not process the same Telegram update twice", async () => {
+    const stored = new Map();
+    let dispatchCount = 0;
+    const env = {
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+      VICOMPARE_KV: {
+        get: async (key) => stored.get(key) || null,
+        put: async (key, value) => stored.set(key, value)
+      }
+    };
+    const createMessage = () => ({
+      body: { update: { update_id: 789, message: { message_id: 3 } } },
+      ack() {}
+    });
+
+    await processTelegramQueueBatch({ messages: [createMessage()] }, env, {
+      dispatchUpdate: async () => { dispatchCount += 1; }
+    });
+    await processTelegramQueueBatch({ messages: [createMessage()] }, env, {
+      dispatchUpdate: async () => { dispatchCount += 1; }
+    });
+
+    assert.equal(dispatchCount, 1);
+  });
+});
 
 describe("Telegram Gemini script generation", () => {
   it("uses minimal thinking and a bounded output for fast Telegram responses", () => {
