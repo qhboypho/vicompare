@@ -56,6 +56,12 @@ import {
   upsertSocialAccount
 } from './utils/socialAccounts';
 import { publishTikTokVideo } from './utils/tiktokPublisher';
+import { publishFacebookReel } from './utils/facebookPublisher';
+import {
+  getScheduledStatusView,
+  resolveScheduledAccounts,
+  snapshotScheduledAccounts
+} from './utils/scheduledPublishing';
 
 // Default prompt script replicating FastScene layout
 const DEFAULT_SCRIPT = `Đây là khách quan.
@@ -2893,6 +2899,7 @@ export default function App() {
     // Đánh dấu là đang xuất bản để tránh lặp lại tiến trình
     setScheduledPosts(prev => prev.map(p => p.id === post.id ? { ...p, status: 'publishing' } : p));
 
+    let publishingPlatform = '';
     try {
       console.log(`[Scheduler] Bắt đầu tự động đăng bài hẹn giờ: ${post.id} (${post.headerTitle})`);
 
@@ -2906,10 +2913,10 @@ export default function App() {
       const postIds = {};
 
       for (const platform of post.platforms) {
+        publishingPlatform = platform;
         const scheduledRefs = post.selectedAccounts?.[platform] || [];
-        const selectedIds = scheduledRefs.map(item => item.id).filter(Boolean);
-        const platformAccounts = selectedIds.length > 0
-          ? (socialAccounts[platform] || []).filter(account => selectedIds.includes(account.id))
+        const platformAccounts = scheduledRefs.length > 0
+          ? resolveScheduledAccounts(scheduledRefs, socialAccounts[platform] || [])
           : getCheckedSocialAccounts(platform);
         const accountsToPublish = platformAccounts.length > 0
           ? platformAccounts
@@ -2917,78 +2924,21 @@ export default function App() {
 
         if (platform === 'facebook') {
           for (const account of accountsToPublish) {
-          const accountLabel = account?.label || 'Facebook Reels';
-          const credentials = account?.credentials || {};
-          const accountPageId = credentials.pageId || fbPageId;
-          const accountAccessToken = credentials.accessToken || fbAccessToken;
-          if (!accountPageId || !accountAccessToken) {
-            throw new Error(`Thiếu Page ID hoặc Access Token Facebook cho ${accountLabel}`);
-          }
-
-          // 1. Khởi tạo phiên upload Reel lên Page
-          const startRes = await fetch(`/fb-api/v21.0/${accountPageId}/video_reels`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              access_token: accountAccessToken,
-              upload_phase: 'start'
-            })
-          });
-
-          if (!startRes.ok) {
-            const errData = await startRes.json();
-            throw new Error(`Khởi tạo FB Reel lỗi: ${errData.error?.message || startRes.statusText}`);
-          }
-
-          const startData = await startRes.json();
-          const { video_id, upload_url } = startData;
-
-          // 2. Upload file video
-          let proxyUploadUrl = upload_url;
-          if (upload_url.includes('video-rupload.facebook.com')) {
-            proxyUploadUrl = upload_url.replace('https://video-rupload.facebook.com', '/fb-upload');
-          } else if (upload_url.includes('rupload.facebook.com')) {
-            proxyUploadUrl = upload_url.replace('https://rupload.facebook.com', '/fb-rupload');
-          }
-
-          const uploadRes = await fetch(proxyUploadUrl, {
-            method: 'POST',
-            headers: {
-              'Authorization': `OAuth ${accountAccessToken}`,
-              'offset': '0',
-              'file_size': videoBlob.size.toString(),
-              'Content-Type': 'application/octet-stream'
-            },
-            body: videoBlob
-          });
-
-          if (!uploadRes.ok) {
-            const errData = await uploadRes.json();
-            throw new Error(`Upload video FB lỗi: ${errData.error?.message || uploadRes.statusText}`);
-          }
-
-          // 3. Hoàn tất & Xuất bản bài viết
-          const finishRes = await fetch(`/fb-api/v21.0/${accountPageId}/video_reels`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              access_token: accountAccessToken,
-              upload_phase: 'finish',
-              video_id: video_id,
-              video_state: 'PUBLISHED',
-              description: post.caption
-            })
-          });
-
-          if (!finishRes.ok) {
-            const errData = await finishRes.json();
-            throw new Error(`Hoàn tất xuất bản FB lỗi: ${errData.error?.message || finishRes.statusText}`);
-          }
-
-          const finishData = await finishRes.json();
-          const fbPostIdValue = finishData.fb_id || finishData.id || video_id;
-          fbPostId = fbPostIdValue;
-          postIds.facebook = [...(postIds.facebook || []), { accountId: account.id, label: accountLabel, postId: fbPostIdValue }];
+            const accountLabel = account?.label || 'Facebook Reels';
+            const credentials = account?.credentials || {};
+            const result = await publishFacebookReel({
+              pageId: credentials.pageId || fbPageId,
+              accessToken: credentials.accessToken || fbAccessToken,
+              videoBlob,
+              caption: post.caption
+            });
+            fbPostId = result.id;
+            postIds.facebook = [...(postIds.facebook || []), {
+              accountId: account.id,
+              label: accountLabel,
+              postId: result.id,
+              videoId: result.videoId
+            }];
           }
 
         } else if (platform === 'youtube') {
@@ -3086,7 +3036,18 @@ export default function App() {
       console.log(`[Scheduler] Tự động đăng thành công bài: ${post.id}`);
     } catch (err) {
       console.error(`[Scheduler] Lỗi tự động đăng bài ${post.id}:`, err);
-      setScheduledPosts(prev => prev.map(p => p.id === post.id ? { ...p, status: 'failed' } : p));
+      const platformLabel = publishingPlatform === 'facebook'
+        ? 'Facebook'
+        : publishingPlatform === 'youtube'
+          ? 'YouTube'
+          : publishingPlatform === 'tiktok'
+            ? 'TikTok'
+            : 'Nền tảng';
+      setScheduledPosts(prev => prev.map(p => p.id === post.id ? {
+        ...p,
+        status: 'failed',
+        error: `${platformLabel}: ${err.message}`
+      } : p));
     }
   };
 
@@ -6026,7 +5987,7 @@ export default function App() {
       selectedAccounts: Object.fromEntries(
         Object.entries(selectedAccountsByPlatform).map(([platform, accounts]) => [
           platform,
-          accounts.map(account => ({ id: account.id, label: account.label }))
+          snapshotScheduledAccounts(accounts)
         ])
       ),
       mode: publishMode,
@@ -6132,78 +6093,21 @@ export default function App() {
           setPublishingStatus(`Đang đăng lên ${accountLabel}...`);
 
           if (platform === 'facebook') {
-          const accountPageId = credentials.pageId || fbPageId;
-          const accountAccessToken = credentials.accessToken || fbAccessToken;
-          // 1. Khởi tạo phiên upload Reel lên Page (gọi qua proxy /fb-api)
-          const startRes = await fetch(`/fb-api/v21.0/${accountPageId}/video_reels`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              access_token: accountAccessToken,
-              upload_phase: 'start'
-            })
-          });
-
-          if (!startRes.ok) {
-            const errData = await startRes.json();
-            throw new Error(`Khởi tạo FB Reel lỗi: ${errData.error?.message || startRes.statusText}`);
-          }
-
-          const startData = await startRes.json();
-          const { video_id, upload_url } = startData;
-
-          // 2. Fetch binary video blob từ URL cục bộ
-          setPublishingStatus('Đang chuẩn bị file video...');
-          const videoBlob = await fetch(exportedVideoUrl).then(r => r.blob());
-
-          // 3. Upload file video nhị phân lên Meta Server thông qua Proxy phù hợp để tránh CORS
-          setPublishingStatus('Đang truyền tải video lên server Facebook...');
-          let proxyUploadUrl = upload_url;
-          if (upload_url.includes('video-rupload.facebook.com')) {
-            proxyUploadUrl = upload_url.replace('https://video-rupload.facebook.com', '/fb-upload');
-          } else if (upload_url.includes('rupload.facebook.com')) {
-            proxyUploadUrl = upload_url.replace('https://rupload.facebook.com', '/fb-rupload');
-          }
-
-          const uploadRes = await fetch(proxyUploadUrl, {
-            method: 'POST',
-            headers: {
-              'Authorization': `OAuth ${accountAccessToken}`,
-              'offset': '0',
-              'file_size': videoBlob.size.toString(),
-              'Content-Type': 'application/octet-stream'
-            },
-            body: videoBlob
-          });
-
-          if (!uploadRes.ok) {
-            const errData = await uploadRes.json();
-            throw new Error(`Upload video FB lỗi: ${errData.error?.message || uploadRes.statusText}`);
-          }
-
-          // 4. Hoàn tất & Xuất bản bài viết (gọi qua proxy /fb-api)
-          setPublishingStatus('Đang xuất bản Reels lên Fanpage...');
-          const finishRes = await fetch(`/fb-api/v21.0/${accountPageId}/video_reels`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              access_token: accountAccessToken,
-              upload_phase: 'finish',
-              video_id: video_id,
-              video_state: 'PUBLISHED',
-              description: publishCaption
-            })
-          });
-
-          if (!finishRes.ok) {
-            const errData = await finishRes.json();
-            throw new Error(`Hoàn tất xuất bản FB lỗi: ${errData.error?.message || finishRes.statusText}`);
-          }
-
-          const finishData = await finishRes.json();
-          const fbPostIdValue = finishData.fb_id || finishData.id || video_id;
-          fbPostId = fbPostIdValue;
-          postIds.facebook = [...(postIds.facebook || []), { accountId: account.id, label: accountLabel, postId: fbPostIdValue }];
+            const videoBlob = await fetch(exportedVideoUrl).then(r => r.blob());
+            const result = await publishFacebookReel({
+              pageId: credentials.pageId || fbPageId,
+              accessToken: credentials.accessToken || fbAccessToken,
+              videoBlob,
+              caption: publishCaption,
+              onStatus: setPublishingStatus
+            });
+            fbPostId = result.id;
+            postIds.facebook = [...(postIds.facebook || []), {
+              accountId: account.id,
+              label: accountLabel,
+              postId: result.id,
+              videoId: result.videoId
+            }];
           } else if (platform === 'youtube') {
           let activeToken = credentials.accessToken || ytAccessToken;
           const accountClientId = credentials.clientId || ytClientId;
@@ -6545,7 +6449,7 @@ export default function App() {
           {audioUrl && <audio ref={audioRef} src={audioUrl} style={{ display: 'none' }} />}
 
           {exportedVideoUrl && (
-            <div className="glass-card" style={{ width: '100%', maxWidth: '290px', display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'center' }}>
+            <div className="glass-card preview-result-card" style={{ width: '100%', maxWidth: '290px', display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'center' }}>
               <span style={{ fontSize: '0.8rem', color: 'var(--accent-green)', fontWeight: 'bold' }}>✓ Dựng Video Thành Công!</span>
               <a
                 href={exportedVideoUrl}
@@ -8671,7 +8575,14 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {scheduledPosts.map((post) => (
+                        {scheduledPosts.map((post) => {
+                          const statusView = getScheduledStatusView(post);
+                          const statusColor = statusView.tone === 'success'
+                            ? 'var(--accent-green)'
+                            : statusView.tone === 'error'
+                              ? '#f87171'
+                              : '#f59e0b';
+                          return (
                           <tr key={post.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
                             <td style={{ padding: '0.5rem 0.75rem', fontWeight: 'bold' }}>
                               {post.headerTitle || 'So sánh'}
@@ -8706,12 +8617,21 @@ export default function App() {
                               {post.date}
                             </td>
                             <td style={{ padding: '0.5rem 0.75rem' }}>
-                              {post.status === 'published' ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--accent-green)' }}>
-                                    <CheckCircle size={12} /> Đã đăng
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', maxWidth: '230px' }}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: statusColor }}>
+                                  {statusView.tone === 'success'
+                                    ? <CheckCircle size={12} />
+                                    : statusView.tone === 'error'
+                                      ? <AlertCircle size={12} />
+                                      : <Clock size={12} style={{ animation: 'pulse 1.5s infinite' }} />}
+                                  {statusView.label}
+                                </span>
+                                {statusView.detail && (
+                                  <span title={statusView.detail} style={{ color: '#fca5a5', fontSize: '0.62rem', lineHeight: 1.3, overflowWrap: 'anywhere' }}>
+                                    {statusView.detail}
                                   </span>
-                                  {post.platforms.includes('facebook') && (
+                                )}
+                                {post.status === 'published' && post.platforms.includes('facebook') && (
                                     <button
                                       type="button"
                                       className="btn btn-secondary btn-sm"
@@ -8720,13 +8640,8 @@ export default function App() {
                                     >
                                       <RefreshCw size={10} /> Check FB Reels
                                     </button>
-                                  )}
-                                </div>
-                              ) : (
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#f59e0b' }}>
-                                  <Clock size={12} style={{ animation: 'pulse 1.5s infinite' }} /> Đang chờ
-                                </span>
-                              )}
+                                )}
+                              </div>
                             </td>
                             <td style={{ padding: '0.5rem 0.75rem', textAlign: 'center' }}>
                               <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'center' }}>
@@ -8751,7 +8666,8 @@ export default function App() {
                               </div>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

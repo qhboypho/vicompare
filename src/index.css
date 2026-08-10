@@ -437,6 +437,16 @@ body {
   display: block;
 }
 
+.preview-result-card {
+  flex: 0 0 auto;
+}
+
+@media (min-width: 769px) and (max-height: 900px) {
+  .preview-panel:has(.preview-result-card) .canvas-container {
+    width: clamp(190px, calc((100vh - 345px) * 0.5625), 290px);
+  }
+}
+
 /* Tabs Bar */
 .tabs-header {
   display: flex;
