@@ -1359,6 +1359,8 @@ export async function processTelegramQueueBatch(batch, env, dependencies = {}) {
   for (const message of batch.messages || []) {
     const update = message.body?.update;
     const dedupeKey = getTelegramUpdateDedupeKey(update);
+    const startedAt = Date.now();
+    const updateType = update?.callback_query ? "callback_query" : update?.message ? "message" : "unknown";
 
     try {
       if (!update) {
@@ -1369,11 +1371,19 @@ export async function processTelegramQueueBatch(batch, env, dependencies = {}) {
       if (dedupeKey && env.VICOMPARE_KV) {
         const alreadyProcessed = await env.VICOMPARE_KV.get(dedupeKey);
         if (alreadyProcessed) {
+          console.log("Telegram queue job skipped as duplicate", {
+            updateId: update?.update_id || null,
+            updateType
+          });
           message.ack?.();
           continue;
         }
       }
 
+      console.log("Telegram queue job started", {
+        updateId: update?.update_id || null,
+        updateType
+      });
       await dispatchUpdate(update, token, env, {
         answerCallback: false,
         ttsTimeoutMs: TELEGRAM_QUEUE_TTS_TIMEOUT_MS
@@ -1384,6 +1394,11 @@ export async function processTelegramQueueBatch(batch, env, dependencies = {}) {
           expirationTtl: TELEGRAM_UPDATE_DEDUPE_TTL_SECONDS
         });
       }
+      console.log("Telegram queue job completed", {
+        updateId: update?.update_id || null,
+        updateType,
+        elapsedMs: Date.now() - startedAt
+      });
       message.ack?.();
     } catch (error) {
       console.error("Telegram queue job failed:", {
