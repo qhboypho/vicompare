@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   LEGACY_LUCYLAB_DEFAULT_VOICE_ID,
+  buildGeminiGenerationBody,
   buildCredentialsFromAppSettings,
   resolveTtsConfig,
   pickVoiceCandidate,
@@ -24,6 +25,16 @@ import {
   readImageClassificationResult,
   resolveTikTokCredentials
 } from "./index.js";
+
+describe("Telegram Gemini script generation", () => {
+  it("uses minimal thinking and a bounded output for fast Telegram responses", () => {
+    const body = buildGeminiGenerationBody([{ text: "So sánh bác sĩ và dược sĩ" }]);
+
+    assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, "minimal");
+    assert.equal(body.generationConfig.maxOutputTokens, 1400);
+    assert.deepEqual(body.contents, [{ parts: [{ text: "So sánh bác sĩ và dược sĩ" }] }]);
+  });
+});
 
 describe("Telegram TTS config resolution", () => {
   it("uses the synced ElevenLabs voice instead of a hardcoded default", () => {
