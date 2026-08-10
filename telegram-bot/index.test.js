@@ -205,6 +205,22 @@ describe("Voicefree Telegram text segmentation", () => {
       "Câu 1.", "Câu 2.", "Câu 3.", "Câu 4.", "Câu 5.", "Câu 6."
     ]);
   });
+
+  it("aborts the segmented voice job before Cloudflare cancels the Telegram callback", async () => {
+    const requestAudio = (engineType, ttsConfig, text, { signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    });
+
+    await assert.rejects(
+      requestSegmentedTtsAudio(
+        "tts_voicefree",
+        {},
+        "Câu 1\nCâu 2",
+        { concurrency: 2, requestAudio, timeoutMs: 5 }
+      ),
+      /quá thời gian tạo voice/i
+    );
+  });
 });
 
 describe("Telegram TTS engine keyboard", () => {
