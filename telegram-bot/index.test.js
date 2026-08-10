@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   LEGACY_LUCYLAB_DEFAULT_VOICE_ID,
   buildGeminiGenerationBody,
+  requestGeminiContent,
   buildCredentialsFromAppSettings,
   resolveTtsConfig,
   pickVoiceCandidate,
@@ -33,6 +34,33 @@ describe("Telegram Gemini script generation", () => {
     assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, "minimal");
     assert.equal(body.generationConfig.maxOutputTokens, 1400);
     assert.deepEqual(body.contents, [{ parts: [{ text: "So sánh bác sĩ và dược sĩ" }] }]);
+  });
+
+  it("falls back to the fast model when the primary Gemini request stalls", async () => {
+    const requestedUrls = [];
+    const fetchImpl = (url, options) => {
+      requestedUrls.push(String(url));
+      if (requestedUrls.length === 1) {
+        return new Promise((resolve, reject) => {
+          options.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+      }
+
+      return Promise.resolve(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: "Đây là Bác sĩ." }] } }]
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    };
+
+    const result = await requestGeminiContent({
+      apiKey: "gemini-key",
+      parts: [{ text: "So sánh bác sĩ và dược sĩ" }],
+      fetchImpl,
+      timeoutMs: 5
+    });
+
+    assert.equal(result, "Đây là Bác sĩ.");
+    assert.match(requestedUrls[0], /gemini-3\.5-flash/);
+    assert.match(requestedUrls[1], /gemini-3\.1-flash-lite/);
   });
 });
 
