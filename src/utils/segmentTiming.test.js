@@ -91,4 +91,6 @@ test('getSpokenWeight treats punctuation-only text as a safe minimum', () => {
 test('getSpokenWeight handles Vietnamese, English abbreviations and numeric expressions', () => {
   assert.ok(getSpokenWeight('Chó Phú Quốc rất thông minh.') >= 5);
   assert.ok(getSpokenWeight('API v2 reached 12.5% in 2026.') > getSpokenWeight('API reached twelve percent.'));
+  assert.ok(getSpokenWeight('Năm 2026.') > getSpokenWeight('Năm nay.'));
+  assert.ok(getSpokenWeight('API ready.') > getSpokenWeight('Tool ready.'));
 });
