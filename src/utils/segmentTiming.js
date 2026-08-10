@@ -1,12 +1,24 @@
 const DEFAULT_MIN_BLOCK_DURATION = 0.45;
 
 export function getSpokenWeight(text) {
-  const clean = String(text || '')
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .trim();
-  if (!clean) return 1;
-  const words = clean.split(/\s+/).filter(Boolean).length;
-  return Math.max(1, words);
+  const source = String(text || '').normalize('NFKC');
+  const tokens = source.match(/[\p{L}\p{M}\p{N}]+(?:[.,][\p{N}]+)*%?/gu) || [];
+  if (tokens.length === 0) return 1;
+
+  const tokenWeight = tokens.reduce((sum, token) => {
+    const digits = (token.match(/\p{N}/gu) || []).length;
+    const letters = (token.match(/\p{L}/gu) || []).length;
+    if (digits > 0) {
+      const numericWeight = Math.max(1.2, digits * 0.55);
+      return sum + numericWeight + (token.endsWith('%') ? 0.65 : 0);
+    }
+    const isAcronym = letters >= 2 && token === token.toLocaleUpperCase('und');
+    return sum + (isAcronym ? Math.max(1.25, letters * 0.75) : 1);
+  }, 0);
+
+  const punctuationPause = (source.match(/[,;:]/g) || []).length * 0.12
+    + (source.match(/[.!?…]/g) || []).length * 0.2;
+  return Math.max(1, tokenWeight + punctuationPause);
 }
 
 function roundTime(value) {

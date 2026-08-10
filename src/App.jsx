@@ -43,7 +43,8 @@ import {
   playActionSfxPreview,
   renderSegmentedAudio
 } from './utils/segmentAudio';
-import { buildActionSfxEvents, buildSegmentTimeline } from './utils/segmentTiming';
+import { buildActionSfxEvents, buildSegmentTimeline, getSpokenWeight } from './utils/segmentTiming';
+import { alignAudioSegmentsToBlocks } from './utils/speechAlignment';
 import { saveAudioToStorage, getAudioFromStorage, clearAudioFromStorage, saveImageToStorage, getImageFromStorage, deleteImageFromStorage, saveVideoToStorage, getVideoFromStorage } from './utils/audioStorage';
 import {
   ACTIVE_SOCIAL_ACCOUNT_STORAGE_KEY,
@@ -2391,9 +2392,14 @@ export default function App() {
           }
           try {
             const sourceBlocks = parsedTelegramScript.timelineBlocks.filter(block => String(block.text || '').trim());
-            if (sourceBlocks.length !== audioSegments.length) return false;
+            const alignment = alignAudioSegmentsToBlocks(sourceBlocks, audioSegments);
+            if (!alignment.ok) {
+              console.warn('Telegram audio/subtitle identity mismatch:', alignment.reason);
+              return false;
+            }
+            const alignedSegments = alignment.pairs.map(pair => pair.segment);
 
-            const segmentBlobs = audioSegments.map((segment) => {
+            const segmentBlobs = alignedSegments.map((segment) => {
               const cleanBase64 = String(segment?.base64 || '').replace(/^data:[^,]+,/, '');
               const byteCharacters = atob(cleanBase64);
               const byteNumbers = new Array(byteCharacters.length);
@@ -2414,13 +2420,19 @@ export default function App() {
               segmentGap: 0.06,
               outroPadding: 0.22
             });
+            const exactTimedBlocks = timed.blocks.map((block, index) => ({
+              ...block,
+              syncSource: 'exact-segment',
+              spokenText: alignedSegments[index]?.text || block.text,
+              segmentDuration: segmentDurations[index]
+            }));
             const actionEvents = buildActionSfxEvents(timed.blocks, {
               enabled: session.actionSfxEnabled !== false,
               offset: 0.02
             });
             const mergedBuffer = await renderSegmentedAudio({
               audioBuffers,
-              timelineBlocks: timed.blocks,
+              timelineBlocks: exactTimedBlocks,
               actionEvents,
               sfxVolume: Number(session.actionSfxVolume) || 0.2,
               actionSfxPresets: normalizeActionSfxPresets(session.actionSfxPresets)
@@ -2431,7 +2443,7 @@ export default function App() {
 
             setAudioUrl(mergedUrl);
             setAudioFileName(filename);
-            setTimelineBlocks(timed.blocks);
+            setTimelineBlocks(exactTimedBlocks);
             setDuration(Math.max(timed.duration, mergedBuffer.duration));
             setCurrentTime(0);
             setIsPlaying(false);
@@ -4176,31 +4188,6 @@ export default function App() {
     globalImageZoom,
     imageGlowOpacity
   ]);
-
-  // Helper tính trọng số âm tiết thực tế cho từ tiếng Anh, con số và từ tiếng Việt
-  const getSpokenWeight = (text) => {
-    if (!text) return 1;
-    let weight = 0;
-    const words = text.trim().split(/\s+/);
-    for (const word of words) {
-      const cleanWord = word.replace(/[^\w\d]/g, '');
-      if (!cleanWord) continue;
-
-      // 1. Chuỗi số (e.g. 365 -> "ba trăm sáu mươi lăm" = 5 âm tiết; 2026 -> 7 âm tiết)
-      if (/^\d+[%]?$/.test(cleanWord)) {
-        weight += Math.max(1, cleanWord.length * 1.6);
-      }
-      // 2. Từ viết tắt in hoa (e.g. API -> "a-pê-i", USB, HTML)
-      else if (/^[A-Z0-9]{2,5}$/.test(cleanWord)) {
-        weight += cleanWord.length * 1.4;
-      }
-      // 3. Mỗi từ thường = 1.0 âm tiết chuẩn (tiếng Việt hay từ tên riêng Alaska, Husky, Windows...)
-      else {
-        weight += 1.0;
-      }
-    }
-    return Math.max(weight, 0.5);
-  };
 
   // Proportional timings redistribution
   const redistributeTimings = (totalDuration) => {
