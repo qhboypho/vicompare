@@ -45,6 +45,16 @@ describe("Telegram background queue", () => {
     assert.deepEqual(sent, [{ update }]);
   });
 
+  it("falls back to direct processing when the queue write fails", async () => {
+    const queued = await enqueueTelegramUpdate({ update_id: 124 }, {
+      TELEGRAM_JOBS: {
+        send: async () => { throw new Error("queue unavailable"); }
+      }
+    });
+
+    assert.equal(queued, false);
+  });
+
   it("uses a long TTS deadline and acknowledges a processed queue message", async () => {
     const calls = [];
     let acknowledged = false;

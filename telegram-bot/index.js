@@ -1311,6 +1311,90 @@ export function buildWebAppUrls({
   };
 }
 
+const TELEGRAM_QUEUE_TTS_TIMEOUT_MS = 120000;
+const TELEGRAM_UPDATE_DEDUPE_TTL_SECONDS = 86400;
+
+export async function enqueueTelegramUpdate(update, env) {
+  if (!env.TELEGRAM_JOBS || typeof env.TELEGRAM_JOBS.send !== "function") {
+    return false;
+  }
+
+  try {
+    await env.TELEGRAM_JOBS.send({ update });
+    return true;
+  } catch (error) {
+    console.error("Unable to enqueue Telegram update, using waitUntil fallback:", {
+      updateId: update?.update_id || null,
+      error: error?.message || String(error)
+    });
+    return false;
+  }
+}
+
+function getTelegramUpdateDedupeKey(update) {
+  const updateId = Number(update?.update_id);
+  if (!Number.isFinite(updateId)) return "";
+  return `telegram_update_done:${updateId}`;
+}
+
+export async function dispatchTelegramUpdate(update, token, env, options = {}) {
+  if (update?.callback_query) {
+    await handleCallbackQuery(update.callback_query, token, env, options);
+    return;
+  }
+
+  if (update?.message) {
+    await handleMessage(update.message, token, env);
+  }
+}
+
+export async function processTelegramQueueBatch(batch, env, dependencies = {}) {
+  const token = env.TELEGRAM_BOT_TOKEN;
+  const dispatchUpdate = dependencies.dispatchUpdate || dispatchTelegramUpdate;
+
+  if (!token) {
+    throw new Error("TELEGRAM_BOT_TOKEN is missing!");
+  }
+
+  for (const message of batch.messages || []) {
+    const update = message.body?.update;
+    const dedupeKey = getTelegramUpdateDedupeKey(update);
+
+    try {
+      if (!update) {
+        message.ack?.();
+        continue;
+      }
+
+      if (dedupeKey && env.VICOMPARE_KV) {
+        const alreadyProcessed = await env.VICOMPARE_KV.get(dedupeKey);
+        if (alreadyProcessed) {
+          message.ack?.();
+          continue;
+        }
+      }
+
+      await dispatchUpdate(update, token, env, {
+        answerCallback: false,
+        ttsTimeoutMs: TELEGRAM_QUEUE_TTS_TIMEOUT_MS
+      });
+
+      if (dedupeKey && env.VICOMPARE_KV) {
+        await env.VICOMPARE_KV.put(dedupeKey, "1", {
+          expirationTtl: TELEGRAM_UPDATE_DEDUPE_TTL_SECONDS
+        });
+      }
+      message.ack?.();
+    } catch (error) {
+      console.error("Telegram queue job failed:", {
+        updateId: update?.update_id || null,
+        error: error?.message || String(error)
+      });
+      message.retry?.();
+    }
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     // Xử lý CORS Preflight
@@ -1660,14 +1744,25 @@ export default {
       }
 
       const update = await request.json();
-      
+
       if (update.callback_query) {
-        ctx.waitUntil(handleCallbackQuery(update.callback_query, token, env));
+        if (update.callback_query.id) {
+          try {
+            await answerTelegramCallbackQuery(update.callback_query.id, token);
+          } catch (e) {}
+        }
+        const queued = await enqueueTelegramUpdate(update, env);
+        if (!queued) {
+          ctx.waitUntil(dispatchTelegramUpdate(update, token, env, { answerCallback: false }));
+        }
         return new Response("OK", { status: 200, headers: corsHeaders });
       }
 
       if (update.message) {
-        ctx.waitUntil(handleMessage(update.message, token, env));
+        const queued = await enqueueTelegramUpdate(update, env);
+        if (!queued) {
+          ctx.waitUntil(dispatchTelegramUpdate(update, token, env));
+        }
       }
 
       return new Response("OK", { status: 200, headers: corsHeaders });
@@ -1675,6 +1770,10 @@ export default {
       console.error("Worker Error:", err);
       return new Response("OK", { status: 200, headers: corsHeaders });
     }
+  },
+
+  async queue(batch, env) {
+    await processTelegramQueueBatch(batch, env);
   }
 };
 
@@ -1992,11 +2091,11 @@ async function handleMessage(message, token, env) {
 }
 
 // Xử lý các sự kiện bấm nút trên Telegram
-async function handleCallbackQuery(callbackQuery, token, env) {
+async function handleCallbackQuery(callbackQuery, token, env, options = {}) {
   const chatId = callbackQuery.message.chat.id;
   const data = callbackQuery.data;
   const messageText = callbackQuery.message.text || "";
-  if (callbackQuery.id) {
+  if (callbackQuery.id && options.answerCallback !== false) {
     try {
       await answerTelegramCallbackQuery(callbackQuery.id, token);
     } catch (e) {}
@@ -2124,7 +2223,9 @@ async function handleCallbackQuery(callbackQuery, token, env) {
       const syncedCreds = await getSyncedCredentials(env);
       const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
 
-      const segmentedResult = await requestSegmentedTtsAudio(engineType, ttsConfig, scriptText);
+      const segmentedResult = await requestSegmentedTtsAudio(engineType, ttsConfig, scriptText, {
+        timeoutMs: options.ttsTimeoutMs
+      });
       audioBuffer = segmentedResult.audioBuffer;
       audioUrlResult = segmentedResult.audioUrlResult;
       audioSegments = segmentedResult.audioSegments;

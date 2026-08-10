@@ -5,3 +5,14 @@ compatibility_date = "2024-03-01"
 [[kv_namespaces]]
 binding = "VICOMPARE_KV"
 id = "f9d414951f3f4c5d9f20daef9fdf50a1"
+
+[[queues.producers]]
+binding = "TELEGRAM_JOBS"
+queue = "vicompare-telegram-jobs"
+
+[[queues.consumers]]
+queue = "vicompare-telegram-jobs"
+max_batch_size = 1
+max_batch_timeout = 1
+max_retries = 2
+max_concurrency = 2
