@@ -49,4 +49,3 @@ export function getScheduledStatusView(post = {}) {
   }
   return { tone: 'pending', label: 'Đang chờ', detail: '' };
 }
-

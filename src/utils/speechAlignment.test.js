@@ -46,4 +46,3 @@ test('rejects reordered or unrelated segments instead of silently syncing the wr
   assert.equal(result.ok, false);
   assert.match(result.reason, /không khớp/i);
 });
-

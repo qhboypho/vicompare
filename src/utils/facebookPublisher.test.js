@@ -49,7 +49,6 @@ test('rejects a start response that omits the Facebook upload target', async () 
     /video_id\/upload_url/
   );
 });
-
 test('surfaces Facebook Graph API errors with their phase', async () => {
   await assert.rejects(
     publishFacebookReel({
@@ -62,4 +61,3 @@ test('surfaces Facebook Graph API errors with their phase', async () => {
     /Khởi tạo Facebook Reel: Session has expired/
   );
 });
-

@@ -63,4 +63,3 @@ test('failed scheduled posts expose the real error instead of appearing pending'
     detail: 'Facebook token expired'
   });
 });
-
