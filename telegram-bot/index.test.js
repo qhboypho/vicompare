@@ -24,6 +24,7 @@ import {
   pickManualImageTargetFromText,
   arrayBufferToBase64,
   readImageClassificationResult,
+  requestSegmentedTtsAudio,
   resolveTikTokCredentials
 } from "./index.js";
 
@@ -176,6 +177,32 @@ describe("Voicefree Telegram text segmentation", () => {
       "Đây là A.",
       "Đây là B.",
       "Sự khác nhau là gì?"
+    ]);
+  });
+
+  it("generates sentence audio concurrently while preserving script order", async () => {
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
+    const requestAudio = async (engineType, ttsConfig, text) => {
+      activeRequests += 1;
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+      const index = Number(text.match(/\d+/)?.[0] || 0);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      activeRequests -= 1;
+      return { buffer: new Uint8Array([index]).buffer, audioUrl: `audio-${index}` };
+    };
+
+    const result = await requestSegmentedTtsAudio(
+      "tts_voicefree",
+      {},
+      "Câu 1\nCâu 2\nCâu 3\nCâu 4\nCâu 5\nCâu 6",
+      { concurrency: 3, requestAudio }
+    );
+
+    assert.equal(maxActiveRequests, 3);
+    assert.deepEqual(Array.from(new Uint8Array(result.audioBuffer)), [1, 2, 3, 4, 5, 6]);
+    assert.deepEqual(result.audioSegments.map(segment => segment.text), [
+      "Câu 1.", "Câu 2.", "Câu 3.", "Câu 4.", "Câu 5.", "Câu 6."
     ]);
   });
 });
