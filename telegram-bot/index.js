@@ -942,9 +942,33 @@ async function updateSessionComparisonImages(sessionId, comparisonImages, env) {
   return true;
 }
 
-async function pollExportAudioUrl(host, apiKey, exportId, engineName) {
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error("Request aborted");
+  error.name = "AbortError";
+  throw error;
+}
+
+function delayWithSignal(ms, signal) {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timeoutId);
+      const error = new Error("Request aborted");
+      error.name = "AbortError";
+      reject(error);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function pollExportAudioUrl(host, apiKey, exportId, engineName, options = {}) {
   for (let i = 0; i < 18; i++) {
-    await new Promise(resolve => setTimeout(resolve, 2500));
+    await delayWithSignal(2500, options.signal);
     const statusRes = await fetch(`https://${host}/json-rpc`, {
       method: "POST",
       headers: {
@@ -954,7 +978,8 @@ async function pollExportAudioUrl(host, apiKey, exportId, engineName) {
       body: JSON.stringify({
         method: "getExportStatus",
         input: { projectExportId: exportId }
-      })
+      }),
+      signal: options.signal
     });
 
     if (!statusRes.ok) continue;
@@ -972,15 +997,16 @@ async function pollExportAudioUrl(host, apiKey, exportId, engineName) {
   throw new Error(`${engineName}: Quá thời gian tạo file.`);
 }
 
-async function pollVoicefreeAudioUrl(apiKey, taskId) {
+async function pollVoicefreeAudioUrl(apiKey, taskId, options = {}) {
   for (let attempts = 0; attempts < 30; attempts += 1) {
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await delayWithSignal(2000, options.signal);
     const statusRes = await fetch(`https://api.taovoicefree.com/v1/history/${encodeURIComponent(taskId)}`, {
       method: "GET",
       headers: {
         "accept": "application/json",
         "xi-api-key": apiKey
-      }
+      },
+      signal: options.signal
     });
     if (!statusRes.ok) continue;
     const statusData = await statusRes.json().catch(() => ({}));
@@ -996,7 +1022,7 @@ async function pollVoicefreeAudioUrl(apiKey, taskId) {
   throw new Error("Voicefree: Quá thời gian tạo file.");
 }
 
-async function requestVoicefreeAudioBuffer(ttsConfig, text) {
+async function requestVoicefreeAudioBuffer(ttsConfig, text, options = {}) {
   const startRes = await fetch(`https://api.taovoicefree.com/v1/text-to-speech/${encodeURIComponent(ttsConfig.voiceId)}`, {
     method: "POST",
     headers: {
@@ -1012,7 +1038,8 @@ async function requestVoicefreeAudioBuffer(ttsConfig, text) {
       voice_settings: {
         speed: ttsConfig.speed
       }
-    })
+    }),
+    signal: options.signal
   });
   const startData = await startRes.json().catch(() => ({}));
   if (!startRes.ok || String(startData.status || "").toLowerCase() === "failed") {
@@ -1022,8 +1049,8 @@ async function requestVoicefreeAudioBuffer(ttsConfig, text) {
   const taskId = startData.id || startData.result?.id;
   if (!taskId) throw new Error("Không nhận được task ID.");
 
-  const audioUrl = await pollVoicefreeAudioUrl(ttsConfig.apiKey, taskId);
-  const audioRes = await fetch(audioUrl);
+  const audioUrl = await pollVoicefreeAudioUrl(ttsConfig.apiKey, taskId, options);
+  const audioRes = await fetch(audioUrl, { signal: options.signal });
   if (!audioRes.ok) {
     const errText = await audioRes.text().catch(() => "");
     throw new Error(`Không tải được audio Voicefree: ${errText || audioRes.statusText}`);
@@ -1031,10 +1058,11 @@ async function requestVoicefreeAudioBuffer(ttsConfig, text) {
   return await audioRes.arrayBuffer();
 }
 
-async function requestVoicefreeAudioBufferWithFallback(ttsConfig, scriptText) {
+async function requestVoicefreeAudioBufferWithFallback(ttsConfig, scriptText, options = {}) {
   try {
-    return await requestVoicefreeAudioBuffer(ttsConfig, scriptText);
+    return await requestVoicefreeAudioBuffer(ttsConfig, scriptText, options);
   } catch (wholeTextErr) {
+    if (wholeTextErr?.name === "AbortError") throw wholeTextErr;
     const segments = splitScriptTextSegments(scriptText);
     if (segments.length <= 1) {
       throw new Error(`Voicefree: ${wholeTextErr.message}`);
@@ -1042,7 +1070,7 @@ async function requestVoicefreeAudioBufferWithFallback(ttsConfig, scriptText) {
 
     const chunks = [];
     for (const segment of segments) {
-      chunks.push(new Uint8Array(await requestVoicefreeAudioBuffer(ttsConfig, segment)));
+      chunks.push(new Uint8Array(await requestVoicefreeAudioBuffer(ttsConfig, segment, options)));
     }
 
     const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
@@ -1056,7 +1084,7 @@ async function requestVoicefreeAudioBufferWithFallback(ttsConfig, scriptText) {
   }
 }
 
-async function requestJsonRpcTtsAudioBuffer(ttsConfig, text, label) {
+async function requestJsonRpcTtsAudioBuffer(ttsConfig, text, label, options = {}) {
   const normalizedText = String(text || "").trim();
   let startRes = await fetch(`https://${ttsConfig.host}/json-rpc`, {
     method: "POST",
@@ -1068,7 +1096,8 @@ async function requestJsonRpcTtsAudioBuffer(ttsConfig, text, label) {
         userVoiceId: ttsConfig.voiceId,
         speed: ttsConfig.speed
       }
-    })
+    }),
+    signal: options.signal
   });
   let startData = await startRes.json();
 
@@ -1083,7 +1112,8 @@ async function requestJsonRpcTtsAudioBuffer(ttsConfig, text, label) {
           voiceId: ttsConfig.voiceId,
           speed: ttsConfig.speed
         }
-      })
+      }),
+      signal: options.signal
     });
     const retryData = await startRes.json();
     if (!retryData.error) {
@@ -1096,8 +1126,8 @@ async function requestJsonRpcTtsAudioBuffer(ttsConfig, text, label) {
   const exportId = startData.result?.projectExportId;
   if (!exportId) throw new Error(`${label}: Không nhận được export ID.`);
 
-  const audioUrl = await pollExportAudioUrl(ttsConfig.host, ttsConfig.apiKey, exportId, label);
-  const audioRes = await fetch(audioUrl);
+  const audioUrl = await pollExportAudioUrl(ttsConfig.host, ttsConfig.apiKey, exportId, label, options);
+  const audioRes = await fetch(audioUrl, { signal: options.signal });
   if (!audioRes.ok) throw new Error(`${label}: Không tải được audio đã xuất.`);
   return {
     buffer: await audioRes.arrayBuffer(),
@@ -1105,7 +1135,7 @@ async function requestJsonRpcTtsAudioBuffer(ttsConfig, text, label) {
   };
 }
 
-async function requestTtsAudioBufferForText(engineType, ttsConfig, text) {
+async function requestTtsAudioBufferForText(engineType, ttsConfig, text, options = {}) {
   if (engineType === "tts_eleven") {
     const ttsRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ttsConfig.voiceId}`, {
       method: "POST",
@@ -1117,7 +1147,8 @@ async function requestTtsAudioBufferForText(engineType, ttsConfig, text) {
         text,
         model_id: "eleven_multilingual_v2",
         voice_settings: { stability: 0.5, similarity_boost: 0.75 }
-      })
+      }),
+      signal: options.signal
     });
 
     if (!ttsRes.ok) throw new Error(`ElevenLabs Error: ${ttsRes.statusText}`);
@@ -1125,15 +1156,15 @@ async function requestTtsAudioBufferForText(engineType, ttsConfig, text) {
   }
 
   if (engineType === "tts_lucy") {
-    return await requestJsonRpcTtsAudioBuffer(ttsConfig, text && !/[.!?:]$/.test(text.trim()) ? `${text.trim()}.` : text, "LucyLab");
+    return await requestJsonRpcTtsAudioBuffer(ttsConfig, text && !/[.!?:]$/.test(text.trim()) ? `${text.trim()}.` : text, "LucyLab", options);
   }
 
   if (engineType === "tts_vclip") {
-    return await requestJsonRpcTtsAudioBuffer(ttsConfig, text, "VClip");
+    return await requestJsonRpcTtsAudioBuffer(ttsConfig, text, "VClip", options);
   }
 
   if (engineType === "tts_voicefree") {
-    return { buffer: await requestVoicefreeAudioBufferWithFallback(ttsConfig, text), audioUrl: null };
+    return { buffer: await requestVoicefreeAudioBufferWithFallback(ttsConfig, text, options), audioUrl: null };
   }
 
   throw new Error("Động cơ TTS không hợp lệ.");
@@ -1151,40 +1182,77 @@ function concatArrayBuffers(buffers) {
   return merged.buffer;
 }
 
-async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText) {
-  const segments = splitScriptTextSegments(scriptText);
-  if (segments.length <= 1) {
-    const result = await requestTtsAudioBufferForText(engineType, ttsConfig, scriptText);
-    return {
-      audioBuffer: result.buffer,
-      audioUrlResult: result.audioUrl,
-      audioSegments: [{
-        text: cleanString(scriptText),
-        base64: arrayBufferToBase64(result.buffer)
-      }]
-    };
-  }
+async function mapWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(Math.floor(concurrency) || 1, items.length));
 
-  const segmentResults = [];
-  for (const segment of segments) {
-    const result = await requestTtsAudioBufferForText(engineType, ttsConfig, segment);
-    segmentResults.push({
-      text: segment,
-      buffer: result.buffer,
-      audioUrl: result.audioUrl
-    });
-  }
-
-  const audioSegments = segmentResults.map(segment => ({
-    text: segment.text,
-    base64: arrayBufferToBase64(segment.buffer)
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index], index);
+    }
   }));
 
-  return {
-    audioBuffer: concatArrayBuffers(segmentResults.map(segment => segment.buffer)),
-    audioUrlResult: segmentResults[segmentResults.length - 1]?.audioUrl || null,
-    audioSegments
-  };
+  return results;
+}
+
+export async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText, options = {}) {
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 18000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const abortFromParent = () => controller.abort();
+  options.signal?.addEventListener("abort", abortFromParent, { once: true });
+
+  try {
+    const segments = splitScriptTextSegments(scriptText);
+    const requestAudio = options.requestAudio || requestTtsAudioBufferForText;
+    if (segments.length <= 1) {
+      const result = await requestAudio(engineType, ttsConfig, scriptText, { signal: controller.signal });
+      return {
+        audioBuffer: result.buffer,
+        audioUrlResult: result.audioUrl,
+        audioSegments: [{
+          text: cleanString(scriptText),
+          base64: arrayBufferToBase64(result.buffer)
+        }]
+      };
+    }
+
+    const segmentResults = await mapWithConcurrency(
+      segments,
+      options.concurrency || 5,
+      async (segment) => {
+        const result = await requestAudio(engineType, ttsConfig, segment, { signal: controller.signal });
+        return {
+          text: segment,
+          buffer: result.buffer,
+          audioUrl: result.audioUrl
+        };
+      }
+    );
+
+    const audioSegments = segmentResults.map(segment => ({
+      text: segment.text,
+      base64: arrayBufferToBase64(segment.buffer)
+    }));
+
+    return {
+      audioBuffer: concatArrayBuffers(segmentResults.map(segment => segment.buffer)),
+      audioUrlResult: segmentResults[segmentResults.length - 1]?.audioUrl || null,
+      audioSegments
+    };
+  } catch (error) {
+    controller.abort();
+    if (error?.name === "AbortError") {
+      throw new Error(`Quá thời gian tạo voice (${Math.ceil(timeoutMs / 1000)} giây). Provider phản hồi quá chậm, vui lòng thử lại.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    options.signal?.removeEventListener("abort", abortFromParent);
+  }
 }
 
 export function buildWebAppUrls({
