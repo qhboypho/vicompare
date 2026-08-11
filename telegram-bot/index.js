@@ -1377,6 +1377,179 @@ const TELEGRAM_UPDATE_DEDUPE_TTL_SECONDS = 86400;
 const TELEGRAM_TTS_JOB_TTL_SECONDS = 600;
 const TELEGRAM_TTS_FAILURE_COOLDOWN_SECONDS = 60;
 
+export function shouldQueueTelegramUpdate(update) {
+  return cleanString(update?.callback_query?.data).startsWith("tts_");
+}
+
+async function runOptionalTaskWithTimeout(task, timeoutMs) {
+  let timeoutId;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(task).catch((error) => {
+        console.warn("Optional Telegram workflow task failed:", error?.message || String(error));
+        return null;
+      }),
+      new Promise(resolve => {
+        timeoutId = setTimeout(() => resolve(null), timeoutMs);
+      })
+    ]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function runTelegramTtsWorkflow(params, dependencies = {}) {
+  const {
+    chatId,
+    channelId,
+    engineType,
+    scriptText,
+    token,
+    env,
+    ttsTimeoutMs,
+    imageTimeoutMs = 8000
+  } = params;
+  const deps = {
+    getSyncedCredentials,
+    resolveTtsConfig,
+    requestSegmentedTtsAudio,
+    sendTelegramAudio,
+    readManualImageState,
+    writeManualImageState,
+    fetchComparisonImages,
+    mergeManualComparisonImages,
+    getProfiles,
+    sendTelegramMessage,
+    buildWebAppUrls,
+    createSessionId: () => `s_${Math.random().toString(36).substring(2, 10)}`,
+    ...dependencies
+  };
+
+  const syncedCreds = await deps.getSyncedCredentials(env);
+  const ttsConfig = deps.resolveTtsConfig(engineType, syncedCreds, env);
+  const segmentedResult = await deps.requestSegmentedTtsAudio(engineType, ttsConfig, scriptText, {
+    timeoutMs: ttsTimeoutMs
+  });
+  const audioBuffer = segmentedResult.audioBuffer;
+  if (!audioBuffer) throw new Error("Không thể khởi tạo file audio.");
+
+  const fileName = ttsConfig.fileName || "voice.mp3";
+  const telegramAudioFileId = await deps.sendTelegramAudio(chatId, audioBuffer, fileName, token);
+  if (!telegramAudioFileId) {
+    throw new Error("Không gửi được file voice lên Telegram.");
+  }
+
+  const webAudioUrl = `${WORKER_PUBLIC_BASE_URL}/api/audio?file_id=${encodeURIComponent(telegramAudioFileId)}`;
+  const sessionId = deps.createSessionId();
+  const manualImageState = await deps.readManualImageState(chatId, env);
+  const emptyComparisonImages = extractComparisonPairs(scriptText).map(pair => ({
+    ...pair,
+    leftImageUrl: "",
+    rightImageUrl: ""
+  }));
+  const comparisonImages = deps.mergeManualComparisonImages(emptyComparisonImages, manualImageState);
+  const candidateSegments = Array.isArray(segmentedResult.audioSegments) ? segmentedResult.audioSegments : [];
+  const compactAudioSegments = JSON.stringify(candidateSegments).length <= 18 * 1024 * 1024
+    ? candidateSegments
+    : [];
+  const sessionPayload = {
+    sessionId,
+    chatId,
+    channelId,
+    scriptText,
+    // Telegram already stores the combined audio. Avoid duplicating it in KV beside per-line audio.
+    audioBase64: "",
+    audioSegments: compactAudioSegments,
+    audioUrl: webAudioUrl,
+    voiceSyncMode: syncedCreds.voiceSyncMode || "segment",
+    actionSfxEnabled: syncedCreds.actionSfxEnabled !== false,
+    actionSfxVolume: Number.isFinite(Number(syncedCreds.actionSfxVolume)) ? Number(syncedCreds.actionSfxVolume) : 0.2,
+    actionSfxPresets: syncedCreds.actionSfxPresets || null,
+    comparisonImages,
+    createdAt: new Date().toISOString()
+  };
+
+  let sessionSaved = false;
+  if (env.VICOMPARE_KV) {
+    await env.VICOMPARE_KV.put(`session:${sessionId}`, JSON.stringify(sessionPayload), { expirationTtl: 86400 });
+    sessionSaved = true;
+    if (manualImageState) {
+      await deps.writeManualImageState(chatId, {
+        ...manualImageState,
+        sessionId,
+        comparisonImages,
+        updatedAt: new Date().toISOString()
+      }, env);
+    }
+  }
+
+  const linkAudioSegments = sessionSaved ? compactAudioSegments : [];
+  const { autoUrl, previewUrl } = deps.buildWebAppUrls({
+    sessionId,
+    chatId,
+    channelId,
+    scriptText,
+    audioUrl: webAudioUrl,
+    audioSegments: linkAudioSegments,
+    voiceSyncMode: sessionPayload.voiceSyncMode,
+    actionSfxEnabled: sessionPayload.actionSfxEnabled,
+    actionSfxVolume: sessionPayload.actionSfxVolume,
+    actionSfxPresets: sessionPayload.actionSfxPresets,
+    comparisonImages,
+    includeInlinePayload: !sessionSaved
+  });
+  const finishMarkup = {
+    inline_keyboard: [
+      [{ text: "⚡ Render Video Tự Động (0-Click)", url: autoUrl }],
+      [{ text: "👁️ Mở Web Tool Xem Trước (Preview)", url: previewUrl }]
+    ]
+  };
+  const profiles = await deps.getProfiles(env);
+  const activeProfile = profiles.find(profile => profile.id === channelId) || { name: channelId };
+  const finishMessageSent = await deps.sendTelegramMessage(
+    chatId,
+    `✅ **Đã tạo Giọng đọc & Khớp nhịp hoàn tất!**\n\n` +
+      `📺 **Kênh:** ${activeProfile.name}\n` +
+      `🎙️ **Engine Giọng:** ${engineType.replace("tts_", "").toUpperCase()}\n\n` +
+      `👉 **Vui lòng chọn tùy chọn dưới đây:**\n` +
+      `- **⚡ Render Video Tự Động:** Tự động chạy render xuất video 100% không cần thao tác thủ công.\n` +
+      `- **👁️ Mở Web Tool Xem Trước:** Mở Web Tool để kiểm tra canvas trước khi xuất.`,
+    token,
+    finishMarkup,
+    "Markdown"
+  );
+  if (!finishMessageSent) {
+    throw new Error("Không gửi được tin nhắn hoàn tất và nút mở Web Tool lên Telegram.");
+  }
+
+  const autoImages = await runOptionalTaskWithTimeout(
+    () => deps.fetchComparisonImages(scriptText, { timeoutMs: imageTimeoutMs }),
+    imageTimeoutMs
+  );
+  if (sessionSaved && Array.isArray(autoImages) && autoImages.length > 0) {
+    try {
+      const enrichedImages = deps.mergeManualComparisonImages(autoImages, manualImageState);
+      await env.VICOMPARE_KV.put(`session:${sessionId}`, JSON.stringify({
+        ...sessionPayload,
+        comparisonImages: enrichedImages,
+        updatedAt: new Date().toISOString()
+      }), { expirationTtl: 86400 });
+      if (manualImageState) {
+        await deps.writeManualImageState(chatId, {
+          ...manualImageState,
+          sessionId,
+          comparisonImages: enrichedImages,
+          updatedAt: new Date().toISOString()
+        }, env);
+      }
+    } catch (error) {
+      console.warn("Optional Telegram image enrichment persistence failed:", error?.message || String(error));
+    }
+  }
+
+  return { sessionId, audioFileId: telegramAudioFileId };
+}
+
 export async function enqueueTelegramUpdate(update, env) {
   if (!env.TELEGRAM_JOBS || typeof env.TELEGRAM_JOBS.send !== "function") {
     return false;
@@ -1386,7 +1559,7 @@ export async function enqueueTelegramUpdate(update, env) {
     await env.TELEGRAM_JOBS.send({ update });
     return true;
   } catch (error) {
-    console.error("Unable to enqueue Telegram update, using waitUntil fallback:", {
+    console.error("Unable to enqueue Telegram TTS update:", {
       updateId: update?.update_id || null,
       error: error?.message || String(error)
     });
@@ -1846,7 +2019,7 @@ export default {
 
       const update = await request.json();
 
-      if (update.callback_query) {
+      if (update.callback_query && shouldQueueTelegramUpdate(update)) {
         if (update.callback_query.id) {
           try {
             await answerTelegramCallbackQuery(update.callback_query.id, token);
@@ -1854,16 +2027,17 @@ export default {
         }
         const queued = await enqueueTelegramUpdate(update, env);
         if (!queued) {
-          ctx.waitUntil(dispatchTelegramUpdate(update, token, env, { answerCallback: false }));
+          await sendTelegramMessage(
+            update.callback_query.message?.chat?.id,
+            "❌ Hàng đợi tạo voice đang tạm thời không khả dụng. Vui lòng thử lại sau.",
+            token
+          );
         }
         return new Response("OK", { status: 200, headers: corsHeaders });
       }
 
-      if (update.message) {
-        const queued = await enqueueTelegramUpdate(update, env);
-        if (!queued) {
-          ctx.waitUntil(dispatchTelegramUpdate(update, token, env));
-        }
+      if (update.callback_query || update.message) {
+        ctx.waitUntil(dispatchTelegramUpdate(update, token, env));
       }
 
       return new Response("OK", { status: 200, headers: corsHeaders });
@@ -2326,128 +2500,21 @@ async function handleCallbackQuery(callbackQuery, token, env, options = {}) {
     await sendTelegramMessage(chatId, "🎙️ Đang kết nối API tạo giọng đọc & tự động đồng bộ nhịp phụ đề...", token);
 
     try {
-      let audioBuffer = null;
-      let fileName = "voice.mp3";
-      let audioUrlResult = null;
-      let audioSegments = [];
-
-      const syncedCreds = await getSyncedCredentials(env);
-      const ttsConfig = resolveTtsConfig(engineType, syncedCreds, env);
-
-      const segmentedResult = await requestSegmentedTtsAudio(engineType, ttsConfig, scriptText, {
-        timeoutMs: options.ttsTimeoutMs
+      await runTelegramTtsWorkflow({
+        chatId,
+        channelId,
+        engineType,
+        scriptText,
+        token,
+        env,
+        ttsTimeoutMs: options.ttsTimeoutMs
       });
-      audioBuffer = segmentedResult.audioBuffer;
-      audioUrlResult = segmentedResult.audioUrlResult;
-      audioSegments = segmentedResult.audioSegments;
-      fileName = ttsConfig.fileName;
-
-      if (audioBuffer) {
-        // Gửi tệp âm thanh nghe thử về Telegram
-        const telegramAudioFileId = await sendTelegramAudio(chatId, audioBuffer, fileName, token);
-        const webAudioUrl = telegramAudioFileId
-          ? `${WORKER_PUBLIC_BASE_URL}/api/audio?file_id=${encodeURIComponent(telegramAudioFileId)}`
-          : audioUrlResult;
-
-        // Tạo phiên làm việc (Session) và lưu vào KV
-        const sessionId = `s_${Math.random().toString(36).substring(2, 10)}`;
-        let base64Audio = "";
-        try {
-          base64Audio = arrayBufferToBase64(audioBuffer);
-        } catch (e) {}
-
-        console.log("Telegram TTS audio delivered; preparing session", { chatId, engineType });
-        const manualImageState = await readManualImageState(chatId, env);
-        const autoComparisonImages = await fetchComparisonImages(scriptText, { timeoutMs: 8000 });
-        const comparisonImages = mergeManualComparisonImages(autoComparisonImages, manualImageState);
-
-        const compactAudioSegments = JSON.stringify(audioSegments).length <= 18 * 1024 * 1024 ? audioSegments : [];
-        const sessionPayload = {
-          sessionId,
-          chatId,
-          channelId,
-          scriptText,
-          audioBase64: base64Audio,
-          audioSegments: compactAudioSegments,
-          audioUrl: webAudioUrl || null,
-          voiceSyncMode: syncedCreds.voiceSyncMode || "segment",
-          actionSfxEnabled: syncedCreds.actionSfxEnabled !== false,
-          actionSfxVolume: Number.isFinite(Number(syncedCreds.actionSfxVolume)) ? Number(syncedCreds.actionSfxVolume) : 0.2,
-          actionSfxPresets: syncedCreds.actionSfxPresets || null,
-          comparisonImages,
-          createdAt: new Date().toISOString()
-        };
-
-        let sessionSaved = false;
-        if (env.VICOMPARE_KV) {
-          await env.VICOMPARE_KV.put(`session:${sessionId}`, JSON.stringify(sessionPayload), { expirationTtl: 86400 });
-          sessionSaved = true;
-          console.log("Telegram TTS session saved", { chatId, sessionId });
-          if (manualImageState) {
-            await writeManualImageState(chatId, {
-              ...manualImageState,
-              sessionId,
-              comparisonImages,
-              updatedAt: new Date().toISOString()
-            }, env);
-          }
-        }
-
-        // Tạo link chuyển hướng 1-Click sang Web App (Auto Render 0-Click hoặc Preview xem trước)
-        const { autoUrl: webAppAutoUrl, previewUrl: webAppPreviewUrl } = buildWebAppUrls({
-          sessionId,
-          chatId,
-          channelId,
-          scriptText,
-          audioUrl: webAudioUrl || null,
-          audioSegments: compactAudioSegments,
-          voiceSyncMode: syncedCreds.voiceSyncMode || "segment",
-          actionSfxEnabled: syncedCreds.actionSfxEnabled !== false,
-          actionSfxVolume: Number.isFinite(Number(syncedCreds.actionSfxVolume)) ? Number(syncedCreds.actionSfxVolume) : 0.2,
-          actionSfxPresets: syncedCreds.actionSfxPresets || null,
-          comparisonImages,
-          includeInlinePayload: !sessionSaved
-        });
-
-        const finishMarkup = {
-          inline_keyboard: [
-            [
-              { text: "⚡ Render Video Tự Động (0-Click)", url: webAppAutoUrl }
-            ],
-            [
-              { text: "👁️ Mở Web Tool Xem Trước (Preview)", url: webAppPreviewUrl }
-            ]
-          ]
-        };
-
-        const profiles = await getProfiles(env);
-        const activeProfile = profiles.find(p => p.id === channelId) || { name: channelId };
-
-        const finishMessageSent = await sendTelegramMessage(
-          chatId, 
-          `✅ **Đã tạo Giọng đọc & Khớp nhịp hoàn tất!**\n\n` +
-          `📺 **Kênh:** ${activeProfile.name}\n` +
-          `🎙️ **Engine Giọng:** ${engineType.replace("tts_", "").toUpperCase()}\n\n` +
-          `👉 **Vui lòng chọn tùy chọn dưới đây:**\n` +
-          `- **⚡ Render Video Tự Động:** Tự động chạy render xuất video 100% không cần thao tác thủ công.\n` +
-          `- **👁️ Mở Web Tool Xem Trước:** Mở Web Tool để kiểm tra canvas trước khi xuất.`, 
-          token, 
-          finishMarkup, 
-          "Markdown"
-        );
-        if (!finishMessageSent) {
-          throw new Error("Không gửi được tin nhắn hoàn tất và nút mở Web Tool lên Telegram.");
-        }
-        await setTelegramTtsJobState(
-          ttsJobKey,
-          "completed",
-          env,
-          TELEGRAM_TTS_JOB_TTL_SECONDS
-        );
-
-      } else {
-        throw new Error("Không thể khởi tạo file audio.");
-      }
+      await setTelegramTtsJobState(
+        ttsJobKey,
+        "completed",
+        env,
+        TELEGRAM_TTS_JOB_TTL_SECONDS
+      );
     } catch (err) {
       console.error("TTS Error:", err);
       await setTelegramTtsJobState(

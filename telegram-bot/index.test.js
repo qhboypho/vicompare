@@ -31,10 +31,23 @@ import {
   processTelegramQueueBatch,
   buildTelegramTtsJobKey,
   claimTelegramTtsJob,
-  runTelegramTtsWorkflow
+  runTelegramTtsWorkflow,
+  shouldQueueTelegramUpdate
 } from "./index.js";
 
 describe("Telegram background queue", () => {
+  it("queues only long-running TTS callbacks so normal bot messages are not blocked", () => {
+    assert.equal(shouldQueueTelegramUpdate({
+      callback_query: { data: "tts_voicefree|cat-thong-thai" }
+    }), true);
+    assert.equal(shouldQueueTelegramUpdate({
+      callback_query: { data: "chan_cat-thong-thai" }
+    }), false);
+    assert.equal(shouldQueueTelegramUpdate({
+      message: { text: "Bác sĩ và dược sĩ" }
+    }), false);
+  });
+
   it("enqueues the complete Telegram update for background processing", async () => {
     const sent = [];
     const update = { update_id: 123, callback_query: { id: "callback-1" } };
@@ -74,7 +87,7 @@ describe("Telegram background queue", () => {
     assert.equal(await claimTelegramTtsJob("telegram_tts_job:1", env), false);
   });
 
-  it("falls back to direct processing when the queue write fails", async () => {
+  it("reports an unavailable queue without running a long TTS job in waitUntil", async () => {
     const queued = await enqueueTelegramUpdate({ update_id: 124 }, {
       TELEGRAM_JOBS: {
         send: async () => { throw new Error("queue unavailable"); }
@@ -424,6 +437,84 @@ describe("Telegram TTS workflow", () => {
       }),
       /không gửi được file voice/i
     );
+  });
+
+  it("does not let a stalled optional image lookup delay voice completion", async () => {
+    const messages = [];
+    const startedAt = Date.now();
+
+    await runTelegramTtsWorkflow({
+      chatId: 10,
+      channelId: "cat-thong-thai",
+      engineType: "tts_voicefree",
+      scriptText: "Câu một.",
+      token: "telegram-token",
+      env: {
+        VICOMPARE_KV: { put: async () => {} }
+      },
+      imageTimeoutMs: 5
+    }, {
+      getSyncedCredentials: async () => ({}),
+      resolveTtsConfig: () => ({ fileName: "voice.mp3" }),
+      requestSegmentedTtsAudio: async () => ({
+        audioBuffer: new Uint8Array([1]).buffer,
+        audioSegments: [{ text: "Câu một.", base64: "AQ==" }],
+        audioUrlResult: null
+      }),
+      sendTelegramAudio: async () => "telegram-audio-id",
+      readManualImageState: async () => null,
+      fetchComparisonImages: async () => new Promise(() => {}),
+      getProfiles: async () => [{ id: "cat-thong-thai", name: "Mèo Thông Thái" }],
+      sendTelegramMessage: async (_chatId, text) => {
+        messages.push(text);
+        return true;
+      },
+      createSessionId: () => "session-timeout"
+    });
+
+    assert.ok(Date.now() - startedAt < 100);
+    assert.equal(messages.filter(text => text.includes("Đã tạo Giọng đọc")).length, 1);
+  });
+
+  it("keeps a completed voice job successful when optional image persistence fails", async () => {
+    let putCount = 0;
+    const messages = [];
+
+    const result = await runTelegramTtsWorkflow({
+      chatId: 10,
+      channelId: "cat-thong-thai",
+      engineType: "tts_voicefree",
+      scriptText: "Đây là A.\nĐây là B.",
+      token: "telegram-token",
+      env: {
+        VICOMPARE_KV: {
+          put: async () => {
+            putCount += 1;
+            if (putCount > 1) throw new Error("KV enrichment failed");
+          }
+        }
+      }
+    }, {
+      getSyncedCredentials: async () => ({}),
+      resolveTtsConfig: () => ({ fileName: "voice.mp3" }),
+      requestSegmentedTtsAudio: async () => ({
+        audioBuffer: new Uint8Array([1, 2]).buffer,
+        audioSegments: [{ text: "Đây là A.", base64: "AQ==" }],
+        audioUrlResult: null
+      }),
+      sendTelegramAudio: async () => "telegram-audio-id",
+      readManualImageState: async () => null,
+      fetchComparisonImages: async () => [{ leftTitle: "A", rightTitle: "B" }],
+      getProfiles: async () => [{ id: "cat-thong-thai", name: "Mèo Thông Thái" }],
+      sendTelegramMessage: async (_chatId, text) => {
+        messages.push(text);
+        return true;
+      },
+      createSessionId: () => "session-enrichment-failure"
+    });
+
+    assert.equal(result.sessionId, "session-enrichment-failure");
+    assert.equal(messages.filter(text => text.includes("Đã tạo Giọng đọc")).length, 1);
   });
 });
 
