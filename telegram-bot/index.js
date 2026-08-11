@@ -1343,6 +1343,8 @@ export function buildWebAppUrls({
 
 const TELEGRAM_QUEUE_TTS_TIMEOUT_MS = 120000;
 const TELEGRAM_UPDATE_DEDUPE_TTL_SECONDS = 86400;
+const TELEGRAM_TTS_JOB_TTL_SECONDS = 600;
+const TELEGRAM_TTS_FAILURE_COOLDOWN_SECONDS = 60;
 
 export async function enqueueTelegramUpdate(update, env) {
   if (!env.TELEGRAM_JOBS || typeof env.TELEGRAM_JOBS.send !== "function") {
@@ -1365,6 +1367,29 @@ function getTelegramUpdateDedupeKey(update) {
   const updateId = Number(update?.update_id);
   if (!Number.isFinite(updateId)) return "";
   return `telegram_update_done:${updateId}`;
+}
+
+export function buildTelegramTtsJobKey(callbackQuery) {
+  const chatId = callbackQuery?.message?.chat?.id;
+  const messageId = callbackQuery?.message?.message_id;
+  const data = cleanString(callbackQuery?.data);
+  if (!chatId || !messageId || !data.startsWith("tts_")) return "";
+  return `telegram_tts_job:${chatId}:${messageId}:${encodeURIComponent(data)}`;
+}
+
+export async function claimTelegramTtsJob(jobKey, env) {
+  if (!jobKey || !env.VICOMPARE_KV) return true;
+  const existingState = await env.VICOMPARE_KV.get(jobKey);
+  if (existingState) return false;
+  await env.VICOMPARE_KV.put(jobKey, "processing", {
+    expirationTtl: TELEGRAM_TTS_JOB_TTL_SECONDS
+  });
+  return true;
+}
+
+async function setTelegramTtsJobState(jobKey, state, env, expirationTtl) {
+  if (!jobKey || !env.VICOMPARE_KV) return;
+  await env.VICOMPARE_KV.put(jobKey, state, { expirationTtl });
 }
 
 export async function dispatchTelegramUpdate(update, token, env, options = {}) {
@@ -2248,12 +2273,22 @@ async function handleCallbackQuery(callbackQuery, token, env, options = {}) {
   // 3. BƯỚC 2: Xử lý bấm chọn Giọng đọc (`tts_...|channelId`)
   if (data.startsWith("tts_")) {
     const [engineType, channelId = 'cat-thong-thai'] = data.split("|");
+    const ttsJobKey = buildTelegramTtsJobKey(callbackQuery);
 
     // Trích xuất kịch bản từ nội dung tin nhắn
     const scriptText = cleanTelegramScriptText(messageText);
     
     if (!scriptText) {
       await sendTelegramMessage(chatId, "⚠️ Không tìm thấy văn bản kịch bản để tạo giọng đọc.", token);
+      return;
+    }
+
+    if (!(await claimTelegramTtsJob(ttsJobKey, env))) {
+      console.log("Repeated Telegram TTS click skipped", {
+        chatId,
+        messageId: callbackQuery.message?.message_id || null,
+        engineType
+      });
       return;
     }
 
@@ -2367,12 +2402,24 @@ async function handleCallbackQuery(callbackQuery, token, env, options = {}) {
           finishMarkup, 
           "Markdown"
         );
+        await setTelegramTtsJobState(
+          ttsJobKey,
+          "completed",
+          env,
+          TELEGRAM_TTS_JOB_TTL_SECONDS
+        );
 
       } else {
         throw new Error("Không thể khởi tạo file audio.");
       }
     } catch (err) {
       console.error("TTS Error:", err);
+      await setTelegramTtsJobState(
+        ttsJobKey,
+        "failed",
+        env,
+        TELEGRAM_TTS_FAILURE_COOLDOWN_SECONDS
+      );
       await sendTelegramMessage(chatId, `❌ Gặp lỗi khi tạo giọng nói: ${err.message}`, token);
     }
   }
