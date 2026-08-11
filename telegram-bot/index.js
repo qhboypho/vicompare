@@ -660,7 +660,7 @@ function pickBestWebImage(urls, query, subject) {
     .sort((a, b) => b.score - a.score)[0]?.url || "";
 }
 
-async function fetchGoogleImageSearch(query, subject) {
+async function fetchGoogleImageSearch(query, subject, options = {}) {
   try {
     const url = new URL("https://www.google.com/search");
     url.searchParams.set("tbm", "isch");
@@ -672,7 +672,8 @@ async function fetchGoogleImageSearch(query, subject) {
       headers: {
         "User-Agent": IMAGE_SEARCH_USER_AGENT,
         "Accept": "text/html,application/xhtml+xml"
-      }
+      },
+      signal: options.signal
     });
     if (!res.ok) return "";
 
@@ -683,15 +684,17 @@ async function fetchGoogleImageSearch(query, subject) {
     }
     return pickBestWebImage(urls, query, subject);
   } catch (e) {
+    if (e?.name === "AbortError") throw e;
     return "";
   }
 }
 
-async function fetchDuckDuckGoImageSearch(query, subject) {
+async function fetchDuckDuckGoImageSearch(query, subject, options = {}) {
   try {
     const homeUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`;
     const homeRes = await fetch(homeUrl, {
-      headers: { "User-Agent": IMAGE_SEARCH_USER_AGENT }
+      headers: { "User-Agent": IMAGE_SEARCH_USER_AGENT },
+      signal: options.signal
     });
     if (!homeRes.ok) return "";
     const homeText = await homeRes.text();
@@ -711,37 +714,65 @@ async function fetchDuckDuckGoImageSearch(query, subject) {
         "User-Agent": IMAGE_SEARCH_USER_AGENT,
         "Referer": homeUrl,
         "Accept": "application/json"
-      }
+      },
+      signal: options.signal
     });
     if (!res.ok) return "";
     const data = await res.json();
     const urls = (data.results || []).flatMap(item => [item.image, item.thumbnail]).filter(Boolean);
     return pickBestWebImage(urls, query, subject);
   } catch (e) {
+    if (e?.name === "AbortError") throw e;
     return "";
   }
 }
 
-async function fetchWebImage(title) {
+async function fetchWebImage(title, options = {}) {
   const { subject } = normalizeImageSubject(title);
   for (const query of buildImageSearchQueries(title)) {
-    const googleImage = await fetchGoogleImageSearch(query, subject);
+    throwIfAborted(options.signal);
+    const googleImage = await fetchGoogleImageSearch(query, subject, options);
     if (googleImage) return googleImage;
 
-    const duckDuckGoImage = await fetchDuckDuckGoImageSearch(query, subject);
+    const duckDuckGoImage = await fetchDuckDuckGoImageSearch(query, subject, options);
     if (duckDuckGoImage) return duckDuckGoImage;
   }
 
   return "";
 }
 
-export async function fetchComparisonImages(scriptText) {
+export async function fetchComparisonImages(scriptText, options = {}) {
   const pairs = extractComparisonPairs(scriptText);
-  return Promise.all(pairs.map(async (pair) => ({
+  const results = pairs.map(pair => ({
     ...pair,
-    leftImageUrl: await fetchWebImage(pair.leftTitle),
-    rightImageUrl: await fetchWebImage(pair.rightTitle)
-  })));
+    leftImageUrl: "",
+    rightImageUrl: ""
+  }));
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 8000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const abortFromParent = () => controller.abort();
+  options.signal?.addEventListener("abort", abortFromParent, { once: true });
+  const fetchImage = options.fetchImage || fetchWebImage;
+
+  try {
+    await Promise.all(results.flatMap((pair) => [
+      fetchImage(pair.leftTitle, { signal: controller.signal })
+        .then(url => { pair.leftImageUrl = cleanString(url); }),
+      fetchImage(pair.rightTitle, { signal: controller.signal })
+        .then(url => { pair.rightImageUrl = cleanString(url); })
+    ]));
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      console.warn("Comparison image lookup failed:", error?.message || String(error));
+    }
+  } finally {
+    controller.abort();
+    clearTimeout(timeoutId);
+    options.signal?.removeEventListener("abort", abortFromParent);
+  }
+
+  return results;
 }
 
 function getManualImageStateKey(chatId) {
@@ -2325,8 +2356,9 @@ async function handleCallbackQuery(callbackQuery, token, env, options = {}) {
           base64Audio = arrayBufferToBase64(audioBuffer);
         } catch (e) {}
 
+        console.log("Telegram TTS audio delivered; preparing session", { chatId, engineType });
         const manualImageState = await readManualImageState(chatId, env);
-        const autoComparisonImages = await fetchComparisonImages(scriptText);
+        const autoComparisonImages = await fetchComparisonImages(scriptText, { timeoutMs: 8000 });
         const comparisonImages = mergeManualComparisonImages(autoComparisonImages, manualImageState);
 
         const compactAudioSegments = JSON.stringify(audioSegments).length <= 18 * 1024 * 1024 ? audioSegments : [];
@@ -2350,6 +2382,7 @@ async function handleCallbackQuery(callbackQuery, token, env, options = {}) {
         if (env.VICOMPARE_KV) {
           await env.VICOMPARE_KV.put(`session:${sessionId}`, JSON.stringify(sessionPayload), { expirationTtl: 86400 });
           sessionSaved = true;
+          console.log("Telegram TTS session saved", { chatId, sessionId });
           if (manualImageState) {
             await writeManualImageState(chatId, {
               ...manualImageState,
@@ -2390,7 +2423,7 @@ async function handleCallbackQuery(callbackQuery, token, env, options = {}) {
         const profiles = await getProfiles(env);
         const activeProfile = profiles.find(p => p.id === channelId) || { name: channelId };
 
-        await sendTelegramMessage(
+        const finishMessageSent = await sendTelegramMessage(
           chatId, 
           `✅ **Đã tạo Giọng đọc & Khớp nhịp hoàn tất!**\n\n` +
           `📺 **Kênh:** ${activeProfile.name}\n` +
@@ -2402,6 +2435,9 @@ async function handleCallbackQuery(callbackQuery, token, env, options = {}) {
           finishMarkup, 
           "Markdown"
         );
+        if (!finishMessageSent) {
+          throw new Error("Không gửi được tin nhắn hoàn tất và nút mở Web Tool lên Telegram.");
+        }
         await setTelegramTtsJobState(
           ttsJobKey,
           "completed",
@@ -2473,7 +2509,7 @@ async function sendTelegramMessage(chatId, text, token, replyMarkup = null, pars
   if (parseMode) body.parse_mode = parseMode;
   if (replyMarkup) body.reply_markup = replyMarkup;
 
-  const res = await fetch(url, {
+  let res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
@@ -2481,12 +2517,17 @@ async function sendTelegramMessage(chatId, text, token, replyMarkup = null, pars
   
   if (!res.ok && parseMode) {
     delete body.parse_mode;
-    await fetch(url, {
+    res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
   }
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    console.warn("sendTelegramMessage failed:", errorData.description || res.statusText);
+  }
+  return res.ok;
 }
 
 async function sendTelegramDocument(chatId, arrayBuffer, fileName, token, caption = "", replyMarkup = null) {
