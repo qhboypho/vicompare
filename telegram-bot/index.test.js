@@ -295,7 +295,7 @@ describe("Voicefree Telegram text segmentation", () => {
     ]);
   });
 
-  it("generates sentence audio concurrently while preserving script order", async () => {
+  it("generates segmented provider audio concurrently while preserving script order", async () => {
     let activeRequests = 0;
     let maxActiveRequests = 0;
     const requestAudio = async (engineType, ttsConfig, text) => {
@@ -308,7 +308,7 @@ describe("Voicefree Telegram text segmentation", () => {
     };
 
     const result = await requestSegmentedTtsAudio(
-      "tts_voicefree",
+      "tts_eleven",
       {},
       "Câu 1\nCâu 2\nCâu 3\nCâu 4\nCâu 5\nCâu 6",
       { concurrency: 3, minRequestIntervalMs: 0, requestAudio }
@@ -321,29 +321,23 @@ describe("Voicefree Telegram text segmentation", () => {
     ]);
   });
 
-  it("paces Voicefree request starts below the provider limit", async () => {
-    const startedAt = Date.now();
-    const starts = [];
+  it("creates Voicefree once for the complete script instead of one task per subtitle", async () => {
+    const requests = [];
     const requestAudio = async (_engineType, _ttsConfig, text) => {
-      starts.push({ text, at: Date.now() - startedAt });
-      return { buffer: new Uint8Array([starts.length]).buffer, audioUrl: null };
+      requests.push(text);
+      return { buffer: new Uint8Array([1, 2, 3]).buffer, audioUrl: "voicefree-audio" };
     };
 
-    await requestSegmentedTtsAudio(
+    const result = await requestSegmentedTtsAudio(
       "tts_voicefree",
       {},
       "Câu 1\nCâu 2\nCâu 3\nCâu 4",
-      {
-        concurrency: 3,
-        minRequestIntervalMs: 25,
-        requestAudio
-      }
+      { requestAudio }
     );
 
-    assert.ok(starts[0].at < 20);
-    for (let index = 1; index < starts.length; index += 1) {
-      assert.ok(starts[index].at - starts[index - 1].at >= 18);
-    }
+    assert.deepEqual(requests, ["Câu 1\nCâu 2\nCâu 3\nCâu 4"]);
+    assert.deepEqual(result.audioSegments, []);
+    assert.equal(result.audioUrlResult, "voicefree-audio");
   });
 
   it("aborts the segmented voice job before Cloudflare cancels the Telegram callback", async () => {
