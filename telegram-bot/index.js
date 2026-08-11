@@ -1089,32 +1089,6 @@ async function requestVoicefreeAudioBuffer(ttsConfig, text, options = {}) {
   return await audioRes.arrayBuffer();
 }
 
-async function requestVoicefreeAudioBufferWithFallback(ttsConfig, scriptText, options = {}) {
-  try {
-    return await requestVoicefreeAudioBuffer(ttsConfig, scriptText, options);
-  } catch (wholeTextErr) {
-    if (wholeTextErr?.name === "AbortError") throw wholeTextErr;
-    const segments = splitScriptTextSegments(scriptText);
-    if (segments.length <= 1) {
-      throw new Error(`Voicefree: ${wholeTextErr.message}`);
-    }
-
-    const chunks = [];
-    for (const segment of segments) {
-      chunks.push(new Uint8Array(await requestVoicefreeAudioBuffer(ttsConfig, segment, options)));
-    }
-
-    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
-    const merged = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of chunks) {
-      merged.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    return merged.buffer;
-  }
-}
-
 async function requestJsonRpcTtsAudioBuffer(ttsConfig, text, label, options = {}) {
   const normalizedText = String(text || "").trim();
   let startRes = await fetch(`https://${ttsConfig.host}/json-rpc`, {
@@ -1195,7 +1169,7 @@ async function requestTtsAudioBufferForText(engineType, ttsConfig, text, options
   }
 
   if (engineType === "tts_voicefree") {
-    return { buffer: await requestVoicefreeAudioBufferWithFallback(ttsConfig, text, options), audioUrl: null };
+    return { buffer: await requestVoicefreeAudioBuffer(ttsConfig, text, options), audioUrl: null };
   }
 
   throw new Error("Động cơ TTS không hợp lệ.");
@@ -1267,6 +1241,16 @@ export async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText
       delay: options.delay,
       signal: controller.signal
     });
+    if (engineType === "tts_voicefree" && options.forceSegmented !== true) {
+      await waitForRequestStart();
+      const result = await requestAudio(engineType, ttsConfig, scriptText, { signal: controller.signal });
+      return {
+        audioBuffer: result.buffer,
+        audioUrlResult: result.audioUrl,
+        // Voicefree is intentionally one-shot. The Web Tool applies Silence Sync to this track.
+        audioSegments: []
+      };
+    }
     if (segments.length <= 1) {
       await waitForRequestStart();
       const result = await requestAudio(engineType, ttsConfig, scriptText, { signal: controller.signal });
