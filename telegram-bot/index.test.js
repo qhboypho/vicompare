@@ -12,6 +12,7 @@ import {
   buildWebAppUrls,
   buildTtsEngineKeyboard,
   buildImageSearchQueries,
+  fetchComparisonImages,
   buildManualImageTargetKeyboard,
   cleanTelegramScriptText,
   splitVoicefreeTextSegments,
@@ -521,6 +522,21 @@ describe("comparison image search queries", () => {
   it("maps common Vietnamese abstract comparison titles before searching images", () => {
     assert.ok(buildImageSearchQueries("Trí tuệ nhân tạo").includes("Artificial intelligence"));
     assert.ok(buildImageSearchQueries("Trí tuệ con người").includes("Thinking"));
+  });
+
+  it("falls back to empty image slots when web image lookup stalls", async () => {
+    const fetchImage = (_title, { signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    });
+
+    const images = await fetchComparisonImages(
+      "Đây là Chó Doberman.\nĐây là Chó Rottweiler.",
+      { timeoutMs: 5, fetchImage }
+    );
+
+    assert.equal(images.length, 1);
+    assert.equal(images[0].leftImageUrl, "");
+    assert.equal(images[0].rightImageUrl, "");
   });
 });
 
