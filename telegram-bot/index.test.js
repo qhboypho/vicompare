@@ -27,7 +27,9 @@ import {
   requestSegmentedTtsAudio,
   resolveTikTokCredentials,
   enqueueTelegramUpdate,
-  processTelegramQueueBatch
+  processTelegramQueueBatch,
+  buildTelegramTtsJobKey,
+  claimTelegramTtsJob
 } from "./index.js";
 
 describe("Telegram background queue", () => {
@@ -43,6 +45,31 @@ describe("Telegram background queue", () => {
 
     assert.equal(queued, true);
     assert.deepEqual(sent, [{ update }]);
+  });
+
+  it("uses the source message and selected engine to identify repeated TTS clicks", () => {
+    const callback = {
+      data: "tts_voicefree|cat-thong-thai",
+      message: { message_id: 55, chat: { id: 999 } }
+    };
+
+    assert.equal(
+      buildTelegramTtsJobKey(callback),
+      "telegram_tts_job:999:55:tts_voicefree%7Ccat-thong-thai"
+    );
+  });
+
+  it("claims a TTS button only once while its job lock is active", async () => {
+    const stored = new Map();
+    const env = {
+      VICOMPARE_KV: {
+        get: async (key) => stored.get(key) || null,
+        put: async (key, value) => stored.set(key, value)
+      }
+    };
+
+    assert.equal(await claimTelegramTtsJob("telegram_tts_job:1", env), true);
+    assert.equal(await claimTelegramTtsJob("telegram_tts_job:1", env), false);
   });
 
   it("falls back to direct processing when the queue write fails", async () => {
