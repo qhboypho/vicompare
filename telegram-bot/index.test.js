@@ -30,7 +30,8 @@ import {
   enqueueTelegramUpdate,
   processTelegramQueueBatch,
   buildTelegramTtsJobKey,
-  claimTelegramTtsJob
+  claimTelegramTtsJob,
+  runTelegramTtsWorkflow
 } from "./index.js";
 
 describe("Telegram background queue", () => {
@@ -345,6 +346,83 @@ describe("Voicefree Telegram text segmentation", () => {
         { concurrency: 2, requestAudio, timeoutMs: 5 }
       ),
       /quá thời gian tạo voice/i
+    );
+  });
+});
+
+describe("Telegram TTS workflow", () => {
+  it("delivers audio, persists a compact session, and sends completion before optional image enrichment", async () => {
+    const events = [];
+    const stored = new Map();
+    const audioBuffer = new Uint8Array([1, 2, 3]).buffer;
+    const audioSegments = [
+      { text: "Câu một.", base64: "AQ==" },
+      { text: "Câu hai.", base64: "Ag==" }
+    ];
+
+    const result = await runTelegramTtsWorkflow({
+      chatId: 10,
+      channelId: "cat-thong-thai",
+      engineType: "tts_voicefree",
+      scriptText: "Câu một.\nCâu hai.",
+      token: "telegram-token",
+      env: {
+        VICOMPARE_KV: {
+          put: async (key, value) => {
+            events.push(`kv:${key}`);
+            stored.set(key, JSON.parse(value));
+          }
+        }
+      }
+    }, {
+      getSyncedCredentials: async () => ({ voiceSyncMode: "segment" }),
+      resolveTtsConfig: () => ({ fileName: "voice.mp3" }),
+      requestSegmentedTtsAudio: async () => ({ audioBuffer, audioSegments, audioUrlResult: null }),
+      sendTelegramAudio: async () => {
+        events.push("audio");
+        return "telegram-audio-id";
+      },
+      readManualImageState: async () => null,
+      fetchComparisonImages: async () => {
+        events.push("images");
+        throw new Error("image provider unavailable");
+      },
+      getProfiles: async () => [{ id: "cat-thong-thai", name: "Mèo Thông Thái" }],
+      sendTelegramMessage: async (_chatId, text) => {
+        if (text.includes("Đã tạo Giọng đọc")) events.push("completed");
+        return true;
+      },
+      createSessionId: () => "session-test"
+    });
+
+    const session = stored.get("session:session-test");
+    assert.equal(result.sessionId, "session-test");
+    assert.equal(session.audioBase64, "");
+    assert.deepEqual(session.audioSegments, audioSegments);
+    assert.ok(events.indexOf("completed") > events.indexOf("kv:session:session-test"));
+    assert.ok(events.indexOf("images") > events.indexOf("completed"));
+  });
+
+  it("fails explicitly when Telegram cannot upload the generated audio", async () => {
+    await assert.rejects(
+      runTelegramTtsWorkflow({
+        chatId: 10,
+        channelId: "cat-thong-thai",
+        engineType: "tts_voicefree",
+        scriptText: "Câu một.",
+        token: "telegram-token",
+        env: {}
+      }, {
+        getSyncedCredentials: async () => ({}),
+        resolveTtsConfig: () => ({ fileName: "voice.mp3" }),
+        requestSegmentedTtsAudio: async () => ({
+          audioBuffer: new Uint8Array([1]).buffer,
+          audioSegments: [],
+          audioUrlResult: null
+        }),
+        sendTelegramAudio: async () => ""
+      }),
+      /không gửi được file voice/i
     );
   });
 });
