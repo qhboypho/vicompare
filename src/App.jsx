@@ -2362,8 +2362,11 @@ export default function App() {
 
       if (session) {
         const { scriptText, channelId, audioBase64, audioUrl, audioSegments = [], comparisonImages = [] } = session;
+        const sessionSfxVolume = Number.isFinite(Number(session.actionSfxVolume))
+          ? Number(session.actionSfxVolume)
+          : 0.2;
         if (session.actionSfxEnabled !== undefined) setActionSfxEnabled(session.actionSfxEnabled);
-        if (session.actionSfxVolume !== undefined) setActionSfxVolume(Number(session.actionSfxVolume) || 0.2);
+        if (session.actionSfxVolume !== undefined) setActionSfxVolume(sessionSfxVolume);
         if (session.actionSfxPresets !== undefined) setActionSfxPresets(normalizeActionSfxPresets(session.actionSfxPresets));
         let parsedTelegramScript = null;
         if (channelId) {
@@ -2436,7 +2439,7 @@ export default function App() {
               audioBuffers,
               timelineBlocks: exactTimedBlocks,
               actionEvents,
-              sfxVolume: Number(session.actionSfxVolume) || 0.2,
+              sfxVolume: sessionSfxVolume,
               actionSfxPresets: normalizeActionSfxPresets(session.actionSfxPresets)
             });
             const mergedBlob = audioBufferToWavBlob(mergedBuffer);
@@ -2503,7 +2506,7 @@ export default function App() {
             await saveAudioToStorage(localAudioBlob, 'telegram_voice.mp3');
             rememberCurrentAudioFileName('telegram_voice.mp3');
           }
-          await waitForTelegramAudioSync({
+          const { syncResult } = await waitForTelegramAudioSync({
             audioUrl: localAudioBlobUrl,
             createAudio: url => new Audio(url),
             syncTimeline: (targetUrl, targetDuration) => runSilenceSyncWithUrl(
@@ -2512,6 +2515,30 @@ export default function App() {
               parsedTelegramScript?.timelineBlocks
             )
           });
+
+          const syncedBlocks = syncResult?.blocks || [];
+          const sourceAudioBuffer = syncResult?.audioBuffer;
+          const actionEvents = buildActionSfxEvents(syncedBlocks, {
+            enabled: session.actionSfxEnabled !== false,
+            offset: 0.02
+          });
+          if (sourceAudioBuffer && actionEvents.length > 0) {
+            const mixedBuffer = await renderSegmentedAudio({
+              audioBuffers: [sourceAudioBuffer],
+              timelineBlocks: [{ start: 0, end: sourceAudioBuffer.duration }],
+              actionEvents,
+              sfxVolume: sessionSfxVolume,
+              actionSfxPresets: normalizeActionSfxPresets(session.actionSfxPresets)
+            });
+            const mixedBlob = audioBufferToWavBlob(mixedBuffer);
+            const mixedUrl = URL.createObjectURL(mixedBlob);
+            const mixedFileName = 'telegram_voice_with_sfx.wav';
+            setAudioUrl(mixedUrl);
+            setAudioFileName(mixedFileName);
+            setDuration(Math.max(syncResult.duration || 0, mixedBuffer.duration));
+            await saveAudioToStorage(mixedBlob, mixedFileName);
+            rememberCurrentAudioFileName(mixedFileName);
+          }
         }
 
         const isAutoRender = urlParams.get('auto') === 'true' || urlParams.get('autoRender') === 'true';
@@ -4220,6 +4247,7 @@ export default function App() {
       const isLocal = targetUrl.startsWith('blob:') || targetUrl.startsWith('data:');
       const requestUrl = isLocal ? targetUrl : `/cors-proxy?url=${encodeURIComponent(targetUrl)}`;
       const response = await fetch(requestUrl);
+      if (!response.ok) throw new Error(`Khong tai duoc audio de can nhịp (HTTP ${response.status}).`);
       const arrayBuffer = await response.arrayBuffer();
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
@@ -4337,19 +4365,21 @@ export default function App() {
           }
         }
 
-        updated[0].start = 0;
         for (let i = 0; i < matchedTimes.length; i++) {
           const t = parseFloat(matchedTimes[i].toFixed(2));
           updated[i].end = t;
           updated[i + 1].start = t;
         }
         updated[updated.length - 1].end = parseFloat(audioDuration.toFixed(2));
-
-        setTimelineBlocks(updated);
       }
+
+      updated[0].start = 0;
+      updated[updated.length - 1].end = parseFloat(audioDuration.toFixed(2));
+      setTimelineBlocks(updated);
 
       setDuration(audioDuration);
       setCurrentTime(0);
+      return { blocks: updated, audioBuffer, duration: audioDuration };
     } catch (err) {
       console.error('Lỗi khi khớp nhịp khoảng lặng:', err);
 
@@ -4366,7 +4396,9 @@ export default function App() {
           return { ...block, start, end };
         });
         setTimelineBlocks(fallbackBlocks);
+        return { blocks: fallbackBlocks, audioBuffer: null, duration: targetDuration };
       }
+      return { blocks: sourceBlocks, audioBuffer: null, duration: targetDuration };
     } finally {
       setIsProcessingAudio(false);
     }

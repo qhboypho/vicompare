@@ -37,7 +37,7 @@ export function waitForTelegramAudioSync({ audioUrl, createAudio, syncTimeline, 
       const metadataDuration = Number(audio.duration);
       const duration = Number.isFinite(metadataDuration) ? metadataDuration : 0;
       Promise.resolve(syncTimeline(audioUrl, duration)).then(
-        () => finish(resolve)(duration),
+        syncResult => finish(resolve)({ duration, syncResult }),
         finish(reject)
       );
     };
