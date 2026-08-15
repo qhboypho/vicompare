@@ -45,6 +45,11 @@ import {
 } from './utils/segmentAudio';
 import { buildActionSfxEvents, buildSegmentTimeline, getSpokenWeight } from './utils/segmentTiming';
 import { alignAudioSegmentsToBlocks } from './utils/speechAlignment';
+import {
+  buildTelegramFallbackSession,
+  pickTelegramChannelProfile,
+  waitForTelegramAudioSync
+} from './utils/telegramSessionHydration';
 import { saveAudioToStorage, getAudioFromStorage, clearAudioFromStorage, saveImageToStorage, getImageFromStorage, deleteImageFromStorage, saveVideoToStorage, getVideoFromStorage } from './utils/audioStorage';
 import {
   ACTIVE_SOCIAL_ACCOUNT_STORAGE_KEY,
@@ -1934,7 +1939,9 @@ export default function App() {
       await syncChannelProfilesToTelegram(cloudSettings?.channelProfiles || channelProfiles, credentialOverrides);
       cloudSettingsBootedRef.current = true;
       scheduleCloudSettingsSync(credentialOverrides);
-      loadSessionFromTelegram();
+      await loadSessionFromTelegram({
+        channelProfiles: cloudSettings?.channelProfiles || channelProfiles
+      });
     };
 
     boot();
@@ -2315,7 +2322,7 @@ export default function App() {
   };
 
   // 2. Tự động kiểm tra URL parameter ?session=... để nạp dữ liệu từ Telegram
-  const loadSessionFromTelegram = async () => {
+  const loadSessionFromTelegram = async (options = {}) => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
@@ -2332,16 +2339,7 @@ export default function App() {
       }
 
       const sessionId = urlParams.get('session');
-      const fallbackSession = {
-        scriptText: inlinePayload.scriptText || urlParams.get('scriptText') || urlParams.get('script') || '',
-        channelId: inlinePayload.channelId || urlParams.get('channelId') || '',
-        audioBase64: '',
-        audioUrl: inlinePayload.audioUrl || urlParams.get('audioUrl') || '',
-        actionSfxEnabled: inlinePayload.actionSfxEnabled,
-        actionSfxVolume: inlinePayload.actionSfxVolume,
-        actionSfxPresets: inlinePayload.actionSfxPresets,
-        comparisonImages: Array.isArray(inlinePayload.comparisonImages) ? inlinePayload.comparisonImages : []
-      };
+      const fallbackSession = buildTelegramFallbackSession({ inlinePayload, urlParams });
 
       let telegramSession = null;
       if (sessionId) {
@@ -2369,7 +2367,11 @@ export default function App() {
         if (session.actionSfxPresets !== undefined) setActionSfxPresets(normalizeActionSfxPresets(session.actionSfxPresets));
         let parsedTelegramScript = null;
         if (channelId) {
-          const selectedProfile = channelProfiles.find(profile => profile.id === channelId);
+          const selectedProfile = pickTelegramChannelProfile(
+            channelId,
+            options.channelProfiles,
+            channelProfiles
+          );
           if (selectedProfile) {
             handleApplyChannelProfile(selectedProfile);
           }
@@ -2477,13 +2479,6 @@ export default function App() {
         }
 
         if (!restoredSegmentedAudio && localAudioBlobUrl) {
-          const syncLoadedAudio = (targetUrl) => {
-            const tempAudio = new Audio(targetUrl);
-            tempAudio.onloadedmetadata = async () => {
-              await runSilenceSyncWithUrl(targetUrl, tempAudio.duration, parsedTelegramScript?.timelineBlocks);
-            };
-          };
-
           setAudioUrl(localAudioBlobUrl);
           setAudioFileName('telegram_voice.mp3');
 
@@ -2508,7 +2503,15 @@ export default function App() {
             await saveAudioToStorage(localAudioBlob, 'telegram_voice.mp3');
             rememberCurrentAudioFileName('telegram_voice.mp3');
           }
-          syncLoadedAudio(localAudioBlobUrl);
+          await waitForTelegramAudioSync({
+            audioUrl: localAudioBlobUrl,
+            createAudio: url => new Audio(url),
+            syncTimeline: (targetUrl, targetDuration) => runSilenceSyncWithUrl(
+              targetUrl,
+              targetDuration,
+              parsedTelegramScript?.timelineBlocks
+            )
+          });
         }
 
         const isAutoRender = urlParams.get('auto') === 'true' || urlParams.get('autoRender') === 'true';

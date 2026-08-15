@@ -73,3 +73,20 @@ test('waits for metadata and timeline synchronization before resolving Telegram 
   assert.equal(duration, 12.4);
   assert.equal(syncFinished, true);
 });
+
+test('rejects stalled Telegram audio metadata instead of leaving preview hydration hanging', async () => {
+  const audio = {
+    set onloadedmetadata(_handler) {},
+    set onerror(_handler) {}
+  };
+
+  await assert.rejects(
+    waitForTelegramAudioSync({
+      audioUrl: 'https://cdn.example.com/stalled.mp3',
+      createAudio: () => audio,
+      syncTimeline: async () => {},
+      timeoutMs: 5
+    }),
+    /Qua thoi gian cho metadata/
+  );
+});
