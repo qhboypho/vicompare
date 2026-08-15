@@ -9390,7 +9390,7 @@ export default function App() {
         <nav className="public-site-footer__links" aria-label="Legal and contact links">
           <a href="/terms/">Điều khoản dịch vụ</a>
           <a href="/privacy/">Chính sách bảo mật</a>
-          <a href="mailto:admin@vicompare.pages.dev">Liên hệ</a>
+          <a href="mailto:qhboypho@gmail.com">Liên hệ</a>
         </nav>
       </footer>
 
