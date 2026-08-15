@@ -133,6 +133,12 @@ body {
   overflow: hidden;
 }
 
+.workspace-grid > .preview-panel,
+.workspace-grid > .editor-panel,
+.workspace-grid > .script-panel {
+  min-height: 0;
+}
+
 .public-site-footer {
   min-height: 58px;
   padding: 0.55rem 1.25rem;
@@ -651,6 +657,11 @@ textarea:focus {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+}
+
+.comparison-list-card {
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
 .comp-box {

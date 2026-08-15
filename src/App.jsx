@@ -63,6 +63,7 @@ import {
 } from './utils/socialAccounts';
 import { publishTikTokVideo } from './utils/tiktokPublisher';
 import { publishFacebookReel } from './utils/facebookPublisher';
+import { buildCanvasImageCandidates } from './utils/canvasImageSource';
 import {
   getScheduledStatusView,
   resolveScheduledAccounts,
@@ -495,25 +496,34 @@ export default function App() {
       return;
     }
 
-    const img = new Image();
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      img.crossOrigin = 'anonymous';
-    }
-    img.onload = async () => {
-      // A sprite can be paintable at onload while its full pixel data is still decoding.
-      // Wait for decode before the renderer creates its reusable transparency canvas.
-      try {
-        await img.decode?.();
-      } catch {
-        // Some browsers reject decode for already-decoded or SVG resources; onload is enough then.
+    const candidates = buildCanvasImageCandidates(url, window.location.origin);
+    const loadCandidate = (candidateIndex) => {
+      const candidateUrl = candidates[candidateIndex];
+      if (!candidateUrl) {
+        console.error(`Failed to load image for canvas: ${url}`);
+        return;
       }
-      loadedImagesRef.current[key] = img;
-      if (triggerCanvasRedrawRef.current) triggerCanvasRedrawRef.current();
+
+      const img = new Image();
+      if (candidateUrl.startsWith('http://') || candidateUrl.startsWith('https://')) {
+        img.crossOrigin = 'anonymous';
+      }
+      img.onload = async () => {
+        // A sprite can be paintable at onload while its full pixel data is still decoding.
+        // Wait for decode before the renderer creates its reusable transparency canvas.
+        try {
+          await img.decode?.();
+        } catch {
+          // Some browsers reject decode for already-decoded or SVG resources; onload is enough then.
+        }
+        loadedImagesRef.current[key] = img;
+        if (triggerCanvasRedrawRef.current) triggerCanvasRedrawRef.current();
+      };
+      img.onerror = () => loadCandidate(candidateIndex + 1);
+      img.src = candidateUrl;
     };
-    img.onerror = (err) => {
-      console.error(`Failed to load image: ${url}`, err);
-    };
-    img.src = url;
+
+    loadCandidate(0);
   };
 
   // Ngăn chặn sự kiện drop mặc định của trình duyệt để tránh bị chuyển hướng trang (browser navigate)
@@ -6525,7 +6535,7 @@ export default function App() {
           {activeTab === 'content' && (
             <>
               {/* Dynamic Comparisons Stack */}
-              <div className="glass-card">
+              <div className="glass-card comparison-list-card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                   <h2 className="card-title" style={{ margin: 0 }}>Danh sách So Sánh</h2>
                   <button className="btn btn-secondary btn-sm" onClick={handleAddComparison}>
