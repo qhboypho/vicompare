@@ -9377,6 +9377,23 @@ export default function App() {
         </div>
       )}
 
+      <footer className="public-site-footer" aria-label="ViCompare service information">
+        <div className="public-site-footer__summary">
+          <strong>ViCompare</strong>
+          <span>
+            Công cụ tạo video so sánh, lồng tiếng AI và đồng bộ phụ đề trên trình duyệt.
+          </span>
+        </div>
+        <div className="public-site-footer__tiktok">
+          TikTok Login Kit kết nối tài khoản; Content Posting API chỉ đăng video khi người dùng chủ động xác nhận.
+        </div>
+        <nav className="public-site-footer__links" aria-label="Legal and contact links">
+          <a href="/terms/">Điều khoản dịch vụ</a>
+          <a href="/privacy/">Chính sách bảo mật</a>
+          <a href="mailto:admin@vicompare.pages.dev">Liên hệ</a>
+        </nav>
+      </footer>
+
     </div>
   );
 }
