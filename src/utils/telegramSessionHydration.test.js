@@ -50,6 +50,10 @@ test('uses the freshly loaded cloud channel profile when opening a Telegram prev
 test('waits for metadata and timeline synchronization before resolving Telegram audio hydration', async () => {
   let metadataHandler;
   let syncFinished = false;
+  const syncResult = {
+    blocks: [{ id: 'line-1', start: 0, end: 12.4, pose: 'point_left' }],
+    audioBuffer: { duration: 12.4 }
+  };
   const audio = {
     duration: 12.4,
     set onloadedmetadata(handler) { metadataHandler = handler; },
@@ -63,14 +67,15 @@ test('waits for metadata and timeline synchronization before resolving Telegram 
       assert.equal(duration, 12.4);
       await Promise.resolve();
       syncFinished = true;
+      return syncResult;
     }
   });
 
   assert.equal(syncFinished, false);
   await metadataHandler();
-  const duration = await pending;
+  const result = await pending;
 
-  assert.equal(duration, 12.4);
+  assert.deepEqual(result, { duration: 12.4, syncResult });
   assert.equal(syncFinished, true);
 });
 
