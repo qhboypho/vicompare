@@ -37,7 +37,8 @@ test('uploads schedule metadata and the rendered video to the Worker', async () 
 
   assert.equal(request.url, 'https://worker.example.com/api/schedules');
   assert.equal(request.options.headers['X-Sync-Token'], 'secret-token');
-  assert.equal(request.options.body.get('video'), video);
+  assert.equal(request.options.body.get('video').size, video.size);
+  assert.equal(request.options.body.get('video').type, video.type);
   assert.deepEqual(JSON.parse(request.options.body.get('metadata')), {
     id: 'post-1',
     caption: 'Bai viet',

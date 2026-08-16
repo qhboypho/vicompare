@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  LEGACY_LUCYLAB_DEFAULT_VOICE_ID,
   buildGeminiGenerationBody,
   requestGeminiContent,
   buildCredentialsFromAppSettings,
@@ -34,6 +33,8 @@ import {
   runTelegramTtsWorkflow,
   shouldQueueTelegramUpdate
 } from "./index.js";
+
+const LEGACY_LUCYLAB_DEFAULT_VOICE_ID = "67e37e5c5ffbc46fa2e75e11";
 
 describe("Telegram background queue", () => {
   it("queues only long-running TTS callbacks so normal bot messages are not blocked", () => {

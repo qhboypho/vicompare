@@ -1,3 +1,5 @@
+import { handleScheduleApiRequest, processDueSchedules } from './scheduledPublishing.js';
+
 // vicompare-telegram-bot - Chạy trên Cloudflare Workers
 // Hỗ trợ phân tích hình ảnh/chủ đề qua Gemini, tự sinh kịch bản tiếng Việt, đồng bộ Mẫu Kênh (Channel Profiles),
 // tự chuyển đổi kịch bản thành giọng đọc và kết nối mượt mà 2 chiều với Web App (ViCompare Tool).
@@ -16,7 +18,7 @@ const corsHeaders = {
 const WORKER_PUBLIC_BASE_URL = "https://vicompare-telegram-bot.qhboypho.workers.dev";
 const IMAGE_SEARCH_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
-export const LEGACY_LUCYLAB_DEFAULT_VOICE_ID = "67e37e5c5ffbc46fa2e75e11";
+const LEGACY_LUCYLAB_DEFAULT_VOICE_ID = "67e37e5c5ffbc46fa2e75e11";
 
 function isAuthorizedSettingsSyncRequest(request, env) {
   const expected = cleanString(env.APP_SETTINGS_SYNC_TOKEN);
@@ -1412,7 +1414,9 @@ export async function runTelegramTtsWorkflow(params, dependencies = {}) {
   const syncedCreds = await deps.getSyncedCredentials(env);
   const ttsConfig = deps.resolveTtsConfig(engineType, syncedCreds, env);
   const segmentedResult = await deps.requestSegmentedTtsAudio(engineType, ttsConfig, scriptText, {
-    timeoutMs: ttsTimeoutMs
+    timeoutMs: ttsTimeoutMs,
+    // Keep Telegram preview on the same per-sentence timing pipeline as the Web Tool.
+    forceSegmented: true
   });
   const audioBuffer = segmentedResult.audioBuffer;
   if (!audioBuffer) throw new Error("Không thể khởi tạo file audio.");
@@ -1661,6 +1665,17 @@ export default {
     }
 
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/schedules") {
+      try {
+        return await handleScheduleApiRequest(request, env, corsHeaders);
+      } catch (err) {
+        return new Response(JSON.stringify({ success: false, error: err.message }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+    }
 
     // -------------------------------------------------------------
     // REST API ENDPOINTS DÀNH CHO WEB APP
@@ -2033,6 +2048,10 @@ export default {
 
   async queue(batch, env) {
     await processTelegramQueueBatch(batch, env);
+  },
+
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(processDueSchedules(env));
   }
 };
 

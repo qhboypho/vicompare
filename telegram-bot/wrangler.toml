@@ -16,3 +16,10 @@ max_batch_size = 1
 max_batch_timeout = 1
 max_retries = 2
 max_concurrency = 1
+
+[[r2_buckets]]
+binding = "SCHEDULED_VIDEOS"
+bucket_name = "vicompare-scheduled-videos"
+
+[triggers]
+crons = ["* * * * *"]

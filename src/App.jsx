@@ -69,6 +69,13 @@ import {
   resolveScheduledAccounts,
   snapshotScheduledAccounts
 } from './utils/scheduledPublishing';
+import {
+  createCloudSchedule,
+  deleteCloudSchedule,
+  fetchCloudSchedules,
+  mergeCloudScheduleStatuses,
+  parseScheduleDateToIso
+} from './utils/cloudScheduler';
 
 // Default prompt script replicating FastScene layout
 const DEFAULT_SCRIPT = `Đây là khách quan.
@@ -86,6 +93,7 @@ Trí tuệ con người sở hữu sự thấu cảm, ý thức, khả năng tư
 const DEFAULT_VIDEO_FONT = '"Be Vietnam Pro", Arial, sans-serif';
 const TELEGRAM_WORKER_BASE_URL = 'https://vicompare-telegram-bot.qhboypho.workers.dev';
 const CLOUD_APP_SETTINGS_URL = `${TELEGRAM_WORKER_BASE_URL}/api/app-settings`;
+const CLOUD_SCHEDULES_URL = `${TELEGRAM_WORKER_BASE_URL}/api/schedules`;
 const CLOUD_SETTINGS_LAST_SYNC_KEY = 'cloud_settings_last_sync';
 const CURRENT_AUDIO_FILE_NAME_KEY = 'current_audio_file_name';
 
@@ -3103,12 +3111,12 @@ export default function App() {
     }
   };
 
-  // Vòng lặp quét lịch hẹn giờ tự động mỗi 30 giây
+  // Legacy fallback for schedules created before cloud scheduling was available.
   useEffect(() => {
     const checkScheduledPosts = () => {
       const now = Date.now();
       scheduledPosts.forEach(post => {
-        if (post.status === 'pending') {
+        if (post.status === 'pending' && !post.cloudScheduled) {
           try {
             // Chuẩn hóa định dạng thời gian để phân tích
             const scheduleTime = new Date(post.date.replace(' ', 'T')).getTime();
@@ -3122,6 +3130,7 @@ export default function App() {
       });
     };
 
+    checkScheduledPosts();
     const intervalId = setInterval(checkScheduledPosts, 30000); // Quét mỗi 30 giây
     return () => clearInterval(intervalId);
   }, [
@@ -3139,6 +3148,33 @@ export default function App() {
     ttClientSecret,
     ttRefreshToken
   ]);
+
+  const hasCloudSchedules = scheduledPosts.some(post => post.cloudScheduled);
+
+  // Cloud Worker owns new schedules, so they continue while the browser is closed.
+  useEffect(() => {
+    if (!hasCloudSchedules) return undefined;
+    let cancelled = false;
+    const syncStatuses = async () => {
+      try {
+        const cloudSchedules = await fetchCloudSchedules({
+          endpoint: CLOUD_SCHEDULES_URL,
+          syncToken: cloudSettingsSyncToken
+        });
+        if (!cancelled) {
+          setScheduledPosts(prev => mergeCloudScheduleStatuses(prev, cloudSchedules));
+        }
+      } catch (err) {
+        console.warn('Không đồng bộ được trạng thái lịch hẹn cloud:', err);
+      }
+    };
+    syncStatuses();
+    const intervalId = setInterval(syncStatuses, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [hasCloudSchedules, cloudSettingsSyncToken]);
 
   // HTML Element Refs
   const canvasRef = useRef(null);
@@ -6012,6 +6048,19 @@ export default function App() {
     }
 
     const newPostId = `post-${Date.now()}`;
+    let dueAt = '';
+    if (publishMode === 'schedule') {
+      try {
+        dueAt = parseScheduleDateToIso(scheduleDate);
+        if (Date.parse(dueAt) <= Date.now()) {
+          alert('Thời gian hẹn đăng phải nằm trong tương lai.');
+          return;
+        }
+      } catch (err) {
+        alert(err.message);
+        return;
+      }
+    }
     const newPost = {
       id: newPostId,
       caption: publishCaption,
@@ -6024,6 +6073,8 @@ export default function App() {
       ),
       mode: publishMode,
       date: publishMode === 'schedule' ? scheduleDate.replace('T', ' ') : new Date().toLocaleString('vi-VN'),
+      dueAt,
+      cloudScheduled: false,
       status: publishMode === 'schedule' ? 'pending' : 'publishing',
       videoUrl: exportedVideoUrl || '',
       headerTitle: headerTitle,
@@ -6090,9 +6141,10 @@ export default function App() {
     };
 
     // Lưu tệp video vào IndexedDB dưới ổ cứng để phục vụ tính năng hẹn giờ đăng tự động
+    let renderedVideoBlob = null;
     try {
-      const videoBlob = await fetch(exportedVideoUrl).then(r => r.blob());
-      await saveVideoToStorage(newPostId, videoBlob);
+      renderedVideoBlob = await fetch(exportedVideoUrl).then(r => r.blob());
+      await saveVideoToStorage(newPostId, renderedVideoBlob);
       const savedVideo = await getVideoFromStorage(newPostId);
       if (!savedVideo) {
         throw new Error('Không xác nhận được file video trong IndexedDB');
@@ -6103,14 +6155,32 @@ export default function App() {
       return;
     }
 
-    // Thêm bài đăng vào danh sách hiển thị sau khi chắc chắn đã lưu được file video.
-    setScheduledPosts(prev => [newPost, ...prev]);
-
     if (publishMode === 'schedule') {
+      try {
+        const cloudSchedule = await createCloudSchedule({
+          endpoint: CLOUD_SCHEDULES_URL,
+          syncToken: cloudSettingsSyncToken,
+          post: { ...newPost, dueAt },
+          videoBlob: renderedVideoBlob
+        });
+        setScheduledPosts(prev => [{
+          ...newPost,
+          ...cloudSchedule,
+          cloudScheduled: true,
+          date: scheduleDate.replace('T', ' ')
+        }, ...prev]);
+      } catch (err) {
+        console.error('Không tạo được lịch hẹn cloud:', err);
+        alert(`Không thể đưa lịch lên Cloudflare nên chưa đặt lịch: ${err.message}`);
+        return;
+      }
       setPublishCaption('');
-      alert('Đã lên lịch đăng video thành công! Bài viết đang ở trạng thái chờ.');
+      alert('Đã tải video lên lịch Cloudflare. Có thể đóng trình duyệt, Worker vẫn tự đăng đúng giờ.');
       return;
     }
+
+    // Immediate posts remain in the local list for status and comment tracking.
+    setScheduledPosts(prev => [newPost, ...prev]);
 
     // Đăng trực tiếp ngay lập tức
     setIsPublishing(true);
@@ -6289,8 +6359,21 @@ export default function App() {
     }
   };
 
-  const handleDeleteSchedule = (id) => {
+  const handleDeleteSchedule = async (id) => {
     if (confirm('Bạn có chắc chắn muốn xóa bài đăng này khỏi lịch trình?')) {
+      const post = scheduledPosts.find(item => item.id === id);
+      if (post?.cloudScheduled) {
+        try {
+          await deleteCloudSchedule({
+            endpoint: CLOUD_SCHEDULES_URL,
+            id,
+            syncToken: cloudSettingsSyncToken
+          });
+        } catch (err) {
+          alert(`Không xóa được lịch trên cloud: ${err.message}`);
+          return;
+        }
+      }
       setScheduledPosts(scheduledPosts.filter(p => p.id !== id));
     }
   };
