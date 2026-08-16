@@ -361,6 +361,7 @@ describe("Telegram TTS workflow", () => {
   it("delivers audio, persists a compact session, and sends completion before optional image enrichment", async () => {
     const events = [];
     const stored = new Map();
+    let segmentedOptions = null;
     const audioBuffer = new Uint8Array([1, 2, 3]).buffer;
     const audioSegments = [
       { text: "Câu một.", base64: "AQ==" },
@@ -384,7 +385,10 @@ describe("Telegram TTS workflow", () => {
     }, {
       getSyncedCredentials: async () => ({ voiceSyncMode: "segment" }),
       resolveTtsConfig: () => ({ fileName: "voice.mp3" }),
-      requestSegmentedTtsAudio: async () => ({ audioBuffer, audioSegments, audioUrlResult: null }),
+      requestSegmentedTtsAudio: async (_engineType, _config, _script, options) => {
+        segmentedOptions = options;
+        return { audioBuffer, audioSegments, audioUrlResult: null };
+      },
       sendTelegramAudio: async () => {
         events.push("audio");
         return "telegram-audio-id";
@@ -404,6 +408,7 @@ describe("Telegram TTS workflow", () => {
 
     const session = stored.get("session:session-test");
     assert.equal(result.sessionId, "session-test");
+    assert.equal(segmentedOptions.forceSegmented, true);
     assert.equal(session.audioBase64, "");
     assert.deepEqual(session.audioSegments, audioSegments);
     assert.ok(events.indexOf("completed") > events.indexOf("kv:session:session-test"));
