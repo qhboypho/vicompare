@@ -1266,9 +1266,14 @@ export async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText
       };
     }
 
+    // Engine online (lucy/vclip/eleven) polling từng câu rất tốn thời gian nếu
+    // chia thành nhiều đợt. Với voicefree phải giữ đợt nhỏ vì bị rate-limit
+    // (minRequestIntervalMs). Các engine còn lại cho chạy gần như cùng lúc để
+    // tổng thời gian ~ 1 câu chậm nhất, tránh vượt wall-time của Worker.
+    const defaultConcurrency = engineType === "tts_voicefree" ? 5 : 10;
     const segmentResults = await mapWithConcurrency(
       segments,
-      options.concurrency || 5,
+      options.concurrency || defaultConcurrency,
       async (segment) => {
         await waitForRequestStart();
         const result = await requestAudio(engineType, ttsConfig, segment, { signal: controller.signal });
@@ -1358,8 +1363,13 @@ export function buildWebAppUrls({
   };
 }
 
-const TELEGRAM_QUEUE_TTS_TIMEOUT_MS = 120000;
+// Giữ dưới ngưỡng wall-time an toàn của Queue consumer để catch kịp gửi lỗi
+// trước khi Cloudflare cắt Worker (tránh treo im lặng ở "Đang kết nối API...").
+const TELEGRAM_QUEUE_TTS_TIMEOUT_MS = 75000;
 const TELEGRAM_UPDATE_DEDUPE_TTL_SECONDS = 86400;
+// TTL của trạng thái "processing": ngắn để một job bị cắt giữa chừng không khoá
+// nút bấm quá lâu. Trạng thái "completed"/"failed" dùng TTL riêng khi set.
+const TELEGRAM_TTS_JOB_PROCESSING_TTL_SECONDS = 90;
 const TELEGRAM_TTS_JOB_TTL_SECONDS = 600;
 const TELEGRAM_TTS_FAILURE_COOLDOWN_SECONDS = 60;
 
@@ -1572,9 +1582,12 @@ export function buildTelegramTtsJobKey(callbackQuery) {
 export async function claimTelegramTtsJob(jobKey, env) {
   if (!jobKey || !env.VICOMPARE_KV) return true;
   const existingState = await env.VICOMPARE_KV.get(jobKey);
-  if (existingState) return false;
+  // Chỉ chặn khi job đã kết thúc (completed/failed). Nếu trạng thái là
+  // "processing" — nghĩa là lần chạy trước bị Worker cắt giữa chừng — thì cho
+  // phép Cloudflare retry chạy lại, tránh treo im lặng vì bị khoá.
+  if (existingState === "completed" || existingState === "failed") return false;
   await env.VICOMPARE_KV.put(jobKey, "processing", {
-    expirationTtl: TELEGRAM_TTS_JOB_TTL_SECONDS
+    expirationTtl: TELEGRAM_TTS_JOB_PROCESSING_TTL_SECONDS
   });
   return true;
 }
@@ -2502,16 +2515,39 @@ async function handleCallbackQuery(callbackQuery, token, env, options = {}) {
 
     await sendTelegramMessage(chatId, "🎙️ Đang kết nối API tạo giọng đọc & tự động đồng bộ nhịp phụ đề...", token);
 
+    // Ngưỡng timeout cho tầng TTS (mặc định lấy từ queue). Hàng rào cứng bên
+    // ngoài đặt cao hơn một chút để requestSegmentedTtsAudio kịp tự abort và
+    // ném lỗi tiếng Việt rõ nghĩa trước; race chỉ là lưới an toàn cuối để đảm
+    // bảo catch luôn chạy và gửi ❌ thay vì để Worker bị cắt im lặng.
+    const ttsTimeoutMs = Number.isFinite(Number(options.ttsTimeoutMs))
+      ? Number(options.ttsTimeoutMs)
+      : TELEGRAM_QUEUE_TTS_TIMEOUT_MS;
+    const hardDeadlineMs = ttsTimeoutMs + 8000;
+
     try {
-      await runTelegramTtsWorkflow({
-        chatId,
-        channelId,
-        engineType,
-        scriptText,
-        token,
-        env,
-        ttsTimeoutMs: options.ttsTimeoutMs
+      let hardTimeoutId;
+      const hardTimeout = new Promise((_, reject) => {
+        hardTimeoutId = setTimeout(
+          () => reject(new Error(`Quá thời gian tạo voice (${Math.ceil(hardDeadlineMs / 1000)} giây). Provider phản hồi quá chậm, vui lòng thử lại.`)),
+          hardDeadlineMs
+        );
       });
+      try {
+        await Promise.race([
+          runTelegramTtsWorkflow({
+            chatId,
+            channelId,
+            engineType,
+            scriptText,
+            token,
+            env,
+            ttsTimeoutMs
+          }),
+          hardTimeout
+        ]);
+      } finally {
+        clearTimeout(hardTimeoutId);
+      }
       await setTelegramTtsJobState(
         ttsJobKey,
         "completed",

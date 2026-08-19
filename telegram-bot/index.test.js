@@ -75,7 +75,7 @@ describe("Telegram background queue", () => {
     );
   });
 
-  it("claims a TTS button only once while its job lock is active", async () => {
+  it("allows retry while processing but blocks a completed TTS job", async () => {
     const stored = new Map();
     const env = {
       VICOMPARE_KV: {
@@ -84,7 +84,16 @@ describe("Telegram background queue", () => {
       }
     };
 
+    // Lần đầu claim thành công và đánh dấu "processing".
     assert.equal(await claimTelegramTtsJob("telegram_tts_job:1", env), true);
+    // Nếu lần chạy trước bị Worker cắt (state vẫn "processing"), retry của
+    // Cloudflare vẫn phải được phép chạy lại thay vì bị khoá im lặng.
+    assert.equal(await claimTelegramTtsJob("telegram_tts_job:1", env), true);
+    // Khi job đã hoàn tất thì mới chặn click lặp.
+    stored.set("telegram_tts_job:1", "completed");
+    assert.equal(await claimTelegramTtsJob("telegram_tts_job:1", env), false);
+    // Job đã thất bại (đang cooldown) cũng bị chặn.
+    stored.set("telegram_tts_job:1", "failed");
     assert.equal(await claimTelegramTtsJob("telegram_tts_job:1", env), false);
   });
 
@@ -98,7 +107,7 @@ describe("Telegram background queue", () => {
     assert.equal(queued, false);
   });
 
-  it("uses a long TTS deadline and acknowledges a processed queue message", async () => {
+  it("uses a wall-time-safe TTS deadline and acknowledges a processed queue message", async () => {
     const calls = [];
     let acknowledged = false;
     const message = {
@@ -114,7 +123,7 @@ describe("Telegram background queue", () => {
 
     assert.equal(acknowledged, true);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].ttsTimeoutMs, 120000);
+    assert.equal(calls[0].ttsTimeoutMs, 75000);
     assert.equal(calls[0].answerCallback, false);
   });
 
