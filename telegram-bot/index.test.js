@@ -418,7 +418,9 @@ describe("Telegram TTS workflow", () => {
 
     const session = stored.get("session:session-test");
     assert.equal(result.sessionId, "session-test");
-    assert.equal(segmentedOptions.forceSegmented, true);
+    // Không ép forceSegmented nữa: mỗi engine dùng chế độ tự nhiên của nó để
+    // tránh vượt giới hạn subrequest của Cloudflare Worker (Voicefree one-shot).
+    assert.equal(segmentedOptions.forceSegmented, undefined);
     assert.equal(session.audioBase64, "");
     assert.deepEqual(session.audioSegments, audioSegments);
     assert.ok(events.indexOf("completed") > events.indexOf("kv:session:session-test"));
@@ -446,6 +448,28 @@ describe("Telegram TTS workflow", () => {
       }),
       /không gửi được file voice/i
     );
+  });
+
+  it("keeps Voicefree one-shot for multi-line scripts to avoid subrequest explosion", async () => {
+    // Hồi quy cho bug "Too many subrequests": Voicefree phải gọi API đúng 1 lần
+    // cho toàn kịch bản, KHÔNG tách từng câu (tách -> mỗi câu ~32 subrequest ->
+    // vượt giới hạn 50/lần của Cloudflare Worker -> treo im lặng trên Telegram).
+    let callCount = 0;
+    const result = await requestSegmentedTtsAudio(
+      "tts_voicefree",
+      { voiceId: "v1", apiKey: "k", provider: "elevenlabs", modelId: "m", speed: 1 },
+      "Câu một.\nCâu hai.\nCâu ba.\nCâu bốn.\nCâu năm.",
+      {
+        requestAudio: async () => {
+          callCount += 1;
+          return { buffer: new Uint8Array([1, 2, 3]).buffer, audioUrl: null };
+        }
+      }
+    );
+
+    assert.equal(callCount, 1);
+    assert.ok(result.audioBuffer);
+    assert.deepEqual(result.audioSegments, []);
   });
 
   it("does not let a stalled optional image lookup delay voice completion", async () => {

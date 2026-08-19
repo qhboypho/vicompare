@@ -1266,14 +1266,9 @@ export async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText
       };
     }
 
-    // Engine online (lucy/vclip/eleven) polling từng câu rất tốn thời gian nếu
-    // chia thành nhiều đợt. Với voicefree phải giữ đợt nhỏ vì bị rate-limit
-    // (minRequestIntervalMs). Các engine còn lại cho chạy gần như cùng lúc để
-    // tổng thời gian ~ 1 câu chậm nhất, tránh vượt wall-time của Worker.
-    const defaultConcurrency = engineType === "tts_voicefree" ? 5 : 10;
     const segmentResults = await mapWithConcurrency(
       segments,
-      options.concurrency || defaultConcurrency,
+      options.concurrency || 5,
       async (segment) => {
         await waitForRequestStart();
         const result = await requestAudio(engineType, ttsConfig, segment, { signal: controller.signal });
@@ -1424,9 +1419,12 @@ export async function runTelegramTtsWorkflow(params, dependencies = {}) {
   const syncedCreds = await deps.getSyncedCredentials(env);
   const ttsConfig = deps.resolveTtsConfig(engineType, syncedCreds, env);
   const segmentedResult = await deps.requestSegmentedTtsAudio(engineType, ttsConfig, scriptText, {
-    timeoutMs: ttsTimeoutMs,
-    // Keep Telegram preview on the same per-sentence timing pipeline as the Web Tool.
-    forceSegmented: true
+    timeoutMs: ttsTimeoutMs
+    // KHÔNG ép forceSegmented: mỗi engine dùng chế độ tự nhiên của nó, giống hệt
+    // Web Tool. Voicefree đặc biệt phải chạy one-shot (1 lần init + poll + tải),
+    // vì nếu tách từng câu thì mỗi câu ~32 subrequest, kịch bản nhiều dòng sẽ
+    // vượt giới hạn 50 subrequest/lần của Cloudflare Worker -> "Too many
+    // subrequests" và treo im lặng. Web Tool áp Silence Sync trên track one-shot.
   });
   const audioBuffer = segmentedResult.audioBuffer;
   if (!audioBuffer) throw new Error("Không thể khởi tạo file audio.");
@@ -2562,7 +2560,14 @@ async function handleCallbackQuery(callbackQuery, token, env, options = {}) {
         env,
         TELEGRAM_TTS_FAILURE_COOLDOWN_SECONDS
       );
-      await sendTelegramMessage(chatId, `❌ Gặp lỗi khi tạo giọng nói: ${err.message}`, token);
+      const rawMessage = err?.message || String(err);
+      // Lỗi giới hạn subrequest của Cloudflare rất khó hiểu với người dùng cuối;
+      // dịch sang thông điệp rõ nghĩa. (Sau khi bỏ forceSegmented thì trường hợp
+      // này gần như không còn, nhưng vẫn phòng thủ cho kịch bản rất dài.)
+      const friendlyMessage = /too many subrequests/i.test(rawMessage)
+        ? "Kịch bản quá dài nên vượt giới hạn của máy chủ. Vui lòng rút ngắn kịch bản (ít dòng hơn) rồi thử lại."
+        : rawMessage;
+      await sendTelegramMessage(chatId, `❌ Gặp lỗi khi tạo giọng nói: ${friendlyMessage}`, token);
     }
   }
 }
