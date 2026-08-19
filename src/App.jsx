@@ -8658,44 +8658,34 @@ export default function App() {
                     </div>
 
                     <div className="form-group">
-                      <label>Chế độ đăng</label>
-                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
-                        <button
-                          className={`btn btn-sm ${publishMode === 'now' ? 'btn-primary' : 'btn-secondary'}`}
-                          onClick={() => setPublishMode('now')}
-                          style={{ flex: 1, padding: '0.4rem' }}
-                        >
-                          Đăng ngay
-                        </button>
-                        <button
-                          className={`btn btn-sm ${publishMode === 'schedule' ? 'btn-primary' : 'btn-secondary'}`}
-                          onClick={() => setPublishMode('schedule')}
-                          style={{ flex: 1, padding: '0.4rem' }}
-                        >
-                          Hẹn giờ
-                        </button>
-                      </div>
-                    </div>
-
-                    {publishMode === 'schedule' && (
-                      <div className="form-group" style={{ animation: 'fadeIn 0.3s ease' }}>
-                        <label>Chọn Ngày & Giờ đăng bài</label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={publishMode === 'schedule'}
+                          onChange={(e) => setPublishMode(e.target.checked ? 'schedule' : 'now')}
+                          style={{ width: '15px', height: '15px', margin: 0 }}
+                        />
+                        Hẹn giờ đăng
+                      </label>
+                      {publishMode === 'schedule' && (
                         <input
                           type="datetime-local"
                           value={scheduleDate}
                           onChange={(e) => setScheduleDate(e.target.value)}
                           style={{
+                            marginTop: '0.4rem',
                             padding: '0.4rem',
                             fontSize: '0.8rem',
                             background: '#0b0f19',
                             color: '#fff',
                             border: '1px solid var(--border-light)',
                             borderRadius: '4px',
-                            cursor: 'pointer'
+                            cursor: 'pointer',
+                            width: '100%'
                           }}
                         />
-                      </div>
-                    )}
+                      )}
+                    </div>
 
                     <button
                       className="btn btn-primary"
