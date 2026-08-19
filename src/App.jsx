@@ -960,10 +960,25 @@ export default function App() {
             }
           });
         }
+
+        // Logo: KHÔNG xóa trắng ảnh data: (trước đây làm mất logo khi lưu local
+        // rồi đẩy lên cloud với logo rỗng -> mở link Telegram/mobile mất logo).
+        // Thay vào đó lưu blob vào IndexedDB và giữ tham chiếu idb: gọn nhẹ, y hệt
+        // cách xử lý mascot. Khi đẩy lên cloud, makeCloudSettingsPortable sẽ tự
+        // chuyển idb: -> data: để thiết bị khác nhận được.
+        let lightweightLogoUrl = p.headerLogoUrl;
+        if (p.headerLogoUrl && (p.headerLogoUrl.startsWith('blob:') || (p.headerLogoUrl.length > 500 && p.headerLogoUrl.startsWith('data:')))) {
+          const logoDbKey = getLogoStorageKey(p.id, p.logoFileName || 'logo');
+          try {
+            fetch(p.headerLogoUrl).then(r => r.blob()).then(b => saveImageToStorage(logoDbKey, b)).catch(() => {});
+          } catch {}
+          lightweightLogoUrl = `idb:${logoDbKey}`;
+        }
+
         return {
           ...p,
           mascotPoses: cleanPoses,
-          headerLogoUrl: (p.headerLogoUrl && p.headerLogoUrl.length > 500 && p.headerLogoUrl.startsWith('data:')) ? '' : p.headerLogoUrl
+          headerLogoUrl: lightweightLogoUrl
         };
       });
       localStorage.setItem('channel_profiles', JSON.stringify(lightweightProfiles));
@@ -3184,6 +3199,16 @@ export default function App() {
 
   // Tự động sửa lỗi/khôi phục cấu hình mẫu kênh nếu bị ghi đè chéo do lỗi bất đồng bộ trước đó
   useEffect(() => {
+    // Heal logo bị mất trong profile do bug cũ (safeSaveChannelProfiles từng xóa
+    // trắng logo data:). Nếu profile active thiếu logo nhưng top-level đã có logo
+    // hợp lệ (data:/idb:) thì nhúng lại để cloud sync đẩy đúng sang mobile.
+    const persistedTopLogo = (() => {
+      const stored = localStorage.getItem('headerLogoUrl') || '';
+      if (stored.startsWith('idb:') || stored.startsWith('data:')) return stored;
+      return '';
+    })();
+    const persistedLogoFileName = localStorage.getItem('logoFileName') || '';
+
     setChannelProfiles(prev => {
       let changed = false;
       const updated = prev.map(p => {
@@ -3217,6 +3242,21 @@ export default function App() {
         }
         return p;
       });
+
+      // Nhúng lại logo cho profile active nếu đang trống mà top-level có logo.
+      if (persistedTopLogo) {
+        for (let i = 0; i < updated.length; i += 1) {
+          if (updated[i].id === activeChannelId && !updated[i].headerLogoUrl) {
+            updated[i] = {
+              ...updated[i],
+              headerLogoUrl: persistedTopLogo,
+              logoFileName: updated[i].logoFileName || persistedLogoFileName
+            };
+            changed = true;
+          }
+        }
+      }
+
       if (changed) {
         safeSaveChannelProfiles(updated);
         const current = updated.find(p => p.id === activeChannelId);

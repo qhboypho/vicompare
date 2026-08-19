@@ -1358,8 +1358,13 @@ export function buildWebAppUrls({
   };
 }
 
-const TELEGRAM_QUEUE_TTS_TIMEOUT_MS = 120000;
+// Giữ dưới ngưỡng wall-time an toàn của Queue consumer để catch kịp gửi lỗi
+// trước khi Cloudflare cắt Worker (tránh treo im lặng ở "Đang kết nối API...").
+const TELEGRAM_QUEUE_TTS_TIMEOUT_MS = 75000;
 const TELEGRAM_UPDATE_DEDUPE_TTL_SECONDS = 86400;
+// TTL của trạng thái "processing": ngắn để một job bị cắt giữa chừng không khoá
+// nút bấm quá lâu. Trạng thái "completed"/"failed" dùng TTL riêng khi set.
+const TELEGRAM_TTS_JOB_PROCESSING_TTL_SECONDS = 90;
 const TELEGRAM_TTS_JOB_TTL_SECONDS = 600;
 const TELEGRAM_TTS_FAILURE_COOLDOWN_SECONDS = 60;
 
@@ -1414,9 +1419,12 @@ export async function runTelegramTtsWorkflow(params, dependencies = {}) {
   const syncedCreds = await deps.getSyncedCredentials(env);
   const ttsConfig = deps.resolveTtsConfig(engineType, syncedCreds, env);
   const segmentedResult = await deps.requestSegmentedTtsAudio(engineType, ttsConfig, scriptText, {
-    timeoutMs: ttsTimeoutMs,
-    // Keep Telegram preview on the same per-sentence timing pipeline as the Web Tool.
-    forceSegmented: true
+    timeoutMs: ttsTimeoutMs
+    // KHÔNG ép forceSegmented: mỗi engine dùng chế độ tự nhiên của nó, giống hệt
+    // Web Tool. Voicefree đặc biệt phải chạy one-shot (1 lần init + poll + tải),
+    // vì nếu tách từng câu thì mỗi câu ~32 subrequest, kịch bản nhiều dòng sẽ
+    // vượt giới hạn 50 subrequest/lần của Cloudflare Worker -> "Too many
+    // subrequests" và treo im lặng. Web Tool áp Silence Sync trên track one-shot.
   });
   const audioBuffer = segmentedResult.audioBuffer;
   if (!audioBuffer) throw new Error("Không thể khởi tạo file audio.");
@@ -1572,9 +1580,12 @@ export function buildTelegramTtsJobKey(callbackQuery) {
 export async function claimTelegramTtsJob(jobKey, env) {
   if (!jobKey || !env.VICOMPARE_KV) return true;
   const existingState = await env.VICOMPARE_KV.get(jobKey);
-  if (existingState) return false;
+  // Chỉ chặn khi job đã kết thúc (completed/failed). Nếu trạng thái là
+  // "processing" — nghĩa là lần chạy trước bị Worker cắt giữa chừng — thì cho
+  // phép Cloudflare retry chạy lại, tránh treo im lặng vì bị khoá.
+  if (existingState === "completed" || existingState === "failed") return false;
   await env.VICOMPARE_KV.put(jobKey, "processing", {
-    expirationTtl: TELEGRAM_TTS_JOB_TTL_SECONDS
+    expirationTtl: TELEGRAM_TTS_JOB_PROCESSING_TTL_SECONDS
   });
   return true;
 }
@@ -2502,16 +2513,39 @@ async function handleCallbackQuery(callbackQuery, token, env, options = {}) {
 
     await sendTelegramMessage(chatId, "🎙️ Đang kết nối API tạo giọng đọc & tự động đồng bộ nhịp phụ đề...", token);
 
+    // Ngưỡng timeout cho tầng TTS (mặc định lấy từ queue). Hàng rào cứng bên
+    // ngoài đặt cao hơn một chút để requestSegmentedTtsAudio kịp tự abort và
+    // ném lỗi tiếng Việt rõ nghĩa trước; race chỉ là lưới an toàn cuối để đảm
+    // bảo catch luôn chạy và gửi ❌ thay vì để Worker bị cắt im lặng.
+    const ttsTimeoutMs = Number.isFinite(Number(options.ttsTimeoutMs))
+      ? Number(options.ttsTimeoutMs)
+      : TELEGRAM_QUEUE_TTS_TIMEOUT_MS;
+    const hardDeadlineMs = ttsTimeoutMs + 8000;
+
     try {
-      await runTelegramTtsWorkflow({
-        chatId,
-        channelId,
-        engineType,
-        scriptText,
-        token,
-        env,
-        ttsTimeoutMs: options.ttsTimeoutMs
+      let hardTimeoutId;
+      const hardTimeout = new Promise((_, reject) => {
+        hardTimeoutId = setTimeout(
+          () => reject(new Error(`Quá thời gian tạo voice (${Math.ceil(hardDeadlineMs / 1000)} giây). Provider phản hồi quá chậm, vui lòng thử lại.`)),
+          hardDeadlineMs
+        );
       });
+      try {
+        await Promise.race([
+          runTelegramTtsWorkflow({
+            chatId,
+            channelId,
+            engineType,
+            scriptText,
+            token,
+            env,
+            ttsTimeoutMs
+          }),
+          hardTimeout
+        ]);
+      } finally {
+        clearTimeout(hardTimeoutId);
+      }
       await setTelegramTtsJobState(
         ttsJobKey,
         "completed",
@@ -2526,7 +2560,14 @@ async function handleCallbackQuery(callbackQuery, token, env, options = {}) {
         env,
         TELEGRAM_TTS_FAILURE_COOLDOWN_SECONDS
       );
-      await sendTelegramMessage(chatId, `❌ Gặp lỗi khi tạo giọng nói: ${err.message}`, token);
+      const rawMessage = err?.message || String(err);
+      // Lỗi giới hạn subrequest của Cloudflare rất khó hiểu với người dùng cuối;
+      // dịch sang thông điệp rõ nghĩa. (Sau khi bỏ forceSegmented thì trường hợp
+      // này gần như không còn, nhưng vẫn phòng thủ cho kịch bản rất dài.)
+      const friendlyMessage = /too many subrequests/i.test(rawMessage)
+        ? "Kịch bản quá dài nên vượt giới hạn của máy chủ. Vui lòng rút ngắn kịch bản (ít dòng hơn) rồi thử lại."
+        : rawMessage;
+      await sendTelegramMessage(chatId, `❌ Gặp lỗi khi tạo giọng nói: ${friendlyMessage}`, token);
     }
   }
 }
