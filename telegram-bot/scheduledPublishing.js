@@ -214,10 +214,7 @@ async function publishTikTok({ account, video, caption, fetchImpl = fetch }) {
         disable_duet: false,
         disable_comment: false,
         disable_stitch: false,
-        video_cover_timestamp_ms: 1000,
-        brand_content_toggle: false,
-        brand_organic_toggle: false,
-        is_aigc: true
+        video_cover_timestamp_ms: 1000
       },
       source_info: { source: 'FILE_UPLOAD', video_size: video.size, chunk_size: video.size, total_chunk_count: 1 }
     })

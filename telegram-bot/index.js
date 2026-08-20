@@ -2936,10 +2936,7 @@ async function initTikTokVideoPublish(accessToken, caption, videoSize, privacyLe
         disable_duet: false,
         disable_comment: false,
         disable_stitch: false,
-        video_cover_timestamp_ms: 1000,
-        brand_content_toggle: false,
-        brand_organic_toggle: false,
-        is_aigc: true
+        video_cover_timestamp_ms: 1000
       },
       source_info: {
         source: "FILE_UPLOAD",
