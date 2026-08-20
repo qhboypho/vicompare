@@ -81,8 +81,10 @@ export const refreshTikTokAccessToken = async ({
     })
   });
   const data = await res.json().catch(() => ({}));
+  console.log('[TikTok refresh token] HTTP', res.status, JSON.stringify(data));
   if (!res.ok || !data.access_token) {
-    throw new Error(getTikTokApiErrorMessage(data, 'Không gia hạn được TikTok access token.'));
+    const detail = `HTTP ${res.status}: ${getTikTokApiErrorMessage(data, 'Không gia hạn được TikTok access token.')}`;
+    throw new Error(detail);
   }
   return data;
 };
@@ -177,7 +179,13 @@ export const publishTikTokVideo = async ({
   let accessToken = clean(creds.accessToken);
   let refreshedTokenData = null;
 
-  if (clean(creds.clientKey) && clean(creds.clientSecret) && clean(creds.refreshToken)) {
+  const hasRefreshCreds = clean(creds.clientKey) && clean(creds.clientSecret) && clean(creds.refreshToken);
+
+  // Nếu không có accessToken thì bắt buộc phải refresh
+  if (!accessToken) {
+    if (!hasRefreshCreds) {
+      throw new Error('Thiếu TikTok Access Token. Vui lòng đăng nhập lại qua OAuth.');
+    }
     setStatus('Đang tự động làm mới TikTok Access Token...');
     refreshedTokenData = await refreshTikTokAccessToken({
       clientKey: creds.clientKey,
@@ -186,15 +194,34 @@ export const publishTikTokVideo = async ({
       apiBase,
       fetchImpl
     });
+    if (!refreshedTokenData?.access_token) {
+      throw new Error('Refresh token hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại TikTok qua OAuth.');
+    }
     accessToken = refreshedTokenData.access_token;
   }
 
-  if (!accessToken) {
-    throw new Error('Thiếu TikTok Access Token hoặc Refresh Token.');
+  setStatus('Đang lấy thông tin tài khoản TikTok...');
+  let creatorInfo;
+  try {
+    creatorInfo = await queryTikTokCreatorInfo({ accessToken, apiBase, fetchImpl });
+  } catch (err) {
+    // Access token hết hạn → thử refresh nếu có credentials
+    if (!hasRefreshCreds) throw err;
+    setStatus('Access token hết hạn, đang làm mới...');
+    refreshedTokenData = await refreshTikTokAccessToken({
+      clientKey: creds.clientKey,
+      clientSecret: creds.clientSecret,
+      refreshToken: creds.refreshToken,
+      apiBase,
+      fetchImpl
+    });
+    if (!refreshedTokenData?.access_token) {
+      throw new Error('Refresh token hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại TikTok qua OAuth.');
+    }
+    accessToken = refreshedTokenData.access_token;
+    creatorInfo = await queryTikTokCreatorInfo({ accessToken, apiBase, fetchImpl });
   }
 
-  setStatus('Đang lấy thông tin tài khoản TikTok...');
-  const creatorInfo = await queryTikTokCreatorInfo({ accessToken, apiBase, fetchImpl });
   const privacyLevel = pickTikTokPrivacyLevel(creatorInfo.privacy_level_options);
 
   setStatus('Đang khởi tạo phiên đăng TikTok...');

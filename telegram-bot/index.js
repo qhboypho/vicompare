@@ -2901,8 +2901,9 @@ async function refreshTikTokAccessToken(credentials) {
     })
   });
   const tokenData = await tokenRes.json().catch(() => ({}));
+  console.log('[TikTok refresh] HTTP', tokenRes.status, JSON.stringify(tokenData));
   if (!tokenRes.ok || !tokenData.access_token) {
-    throw new Error(getTikTokApiErrorMessage(tokenData, "Không gia hạn được TikTok token."));
+    throw new Error(`HTTP ${tokenRes.status}: ${getTikTokApiErrorMessage(tokenData, "Không gia hạn được TikTok token.")}`);
   }
   return { accessToken: tokenData.access_token, tokenData };
 }
