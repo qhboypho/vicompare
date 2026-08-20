@@ -6044,12 +6044,65 @@ export default function App() {
     const code = params.get('code');
     const state = params.get('state');
     if (!code || !state?.startsWith('vicompare-tiktok')) return;
-    setActiveConnectModal('tiktok');
-    setTtAuthCode(code);
+
+    // Xoá code khỏi URL ngay lập tức trước khi làm bất cứ điều gì
     try {
       const cleanUrl = `${window.location.origin}${window.location.pathname}${window.location.hash || ''}`;
       window.history.replaceState({}, document.title, cleanUrl);
     } catch {}
+
+    setActiveConnectModal('tiktok');
+    setTtAuthCode(code);
+
+    // Tự động exchange ngay — đọc thẳng từ localStorage vì state chưa flush vào closure
+    const clientKey = (localStorage.getItem('tt_client_key') || '').replace(/\s+/g, '');
+    const clientSecret = (localStorage.getItem('tt_client_secret') || '').replace(/\s+/g, '');
+    const redirectUri = (localStorage.getItem('tt_redirect_uri') || 'https://vicompare.pages.dev/').trim();
+
+    if (!clientKey || !clientSecret || !redirectUri) return; // thiếu thông tin, user tự bấm nút
+
+    setIsTtExchanging(true);
+    fetch('https://open.tiktokapis.com/v2/oauth/token/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Cache-Control': 'no-cache' },
+      body: new URLSearchParams({ client_key: clientKey, client_secret: clientSecret, code: code.trim(), grant_type: 'authorization_code', redirect_uri: redirectUri })
+    })
+      .then(res => res.json().then(data => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        console.log('TikTok auto-exchange response:', ok, JSON.stringify(data));
+        const errorDesc = data.error_description || data.error || data.message || '';
+        if (!ok || data.error || !data.access_token) throw new Error(errorDesc || 'Không đổi được TikTok token.');
+        const nextOpenId = data.open_id || '';
+        const nextDisplayName = nextOpenId || DEFAULT_TT_DISPLAY_NAME;
+        setTtSessionId(nextOpenId);
+        setTtAccessToken(data.access_token || '');
+        setTtRefreshToken(data.refresh_token || '');
+        setTtOpenId(nextOpenId);
+        setSocialDisplayName(nextDisplayName);
+        setTtConnected(true);
+        saveSocialAccount('tiktok', {
+          sessionId: nextOpenId,
+          accessToken: data.access_token || '',
+          refreshToken: data.refresh_token || '',
+          openId: nextOpenId,
+          clientKey,
+          clientSecret,
+          redirectUri,
+          displayName: nextDisplayName
+        });
+        scheduleTelegramCredentialSync({
+          ttSessionId: nextOpenId,
+          ttAccessToken: data.access_token || '',
+          ttRefreshToken: data.refresh_token || '',
+          ttOpenId: nextOpenId,
+          ttClientKey: clientKey,
+          ttClientSecret: clientSecret,
+          ttDisplayName: nextDisplayName
+        });
+        alert('Đã lấy TikTok Access Token thành công. Bấm Lưu & Kết nối để đóng modal.');
+      })
+      .catch(err => alert(`Lấy TikTok token thất bại: ${err.message}`))
+      .finally(() => setIsTtExchanging(false));
   }, []);
 
   const handleAddManualVideo = () => {
