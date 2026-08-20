@@ -1973,7 +1973,9 @@ export default function App() {
       cloudSettingsBootedRef.current = true;
       scheduleCloudSettingsSync(credentialOverrides);
       await loadSessionFromTelegram({
-        channelProfiles: cloudSettings?.channelProfiles || channelProfiles
+        channelProfiles: cloudSettings?.channelProfiles || channelProfiles,
+        cloudSettingsRestored: Boolean(cloudSettings),
+        restoredChannelId: cloudSettings?.activeChannelId || ''
       });
     };
 
@@ -2403,13 +2405,25 @@ export default function App() {
         if (session.actionSfxPresets !== undefined) setActionSfxPresets(normalizeActionSfxPresets(session.actionSfxPresets));
         let parsedTelegramScript = null;
         if (channelId) {
-          const selectedProfile = pickTelegramChannelProfile(
-            channelId,
-            options.channelProfiles,
-            channelProfiles
-          );
-          if (selectedProfile) {
-            handleApplyChannelProfile(selectedProfile);
+          // Cloud settings already restored the full visual config (logo,
+          // mascot, bgColor, etc.) via handleLoadProjectConfig in boot().
+          // Only switch the active channel when the session targets a
+          // *different* channel than the one cloud settings activated —
+          // calling handleApplyChannelProfile unconditionally would
+          // overwrite custom settings (e.g. user-uploaded logo/mascot)
+          // with the channel's bare defaults.
+          if (options.cloudSettingsRestored && channelId === (options.restoredChannelId || '')) {
+            // Cloud already activated this channel — skip profile apply
+            // to preserve logo, mascot, and other customised settings.
+          } else {
+            const selectedProfile = pickTelegramChannelProfile(
+              channelId,
+              options.channelProfiles,
+              channelProfiles
+            );
+            if (selectedProfile) {
+              handleApplyChannelProfile(selectedProfile);
+            }
           }
         }
 
