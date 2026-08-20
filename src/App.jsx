@@ -5931,7 +5931,7 @@ export default function App() {
       throw new Error('Thiếu Client Key, Client Secret, Redirect URI hoặc Authorization Code.');
     }
 
-    const tokenRes = await fetch('/tiktok-api/v2/oauth/token/', {
+    const tokenRes = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
