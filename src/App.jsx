@@ -5946,8 +5946,11 @@ export default function App() {
       })
     });
     const tokenData = await tokenRes.json().catch(() => ({}));
-    if (!tokenRes.ok || !tokenData.access_token) {
-      throw new Error(tokenData.error_description || tokenData.error || tokenRes.statusText || 'Không đổi được TikTok token.');
+    console.log('TikTok token exchange response:', tokenRes.status, JSON.stringify(tokenData));
+    // TikTok v2 API may return HTTP 200 with error inside body
+    const errorDesc = tokenData.error_description || tokenData.error || tokenData.message || '';
+    if (!tokenRes.ok || tokenData.error || !tokenData.access_token) {
+      throw new Error(errorDesc || `HTTP ${tokenRes.status}: Không đổi được TikTok token.`);
     }
     return tokenData;
   };
