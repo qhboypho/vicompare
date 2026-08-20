@@ -5924,8 +5924,8 @@ export default function App() {
   };
 
   const exchangeTikTokCode = async (code) => {
-    const clientKey = ttClientKey.trim();
-    const clientSecret = ttClientSecret.trim();
+    const clientKey = ttClientKey.replace(/\s+/g, '');
+    const clientSecret = ttClientSecret.replace(/\s+/g, '');
     const redirectUri = ttRedirectUri.trim();
     if (!clientKey || !clientSecret || !redirectUri || !code.trim()) {
       throw new Error('Thiếu Client Key, Client Secret, Redirect URI hoặc Authorization Code.');
