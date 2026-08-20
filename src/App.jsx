@@ -5959,34 +5959,13 @@ export default function App() {
     setIsTtExchanging(true);
     try {
       const tokenData = await exchangeTikTokCode(ttAuthCode);
-      const nextSessionId = ttSessionId.trim() || tokenData.open_id || '';
-      const nextDisplayName = socialDisplayName.trim() || nextSessionId || DEFAULT_TT_DISPLAY_NAME;
-      setTtSessionId(nextSessionId);
+      // Chỉ điền token vào form — KHÔNG lưu account ở đây.
+      // handleSaveTtCredentials sẽ lưu khi user bấm "Lưu & Kết nối".
+      setTtSessionId(prev => prev.trim() || tokenData.open_id || '');
       setTtAccessToken(tokenData.access_token || '');
       setTtRefreshToken(tokenData.refresh_token || '');
       setTtOpenId(tokenData.open_id || '');
-      setSocialDisplayName(nextDisplayName);
-      setTtConnected(true);
-      saveSocialAccount('tiktok', {
-        sessionId: nextSessionId,
-        accessToken: tokenData.access_token || '',
-        refreshToken: tokenData.refresh_token || '',
-        openId: tokenData.open_id || '',
-        clientKey: ttClientKey.trim(),
-        clientSecret: ttClientSecret.trim(),
-        redirectUri: ttRedirectUri.trim(),
-        displayName: nextDisplayName
-      });
-      scheduleTelegramCredentialSync({
-        ttSessionId: nextSessionId,
-        ttAccessToken: tokenData.access_token || '',
-        ttRefreshToken: tokenData.refresh_token || '',
-        ttOpenId: tokenData.open_id || '',
-        ttClientKey: ttClientKey.trim(),
-        ttClientSecret: ttClientSecret.trim(),
-        ttDisplayName: nextDisplayName
-      });
-      alert('Đã lấy TikTok Access Token thành công. Bấm Lưu & Kết nối để đóng modal.');
+      alert('Đã lấy TikTok Access Token thành công. Kiểm tra tên tài khoản rồi bấm Lưu & Kết nối.');
     } catch (err) {
       alert(`Lấy TikTok token thất bại: ${err.message}`);
     } finally {
@@ -6054,6 +6033,19 @@ export default function App() {
     setActiveConnectModal('tiktok');
     setTtAuthCode(code);
 
+    // Nếu đã có account TikTok, set editingSocialAccountId để saveSocialAccount
+    // sẽ upsert thay vì tạo mới, tránh trùng account
+    try {
+      const savedAccounts = JSON.parse(localStorage.getItem(SOCIAL_ACCOUNT_STORAGE_KEY) || 'null');
+      const ttAccounts = savedAccounts?.tiktok || [];
+      if (ttAccounts.length > 0) {
+        // Lấy account active hoặc account đầu tiên
+        const activeId = JSON.parse(localStorage.getItem(ACTIVE_SOCIAL_ACCOUNT_STORAGE_KEY) || 'null')?.tiktok;
+        const targetId = (activeId && ttAccounts.find(a => a.id === activeId)?.id) || ttAccounts[0].id;
+        setEditingSocialAccountId(targetId);
+      }
+    } catch {}
+
     // Tự động exchange ngay — đọc thẳng từ localStorage vì state chưa flush vào closure
     const clientKey = (localStorage.getItem('tt_client_key') || '').replace(/\s+/g, '');
     const clientSecret = (localStorage.getItem('tt_client_secret') || '').replace(/\s+/g, '');
@@ -6073,33 +6065,14 @@ export default function App() {
         const errorDesc = data.error_description || data.error || data.message || '';
         if (!ok || data.error || !data.access_token) throw new Error(errorDesc || 'Không đổi được TikTok token.');
         const nextOpenId = data.open_id || '';
-        const nextDisplayName = nextOpenId || DEFAULT_TT_DISPLAY_NAME;
+        // Chỉ điền token vào form — KHÔNG lưu account ở đây.
+        // handleSaveTtCredentials sẽ lưu khi user bấm "Lưu & Kết nối",
+        // giữ nguyên tên tài khoản user đã đặt và tránh tạo account trùng.
         setTtSessionId(nextOpenId);
         setTtAccessToken(data.access_token || '');
         setTtRefreshToken(data.refresh_token || '');
         setTtOpenId(nextOpenId);
-        setSocialDisplayName(nextDisplayName);
-        setTtConnected(true);
-        saveSocialAccount('tiktok', {
-          sessionId: nextOpenId,
-          accessToken: data.access_token || '',
-          refreshToken: data.refresh_token || '',
-          openId: nextOpenId,
-          clientKey,
-          clientSecret,
-          redirectUri,
-          displayName: nextDisplayName
-        });
-        scheduleTelegramCredentialSync({
-          ttSessionId: nextOpenId,
-          ttAccessToken: data.access_token || '',
-          ttRefreshToken: data.refresh_token || '',
-          ttOpenId: nextOpenId,
-          ttClientKey: clientKey,
-          ttClientSecret: clientSecret,
-          ttDisplayName: nextDisplayName
-        });
-        alert('Đã lấy TikTok Access Token thành công. Bấm Lưu & Kết nối để đóng modal.');
+        alert('Đã lấy TikTok Access Token thành công. Kiểm tra tên tài khoản rồi bấm Lưu & Kết nối.');
       })
       .catch(err => alert(`Lấy TikTok token thất bại: ${err.message}`))
       .finally(() => setIsTtExchanging(false));
