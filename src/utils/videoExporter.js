@@ -285,13 +285,17 @@ export async function exportVideo({
     // 4. Create Combined Stream and Recorder
     const combinedStream = new MediaStream(outputTracks);
     
-    // Choose optimal mimeType supported by the browser
+    // Ưu tiên MP4/H.264 vì TikTok & nhiều nền tảng chỉ nhận MP4/MOV.
+    // Chrome 130+ hỗ trợ ghi MP4 trực tiếp; fallback WebM cho trình duyệt cũ.
     const mimeTypes = [
+      'video/mp4;codecs=avc1.640028,mp4a.40.2',
+      'video/mp4;codecs=avc1,mp4a',
+      'video/mp4;codecs=h264,aac',
+      'video/mp4',
       'video/webm;codecs=vp9,opus',
       'video/webm;codecs=vp8,opus',
       'video/webm;codecs=h264,opus',
-      'video/webm',
-      'video/mp4' // Safari support
+      'video/webm'
     ];
     
     let selectedMimeType = '';

@@ -219,6 +219,13 @@ export const publishTikTokVideo = async ({
   let accessToken = clean(creds.accessToken);
   let refreshedTokenData = null;
 
+  // TikTok CHỈ nhận MP4/MOV. Nếu video là WebM (Chrome cũ export), upload sẽ
+  // "thành công" nhưng TikTok âm thầm hủy video → không bao giờ lên. Chặn sớm.
+  const blobType = (videoBlob?.type || '').toLowerCase();
+  if (blobType && !blobType.includes('mp4') && !blobType.includes('quicktime') && !blobType.includes('mov')) {
+    throw new Error(`TikTok chỉ nhận video MP4/MOV nhưng video đang là định dạng "${blobType || 'không xác định'}". Trình duyệt của bạn xuất WebM — hãy dùng Chrome mới nhất (hỗ trợ xuất MP4) hoặc chuyển video sang MP4 trước khi đăng.`);
+  }
+
   const hasRefreshCreds = clean(creds.clientKey) && clean(creds.clientSecret) && clean(creds.refreshToken);
 
   // Nếu không có accessToken thì bắt buộc phải refresh
