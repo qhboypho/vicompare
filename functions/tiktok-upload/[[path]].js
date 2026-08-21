@@ -15,7 +15,8 @@ export async function onRequest({ request, params }) {
 
   const path = Array.isArray(params.path) ? params.path.join("/") : (params.path || "");
   const sourceUrl = new URL(request.url);
-  const targetUrl = new URL(`https://open-upload.tiktokapis.com/${path}`);
+  const trailingSlash = sourceUrl.pathname.endsWith("/") ? "/" : "";
+  const targetUrl = new URL(`https://open-upload.tiktokapis.com/${path}${trailingSlash}`);
   targetUrl.search = sourceUrl.search;
 
   const headers = new Headers(request.headers);

@@ -11,7 +11,10 @@ export async function onRequest({ request, params }) {
 
   const path = Array.isArray(params.path) ? params.path.join("/") : (params.path || "");
   const sourceUrl = new URL(request.url);
-  const targetUrl = new URL(`https://open.tiktokapis.com/${path}`);
+  // Giữ nguyên trailing slash từ URL gốc — TikTok's Janus gateway phân biệt
+  // /v2/oauth/token/ với /v2/oauth/token và trả "Unsupported path" nếu sai.
+  const trailingSlash = sourceUrl.pathname.endsWith("/") ? "/" : "";
+  const targetUrl = new URL(`https://open.tiktokapis.com/${path}${trailingSlash}`);
   targetUrl.search = sourceUrl.search;
 
   // Build a minimal header set — forwarding all original headers can
