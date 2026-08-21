@@ -878,8 +878,12 @@ describe("Telegram TikTok publish config", () => {
 
   it("formats TikTok API errors and privacy fallback", () => {
     assert.equal(
-      getTikTokApiErrorMessage({ error: { code: "scope_not_authorized", message: "missing scope" } }),
+      getTikTokApiErrorMessage({ error: { code: "some_other_error", message: "missing scope" } }),
       "missing scope"
+    );
+    assert.match(
+      getTikTokApiErrorMessage({ error: { code: "unaudited_client_can_only_post_to_private_accounts", message: "Please review" } }),
+      /chưa qua audit/
     );
     assert.equal(pickTikTokPrivacyLevel(["SELF_ONLY", "PUBLIC_TO_EVERYONE"]), "PUBLIC_TO_EVERYONE");
   });

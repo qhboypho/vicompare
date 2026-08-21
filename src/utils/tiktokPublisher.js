@@ -12,6 +12,23 @@ const clean = (value) => (typeof value === 'string' ? value.trim() : '');
 
 export const getTikTokApiErrorMessage = (payload = {}, fallback = 'TikTok API error') => {
   const error = payload.error || {};
+  const code = clean(error.code) || clean(payload.error);
+
+  // Dịch một số error code khó hiểu của TikTok sang hướng dẫn tiếng Việt
+  const FRIENDLY_MESSAGES = {
+    unaudited_client_can_only_post_to_private_accounts:
+      'App TikTok chưa qua audit nên chỉ đăng được vào tài khoản đang ở chế độ Riêng tư (Private). Cách xử lý: (1) Đặt tài khoản TikTok thành Private để đăng ngay, HOẶC (2) Nộp app cho TikTok audit (Developer Portal > App review > Submit for review) để đăng công khai.',
+    spam_risk_too_many_pending_share:
+      'Có quá nhiều video đang chờ đăng. Vui lòng đợi vài phút rồi thử lại.',
+    spam_risk_user_banned_from_posting:
+      'Tài khoản TikTok đang bị hạn chế đăng bài. Kiểm tra lại trạng thái tài khoản trên TikTok.',
+    access_token_invalid:
+      'Access token TikTok không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại qua OAuth.',
+    scope_not_authorized:
+      'App chưa được cấp quyền video.publish. Kiểm tra Products/Scopes trong TikTok Developer Portal.'
+  };
+  if (code && FRIENDLY_MESSAGES[code]) return FRIENDLY_MESSAGES[code];
+
   return clean(payload.error_description)
     || clean(payload.error)
     || clean(error.message)
@@ -123,36 +140,23 @@ export const initTikTokVideoPublish = async ({
   apiBase = DEFAULT_API_BASE,
   fetchImpl = fetch
 }) => {
-  const sendInit = async (level) => {
-    const payload = buildTikTokVideoInitPayload({
-      caption,
-      videoSize,
-      privacyLevel: level,
-      chunkSize: videoSize,
-      creatorInfo
-    });
-    const res = await fetchImpl(`${apiBase}${TIKTOK_DIRECT_POST_ENDPOINTS.videoInit}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${clean(accessToken)}`,
-        'Content-Type': 'application/json; charset=UTF-8'
-      },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json().catch(() => ({}));
-    console.log('[TikTok video/init] level:', level, '| response:', res.status, JSON.stringify(data));
-    return { res, data };
-  };
-
-  let { res, data } = await sendInit(privacyLevel);
-
-  // App chưa audit → TikTok chỉ cho đăng SELF_ONLY. Tự động fallback để bài
-  // vẫn lên (dạng riêng tư) thay vì fail hoàn toàn. Khi app audit xong,
-  // PUBLIC_TO_EVERYONE sẽ thành công ngay ở lần gọi đầu.
-  if (data.error?.code === 'unaudited_client_can_only_post_to_private_accounts' && privacyLevel !== 'SELF_ONLY') {
-    console.warn('[TikTok] App chưa audit — fallback privacy_level về SELF_ONLY.');
-    ({ res, data } = await sendInit('SELF_ONLY'));
-  }
+  const payload = buildTikTokVideoInitPayload({
+    caption,
+    videoSize,
+    privacyLevel,
+    chunkSize: videoSize,
+    creatorInfo
+  });
+  const res = await fetchImpl(`${apiBase}${TIKTOK_DIRECT_POST_ENDPOINTS.videoInit}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${clean(accessToken)}`,
+      'Content-Type': 'application/json; charset=UTF-8'
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(() => ({}));
+  console.log('[TikTok video/init] level:', privacyLevel, '| response:', res.status, JSON.stringify(data));
 
   if (!res.ok || data.error?.code !== 'ok' || !data.data?.publish_id || !data.data?.upload_url) {
     throw new Error(getTikTokApiErrorMessage(data, 'Không khởi tạo được phiên đăng TikTok.'));

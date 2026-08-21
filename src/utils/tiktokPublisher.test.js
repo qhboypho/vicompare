@@ -44,9 +44,15 @@ test('proxies TikTok upload URLs through the local upload route', () => {
 });
 
 test('extracts useful TikTok API error messages', () => {
+  // Error code không nằm trong danh sách friendly → dùng message gốc
   assert.equal(
-    getTikTokApiErrorMessage({ error: { code: 'scope_not_authorized', message: 'missing video.publish' } }),
+    getTikTokApiErrorMessage({ error: { code: 'some_other_error', message: 'missing video.publish' } }),
     'missing video.publish'
+  );
+  // Error code có sẵn hướng dẫn tiếng Việt → dịch sang thông báo rõ ràng
+  assert.match(
+    getTikTokApiErrorMessage({ error: { code: 'unaudited_client_can_only_post_to_private_accounts', message: 'Please review' } }),
+    /chưa qua audit/
   );
 });
 
