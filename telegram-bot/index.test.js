@@ -123,7 +123,7 @@ describe("Telegram background queue", () => {
 
     assert.equal(acknowledged, true);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].ttsTimeoutMs, 75000);
+    assert.equal(calls[0].ttsTimeoutMs, 135000);
     assert.equal(calls[0].answerCallback, false);
   });
 

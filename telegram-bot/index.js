@@ -1031,7 +1031,10 @@ async function pollExportAudioUrl(host, apiKey, exportId, engineName, options = 
 }
 
 async function pollVoicefreeAudioUrl(apiKey, taskId, options = {}) {
-  for (let attempts = 0; attempts < 30; attempts += 1) {
+  // Voicefree tạo one-shot cả kịch bản, bài dài có thể mất >60s. Poll tới 120s
+  // (60 lần × 2s) để không ném "Quá thời gian tạo file" khi provider chỉ chậm.
+  const maxAttempts = Number.isFinite(Number(options.maxAttempts)) ? Number(options.maxAttempts) : 60;
+  for (let attempts = 0; attempts < maxAttempts; attempts += 1) {
     await delayWithSignal(2000, options.signal);
     const statusRes = await fetch(`https://api.taovoicefree.com/v1/history/${encodeURIComponent(taskId)}`, {
       method: "GET",
@@ -1360,7 +1363,9 @@ export function buildWebAppUrls({
 
 // Giữ dưới ngưỡng wall-time an toàn của Queue consumer để catch kịp gửi lỗi
 // trước khi Cloudflare cắt Worker (tránh treo im lặng ở "Đang kết nối API...").
-const TELEGRAM_QUEUE_TTS_TIMEOUT_MS = 75000;
+// Voicefree one-shot bài dài poll tới 120s, nên tầng này phải bao trọn (135s)
+// để không abort giữa chừng và biến lỗi provider-chậm thành lỗi timeout giả.
+const TELEGRAM_QUEUE_TTS_TIMEOUT_MS = 135000;
 const TELEGRAM_UPDATE_DEDUPE_TTL_SECONDS = 86400;
 // TTL của trạng thái "processing": ngắn để một job bị cắt giữa chừng không khoá
 // nút bấm quá lâu. Trạng thái "completed"/"failed" dùng TTL riêng khi set.
