@@ -211,6 +211,8 @@ export function buildCredentialsFromAppSettings(settings = {}) {
   mirrorSetting("voicefreeProvider", "voicefreeProvider");
   mirrorSetting("voicefreeModelId", "voicefreeModelId");
   mirrorSetting("voicefreeSpeed", "voicefreeSpeed");
+  mirrorSetting("outroCtaText", "outroCtaText");
+  mirrorSetting("outroFollowLabel", "outroFollowLabel");
 
   return credentials;
 }
@@ -1431,8 +1433,31 @@ export async function runTelegramTtsWorkflow(params, dependencies = {}) {
     // vượt giới hạn 50 subrequest/lần của Cloudflare Worker -> "Too many
     // subrequests" và treo im lặng. Web Tool áp Silence Sync trên track one-shot.
   });
-  const audioBuffer = segmentedResult.audioBuffer;
+  let audioBuffer = segmentedResult.audioBuffer;
   if (!audioBuffer) throw new Error("Không thể khởi tạo file audio.");
+
+  // Lời thoại kêu gọi Follow ở cuối video (đồng bộ từ Web Tool qua Cloud).
+  // Tạo thêm 1 voice CTA, GHÉP vào cuối track chính (để Telegram + auto-render
+  // có tiếng), và mang metadata outro trong session để Web Tool vẽ cảnh Follow.
+  const outroText = cleanString(syncedCreds.outroCtaText);
+  const outroFollowLabel = cleanString(syncedCreds.outroFollowLabel) || "ĐĂNG KÝ";
+  let outroSegment = null;
+  if (outroText) {
+    try {
+      const outroResult = await requestTtsAudioBufferForText(engineType, ttsConfig, outroText, {});
+      if (outroResult?.buffer) {
+        outroSegment = {
+          text: outroText,
+          followLabel: outroFollowLabel,
+          base64: arrayBufferToBase64(outroResult.buffer)
+        };
+        // Ghép voice CTA vào cuối track chính để bản gửi Telegram cũng có tiếng.
+        audioBuffer = concatArrayBuffers([audioBuffer, outroResult.buffer]);
+      }
+    } catch (outroErr) {
+      console.warn("Bỏ qua CTA outro (tạo voice lỗi):", outroErr?.message || String(outroErr));
+    }
+  }
 
   const fileName = ttsConfig.fileName || "voice.mp3";
   const telegramAudioFileId = await deps.sendTelegramAudio(chatId, audioBuffer, fileName, token);
@@ -1461,6 +1486,7 @@ export async function runTelegramTtsWorkflow(params, dependencies = {}) {
     // Telegram already stores the combined audio. Avoid duplicating it in KV beside per-line audio.
     audioBase64: "",
     audioSegments: compactAudioSegments,
+    outroSegment,
     audioUrl: webAudioUrl,
     voiceSyncMode: syncedCreds.voiceSyncMode || "segment",
     actionSfxEnabled: syncedCreds.actionSfxEnabled !== false,

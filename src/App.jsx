@@ -2478,7 +2478,7 @@ export default function App() {
       );
 
       if (session) {
-        const { scriptText, channelId, audioBase64, audioUrl, audioSegments = [], comparisonImages = [] } = session;
+        const { scriptText, channelId, audioBase64, audioUrl, audioSegments = [], comparisonImages = [], outroSegment = null } = session;
         const sessionSfxVolume = Number.isFinite(Number(session.actionSfxVolume))
           ? Number(session.actionSfxVolume)
           : 0.2;
@@ -2562,12 +2562,44 @@ export default function App() {
               spokenText: alignedSegments[index]?.text || block.text,
               segmentDuration: segmentDurations[index]
             }));
-            const actionEvents = buildActionSfxEvents(timed.blocks, {
+
+            // Ghép lời thoại CTA cuối video (nếu bot có gửi outroSegment): thêm
+            // 1 buffer voice + 1 block isOutro (không phụ đề) nối tiếp timeline.
+            const renderBuffers = [...audioBuffers];
+            if (outroSegment?.base64) {
+              try {
+                const outroBlob = base64ToBlob(outroSegment.base64, 'audio/mpeg');
+                const outroBuffer = await decodeAudioBlob(outroBlob);
+                const outroRegion = analyzeSegmentSpeech(outroBuffer);
+                const round3 = (v) => Math.round(Number(v || 0) * 1000) / 1000;
+                const prevEnd = exactTimedBlocks.length > 0 ? exactTimedBlocks[exactTimedBlocks.length - 1].end : 0;
+                const start = round3(prevEnd + 0.06);
+                const spoken = Math.max(0.45, outroRegion.speechDuration || outroBuffer.duration);
+                exactTimedBlocks.push({
+                  id: 'outro-cta',
+                  text: '',
+                  isOutro: true,
+                  followLabel: outroSegment.followLabel || 'ĐĂNG KÝ',
+                  pose: 'default',
+                  highlight: 'none',
+                  start,
+                  end: round3(start + spoken),
+                  audioStart: round3(Math.max(0, start - (outroRegion.leadIn || 0))),
+                  segmentDuration: outroBuffer.duration,
+                  syncSource: 'outro-cta'
+                });
+                renderBuffers.push(outroBuffer);
+              } catch (outroErr) {
+                console.warn('Bỏ qua ghép outro CTA (web):', outroErr);
+              }
+            }
+
+            const actionEvents = buildActionSfxEvents(exactTimedBlocks, {
               enabled: session.actionSfxEnabled !== false,
               offset: 0.02
             });
             const mergedBuffer = await renderSegmentedAudio({
-              audioBuffers,
+              audioBuffers: renderBuffers,
               timelineBlocks: exactTimedBlocks,
               actionEvents,
               sfxVolume: sessionSfxVolume,
@@ -2580,7 +2612,8 @@ export default function App() {
             setAudioUrl(mergedUrl);
             setAudioFileName(filename);
             setTimelineBlocks(exactTimedBlocks);
-            setDuration(Math.max(timed.duration, mergedBuffer.duration));
+            const outroEnd = exactTimedBlocks.length > 0 ? exactTimedBlocks[exactTimedBlocks.length - 1].end : timed.duration;
+            setDuration(Math.max(timed.duration, outroEnd + 0.22, mergedBuffer.duration));
             setCurrentTime(0);
             setIsPlaying(false);
             await saveAudioToStorage(mergedBlob, filename);
@@ -2649,6 +2682,32 @@ export default function App() {
 
           const syncedBlocks = syncResult?.blocks || [];
           const sourceAudioBuffer = syncResult?.audioBuffer;
+
+          // Track one-shot (vd Voicefree) đã có voice CTA ghép sẵn ở cuối bởi bot.
+          // Chỉ cần thêm 1 block isOutro phủ đoạn đuôi để Web Tool vẽ cảnh Follow.
+          if (outroSegment && sourceAudioBuffer) {
+            try {
+              const outroBuffer = await decodeAudioBlob(base64ToBlob(outroSegment.base64, 'audio/mpeg'));
+              const round3 = (v) => Math.round(Number(v || 0) * 1000) / 1000;
+              const audioEnd = sourceAudioBuffer.duration;
+              const outroStart = round3(Math.max(0, audioEnd - outroBuffer.duration));
+              syncedBlocks.push({
+                id: 'outro-cta',
+                text: '',
+                isOutro: true,
+                followLabel: outroSegment.followLabel || 'ĐĂNG KÝ',
+                pose: 'default',
+                highlight: 'none',
+                start: outroStart,
+                end: round3(audioEnd),
+                syncSource: 'outro-cta'
+              });
+              setTimelineBlocks([...syncedBlocks]);
+            } catch (outroErr) {
+              console.warn('Bỏ qua outro CTA (silence-sync):', outroErr);
+            }
+          }
+
           const actionEvents = buildActionSfxEvents(syncedBlocks, {
             enabled: session.actionSfxEnabled !== false,
             offset: 0.02
