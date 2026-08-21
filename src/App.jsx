@@ -2242,7 +2242,7 @@ export default function App() {
         ...cloudCredentials
       }
     };
-    handleLoadProjectConfig(mergedSettings, { silent: true, skipAudio: true });
+    handleLoadProjectConfig(mergedSettings, { silent: true, skipAudio: true, preserveExistingComparisons: true });
     try { localStorage.setItem(CLOUD_SETTINGS_LAST_SYNC_KEY, settings?.updatedAt || new Date().toISOString()); } catch {}
     return mergedSettings;
   };
@@ -5244,7 +5244,16 @@ export default function App() {
       if (config.headerPosition !== undefined) setHeaderPosition(config.headerPosition);
       if (config.headerTitleColor !== undefined) setHeaderTitleColor(config.headerTitleColor);
       if (config.headerTitleFontSize !== undefined) setHeaderTitleFontSize(config.headerTitleFontSize);
-      if (config.comparisons !== undefined) setComparisons(config.comparisons);
+      if (config.comparisons !== undefined) {
+        // KHÔNG đè comparisons đang có (đã upload ảnh) bằng mảng rỗng từ cloud.
+        // Cloud lưu comparisons rỗng để tránh nhồi ảnh nặng vào KV; nếu set đè
+        // sẽ xóa sạch ảnh vừa upload → render "Chưa tải ảnh". Chỉ áp khi cloud
+        // thực sự có comparison, hoặc khi máy đang trống (lần nạp đầu hợp lệ).
+        const cloudComparisons = Array.isArray(config.comparisons) ? config.comparisons : [];
+        const shouldApply = cloudComparisons.length > 0
+          || !options.preserveExistingComparisons;
+        if (shouldApply) setComparisons(config.comparisons);
+      }
       if (config.timelineBlocks !== undefined) {
         setTimelineBlocks(config.timelineBlocks);
         const maxEnd = Math.max(...config.timelineBlocks.map(b => b.end), 5);
