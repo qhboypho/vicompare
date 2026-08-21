@@ -123,24 +123,37 @@ export const initTikTokVideoPublish = async ({
   apiBase = DEFAULT_API_BASE,
   fetchImpl = fetch
 }) => {
-  const payload = buildTikTokVideoInitPayload({
-    caption,
-    videoSize,
-    privacyLevel,
-    chunkSize: videoSize,
-    creatorInfo
-  });
+  const sendInit = async (level) => {
+    const payload = buildTikTokVideoInitPayload({
+      caption,
+      videoSize,
+      privacyLevel: level,
+      chunkSize: videoSize,
+      creatorInfo
+    });
+    const res = await fetchImpl(`${apiBase}${TIKTOK_DIRECT_POST_ENDPOINTS.videoInit}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${clean(accessToken)}`,
+        'Content-Type': 'application/json; charset=UTF-8'
+      },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    console.log('[TikTok video/init] level:', level, '| response:', res.status, JSON.stringify(data));
+    return { res, data };
+  };
 
-  const res = await fetchImpl(`${apiBase}${TIKTOK_DIRECT_POST_ENDPOINTS.videoInit}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${clean(accessToken)}`,
-      'Content-Type': 'application/json; charset=UTF-8'
-    },
-    body: JSON.stringify(payload)
-  });
-  const data = await res.json().catch(() => ({}));
-  console.log('[TikTok video/init] payload:', JSON.stringify(payload.post_info), '| response:', res.status, JSON.stringify(data));
+  let { res, data } = await sendInit(privacyLevel);
+
+  // App chưa audit → TikTok chỉ cho đăng SELF_ONLY. Tự động fallback để bài
+  // vẫn lên (dạng riêng tư) thay vì fail hoàn toàn. Khi app audit xong,
+  // PUBLIC_TO_EVERYONE sẽ thành công ngay ở lần gọi đầu.
+  if (data.error?.code === 'unaudited_client_can_only_post_to_private_accounts' && privacyLevel !== 'SELF_ONLY') {
+    console.warn('[TikTok] App chưa audit — fallback privacy_level về SELF_ONLY.');
+    ({ res, data } = await sendInit('SELF_ONLY'));
+  }
+
   if (!res.ok || data.error?.code !== 'ok' || !data.data?.publish_id || !data.data?.upload_url) {
     throw new Error(getTikTokApiErrorMessage(data, 'Không khởi tạo được phiên đăng TikTok.'));
   }

@@ -2924,33 +2924,43 @@ async function queryTikTokCreatorInfo(accessToken) {
 }
 
 async function initTikTokVideoPublish(accessToken, caption, videoSize, privacyLevel, creatorInfo = {}) {
-  const res = await fetch("https://open.tiktokapis.com/v2/post/publish/video/init/", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${accessToken}`,
-      "Content-Type": "application/json; charset=UTF-8"
-    },
-    body: JSON.stringify({
-      post_info: {
-        title: cleanString(caption).slice(0, 2200),
-        privacy_level: privacyLevel,
-        // Tôn trọng ràng buộc account từ creator_info, nếu không TikTok trả
-        // "Please review our integration guidelines".
-        disable_comment: creatorInfo.comment_disabled === true,
-        disable_duet: creatorInfo.duet_disabled === true,
-        disable_stitch: creatorInfo.stitch_disabled === true,
-        video_cover_timestamp_ms: 1000
+  const sendInit = async (level) => {
+    const res = await fetch("https://open.tiktokapis.com/v2/post/publish/video/init/", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": "application/json; charset=UTF-8"
       },
-      source_info: {
-        source: "FILE_UPLOAD",
-        video_size: videoSize,
-        chunk_size: videoSize,
-        total_chunk_count: 1
-      }
-    })
-  });
-  const data = await res.json().catch(() => ({}));
-  console.log('[TikTok video/init] HTTP', res.status, JSON.stringify(data));
+      body: JSON.stringify({
+        post_info: {
+          title: cleanString(caption).slice(0, 2200),
+          privacy_level: level,
+          disable_comment: creatorInfo.comment_disabled === true,
+          disable_duet: creatorInfo.duet_disabled === true,
+          disable_stitch: creatorInfo.stitch_disabled === true,
+          video_cover_timestamp_ms: 1000
+        },
+        source_info: {
+          source: "FILE_UPLOAD",
+          video_size: videoSize,
+          chunk_size: videoSize,
+          total_chunk_count: 1
+        }
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    console.log('[TikTok video/init] level', level, 'HTTP', res.status, JSON.stringify(data));
+    return { res, data };
+  };
+
+  let { res, data } = await sendInit(privacyLevel);
+
+  // App chưa audit → chỉ được đăng SELF_ONLY. Tự động fallback để bài vẫn lên.
+  if (data.error?.code === 'unaudited_client_can_only_post_to_private_accounts' && privacyLevel !== 'SELF_ONLY') {
+    console.warn('[TikTok] App chưa audit — fallback privacy_level về SELF_ONLY.');
+    ({ res, data } = await sendInit('SELF_ONLY'));
+  }
+
   if (!res.ok || data.error?.code !== "ok" || !data.data?.publish_id || !data.data?.upload_url) {
     throw new Error(getTikTokApiErrorMessage(data, "Không khởi tạo được phiên đăng TikTok."));
   }
