@@ -5632,8 +5632,9 @@ export default function App() {
     const selectedIds = selectedSocialAccountIds[platform] || [];
     return getPlatformAccounts(platform).filter((account) => selectedIds.includes(account.id));
   };
-  const persistRefreshedTikTokToken = (account, tokenData = {}) => {
-    if (!account || !tokenData.access_token) return;
+  const persistRefreshedTikTokToken = (account, tokenData) => {
+    // tokenData có thể là null khi không cần refresh (accessToken còn dùng được)
+    if (!account || !tokenData || !tokenData.access_token) return;
     const credentials = {
       ...(account.credentials || {}),
       accessToken: tokenData.access_token,

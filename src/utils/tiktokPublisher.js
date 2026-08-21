@@ -80,8 +80,13 @@ export const buildTikTokVideoInitPayload = ({ caption, videoSize, privacyLevel, 
 
 export const getProxiedTikTokUploadUrl = (uploadUrl, uploadBase = DEFAULT_UPLOAD_BASE) => {
   const parsed = new URL(uploadUrl);
-  if (parsed.hostname !== 'open-upload.tiktokapis.com') return uploadUrl;
-  return `${uploadBase}${parsed.pathname}${parsed.search}`;
+  // TikTok trả upload_url theo region: open-upload.tiktokapis.com,
+  // open-upload-sg.tiktokapis.com, open-upload-eu.tiktokapis.com, ...
+  if (!/^open-upload[a-z0-9-]*\.tiktokapis\.com$/.test(parsed.hostname)) return uploadUrl;
+  // Truyền host thật qua param để proxy forward đúng region
+  const search = new URLSearchParams(parsed.search);
+  search.set('__tt_host', parsed.hostname);
+  return `${uploadBase}${parsed.pathname}?${search.toString()}`;
 };
 
 export const refreshTikTokAccessToken = async ({

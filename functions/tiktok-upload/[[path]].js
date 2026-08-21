@@ -16,7 +16,18 @@ export async function onRequest({ request, params }) {
   const path = Array.isArray(params.path) ? params.path.join("/") : (params.path || "");
   const sourceUrl = new URL(request.url);
   const trailingSlash = sourceUrl.pathname.endsWith("/") ? "/" : "";
-  const targetUrl = new URL(`https://open-upload.tiktokapis.com/${path}${trailingSlash}`);
+
+  // TikTok trả upload_url theo region (open-upload-sg, open-upload-eu, ...).
+  // Client truyền host thật qua ?__tt_host=; chỉ chấp nhận host *.tiktokapis.com.
+  let uploadHost = "open-upload.tiktokapis.com";
+  const requestedHost = sourceUrl.searchParams.get("__tt_host");
+  if (requestedHost && /^open-upload[a-z0-9-]*\.tiktokapis\.com$/.test(requestedHost)) {
+    uploadHost = requestedHost;
+  }
+  // Xoá param nội bộ trước khi forward
+  sourceUrl.searchParams.delete("__tt_host");
+
+  const targetUrl = new URL(`https://${uploadHost}/${path}${trailingSlash}`);
   targetUrl.search = sourceUrl.search;
 
   const headers = new Headers(request.headers);

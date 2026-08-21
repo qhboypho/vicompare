@@ -46,7 +46,14 @@ test('builds TikTok direct post init payload for a one chunk file upload', () =>
 test('proxies TikTok upload URLs through the local upload route', () => {
   assert.equal(
     getProxiedTikTokUploadUrl('https://open-upload.tiktokapis.com/video/?upload_id=abc&token=def'),
-    '/tiktok-upload/video/?upload_id=abc&token=def'
+    '/tiktok-upload/video/?upload_id=abc&token=def&__tt_host=open-upload.tiktokapis.com'
+  );
+});
+
+test('proxies region-specific TikTok upload URLs (sg/eu) with real host', () => {
+  assert.equal(
+    getProxiedTikTokUploadUrl('https://open-upload-sg.tiktokapis.com/upload?upload_id=xyz'),
+    '/tiktok-upload/upload?upload_id=xyz&__tt_host=open-upload-sg.tiktokapis.com'
   );
 });
 
@@ -85,7 +92,7 @@ test('publishTikTokVideo uses existing access token directly and uploads', async
         error: { code: 'ok', message: '' }
       });
     }
-    if (url === '/tiktok-upload/video/?upload_id=abc') {
+    if (url.startsWith('/tiktok-upload/video/') && url.includes('upload_id=abc')) {
       return new Response('', { status: 200 });
     }
     return new Response('unexpected', { status: 500 });
@@ -107,7 +114,7 @@ test('publishTikTokVideo uses existing access token directly and uploads', async
   // accessToken có sẵn → dùng trực tiếp, KHÔNG gọi refresh token
   const creatorCall = calls.find(c => c.url.endsWith('/v2/post/publish/creator_info/query/'));
   const initCall = calls.find(c => c.url.endsWith('/v2/post/publish/video/init/'));
-  const uploadCall = calls.find(c => c.url === '/tiktok-upload/video/?upload_id=abc');
+  const uploadCall = calls.find(c => c.url.startsWith('/tiktok-upload/video/'));
   assert.ok(!calls.some(c => c.url.endsWith('/v2/oauth/token/')), 'không được refresh khi có accessToken');
   assert.equal(creatorCall.options.headers.Authorization, 'Bearer old-token');
   assert.equal(initCall.options.headers.Authorization, 'Bearer old-token');
@@ -138,7 +145,7 @@ test('publishTikTokVideo refreshes token when no access token provided', async (
         error: { code: 'ok', message: '' }
       });
     }
-    if (url === '/tiktok-upload/video/?upload_id=abc') {
+    if (url.startsWith('/tiktok-upload/video/') && url.includes('upload_id=abc')) {
       return new Response('', { status: 200 });
     }
     return new Response('unexpected', { status: 500 });
