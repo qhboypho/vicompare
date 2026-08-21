@@ -3080,8 +3080,13 @@ export default function App() {
           const accountLabel = account?.label || 'YouTube Shorts';
           const credentials = account?.credentials || {};
           let activeToken = credentials.accessToken || ytAccessToken;
-          const accountClientId = credentials.clientId || ytClientId;
-          const accountClientSecret = credentials.clientSecret || ytClientSecret;
+          // clientId + clientSecret phải đi THÀNH CẶP. Nếu account thiếu bất kỳ
+          // vế nào, dùng cả cặp từ state (đã đồng bộ từ cloud) để tránh ghép
+          // clientId cũ với clientSecret mới (hoặc ngược lại) → Google báo
+          // "client secret is invalid".
+          const accountHasClientPair = credentials.clientId?.trim() && credentials.clientSecret?.trim();
+          const accountClientId = (accountHasClientPair ? credentials.clientId : ytClientId) || '';
+          const accountClientSecret = (accountHasClientPair ? credentials.clientSecret : ytClientSecret) || '';
           const accountRefreshToken = credentials.refreshToken || ytRefreshToken;
           if (accountClientId.trim() && accountClientSecret.trim() && accountRefreshToken.trim()) {
             try {
@@ -5393,29 +5398,38 @@ export default function App() {
         // tiên của mỗi platform để tài khoản không hiện "trống token" → văng ra.
         const hydrateAccountsFromCredentials = (rawAccounts) => {
           const cloned = JSON.parse(JSON.stringify(rawAccounts || {}));
-          const fillFirst = (platform, mapping) => {
+          // fillOnlyEmpty: token per-account, chỉ bơm khi account đang trống.
+          // overwriteFromCloud: config OAuth app (clientId/clientSecret/redirect)
+          //   dùng chung — cloud là nguồn chân lý, ĐÈ giá trị cũ/sai trên account
+          //   để tránh lệch cặp clientId/clientSecret gây "client secret invalid".
+          const fillFirst = (platform, fillOnlyEmpty, overwriteFromCloud = {}) => {
             const list = Array.isArray(cloned[platform]) ? cloned[platform] : [];
             const target = list[0];
             if (!target) return;
             target.credentials = target.credentials || {};
-            for (const [accKey, credKey] of Object.entries(mapping)) {
+            for (const [accKey, credKey] of Object.entries(fillOnlyEmpty)) {
               const value = credentials[credKey];
               if ((!target.credentials[accKey] || String(target.credentials[accKey]).trim() === '')
                 && typeof value === 'string' && value.trim() !== '') {
                 target.credentials[accKey] = value;
               }
             }
+            for (const [accKey, credKey] of Object.entries(overwriteFromCloud)) {
+              const value = credentials[credKey];
+              if (typeof value === 'string' && value.trim() !== '') {
+                target.credentials[accKey] = value.trim();
+              }
+            }
           };
           fillFirst('facebook', { pageId: 'fbPageId', accessToken: 'fbAccessToken', displayName: 'fbDisplayName' });
-          fillFirst('youtube', {
-            channelId: 'ytChannelId', accessToken: 'ytAccessToken', refreshToken: 'ytRefreshToken',
-            clientId: 'ytClientId', clientSecret: 'ytClientSecret', displayName: 'ytDisplayName'
-          });
-          fillFirst('tiktok', {
-            sessionId: 'ttSessionId', accessToken: 'ttAccessToken', refreshToken: 'ttRefreshToken',
-            clientKey: 'ttClientKey', clientSecret: 'ttClientSecret', openId: 'ttOpenId',
-            redirectUri: 'ttRedirectUri', displayName: 'ttDisplayName'
-          });
+          fillFirst('youtube',
+            { channelId: 'ytChannelId', accessToken: 'ytAccessToken', refreshToken: 'ytRefreshToken', displayName: 'ytDisplayName' },
+            { clientId: 'ytClientId', clientSecret: 'ytClientSecret' }
+          );
+          fillFirst('tiktok',
+            { sessionId: 'ttSessionId', accessToken: 'ttAccessToken', refreshToken: 'ttRefreshToken', openId: 'ttOpenId', displayName: 'ttDisplayName' },
+            { clientKey: 'ttClientKey', clientSecret: 'ttClientSecret', redirectUri: 'ttRedirectUri' }
+          );
           return cloned;
         };
         const normalizedAccounts = normalizeSocialAccounts(hydrateAccountsFromCredentials(config.socialAccounts));
@@ -6406,8 +6420,13 @@ export default function App() {
             }];
           } else if (platform === 'youtube') {
           let activeToken = credentials.accessToken || ytAccessToken;
-          const accountClientId = credentials.clientId || ytClientId;
-          const accountClientSecret = credentials.clientSecret || ytClientSecret;
+          // clientId + clientSecret phải đi THÀNH CẶP. Nếu account thiếu bất kỳ
+          // vế nào, dùng cả cặp từ state (đã đồng bộ từ cloud) để tránh ghép
+          // clientId cũ với clientSecret mới (hoặc ngược lại) → Google báo
+          // "client secret is invalid".
+          const accountHasClientPair = credentials.clientId?.trim() && credentials.clientSecret?.trim();
+          const accountClientId = (accountHasClientPair ? credentials.clientId : ytClientId) || '';
+          const accountClientSecret = (accountHasClientPair ? credentials.clientSecret : ytClientSecret) || '';
           const accountRefreshToken = credentials.refreshToken || ytRefreshToken;
           if (accountClientId.trim() && accountClientSecret.trim() && accountRefreshToken.trim()) {
             setPublishingStatus('Đang tự động làm mới YouTube Access Token...');
