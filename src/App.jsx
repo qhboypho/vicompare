@@ -3080,13 +3080,12 @@ export default function App() {
           const accountLabel = account?.label || 'YouTube Shorts';
           const credentials = account?.credentials || {};
           let activeToken = credentials.accessToken || ytAccessToken;
-          // clientId + clientSecret phải đi THÀNH CẶP. Nếu account thiếu bất kỳ
-          // vế nào, dùng cả cặp từ state (đã đồng bộ từ cloud) để tránh ghép
-          // clientId cũ với clientSecret mới (hoặc ngược lại) → Google báo
-          // "client secret is invalid".
-          const accountHasClientPair = credentials.clientId?.trim() && credentials.clientSecret?.trim();
-          const accountClientId = (accountHasClientPair ? credentials.clientId : ytClientId) || '';
-          const accountClientSecret = (accountHasClientPair ? credentials.clientSecret : ytClientSecret) || '';
+          // clientId + clientSecret là config OAuth app DÙNG CHUNG (cloud là
+          // nguồn chân lý), KHÔNG phải per-account. Ưu tiên state (đã nạp từ
+          // cloud); chỉ fallback về account khi state rỗng. Tránh dùng cặp
+          // cũ/sai còn kẹt trong account → Google báo "client secret is invalid".
+          const accountClientId = (ytClientId?.trim() ? ytClientId : credentials.clientId) || '';
+          const accountClientSecret = (ytClientSecret?.trim() ? ytClientSecret : credentials.clientSecret) || '';
           const accountRefreshToken = credentials.refreshToken || ytRefreshToken;
           if (accountClientId.trim() && accountClientSecret.trim() && accountRefreshToken.trim()) {
             try {
@@ -6420,13 +6419,12 @@ export default function App() {
             }];
           } else if (platform === 'youtube') {
           let activeToken = credentials.accessToken || ytAccessToken;
-          // clientId + clientSecret phải đi THÀNH CẶP. Nếu account thiếu bất kỳ
-          // vế nào, dùng cả cặp từ state (đã đồng bộ từ cloud) để tránh ghép
-          // clientId cũ với clientSecret mới (hoặc ngược lại) → Google báo
-          // "client secret is invalid".
-          const accountHasClientPair = credentials.clientId?.trim() && credentials.clientSecret?.trim();
-          const accountClientId = (accountHasClientPair ? credentials.clientId : ytClientId) || '';
-          const accountClientSecret = (accountHasClientPair ? credentials.clientSecret : ytClientSecret) || '';
+          // clientId + clientSecret là config OAuth app DÙNG CHUNG (cloud là
+          // nguồn chân lý), KHÔNG phải per-account. Ưu tiên state (đã nạp từ
+          // cloud); chỉ fallback về account khi state rỗng. Tránh dùng cặp
+          // cũ/sai còn kẹt trong account → Google báo "client secret is invalid".
+          const accountClientId = (ytClientId?.trim() ? ytClientId : credentials.clientId) || '';
+          const accountClientSecret = (ytClientSecret?.trim() ? ytClientSecret : credentials.clientSecret) || '';
           const accountRefreshToken = credentials.refreshToken || ytRefreshToken;
           if (accountClientId.trim() && accountClientSecret.trim() && accountRefreshToken.trim()) {
             setPublishingStatus('Đang tự động làm mới YouTube Access Token...');
