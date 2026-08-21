@@ -885,6 +885,8 @@ describe("Telegram TikTok publish config", () => {
       getTikTokApiErrorMessage({ error: { code: "unaudited_client_can_only_post_to_private_accounts", message: "Please review" } }),
       /chưa qua audit/
     );
-    assert.equal(pickTikTokPrivacyLevel(["SELF_ONLY", "PUBLIC_TO_EVERYONE"]), "PUBLIC_TO_EVERYONE");
+    assert.equal(pickTikTokPrivacyLevel(["SELF_ONLY", "PUBLIC_TO_EVERYONE"], { unaudited: false }), "PUBLIC_TO_EVERYONE");
+    // Mặc định app chưa audit → luôn SELF_ONLY
+    assert.equal(pickTikTokPrivacyLevel(["SELF_ONLY", "PUBLIC_TO_EVERYONE"]), "SELF_ONLY");
   });
 });

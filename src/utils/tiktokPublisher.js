@@ -2,6 +2,11 @@ const DEFAULT_API_BASE = '/tiktok-api';
 const DEFAULT_UPLOAD_BASE = '/tiktok-upload';
 const MAX_TIKTOK_CAPTION_LENGTH = 2200;
 
+// App TikTok chưa qua audit Content Posting API → CHỈ đăng được SELF_ONLY.
+// SAU KHI TikTok duyệt audit xong, đổi thành false để đăng công khai
+// (PUBLIC_TO_EVERYONE). Đây là công tắc duy nhất cần đổi.
+export const TIKTOK_APP_UNAUDITED = true;
+
 export const TIKTOK_DIRECT_POST_ENDPOINTS = {
   token: '/v2/oauth/token/',
   creatorInfo: '/v2/post/publish/creator_info/query/',
@@ -38,8 +43,14 @@ export const getTikTokApiErrorMessage = (payload = {}, fallback = 'TikTok API er
 
 export const normalizeTikTokCaption = (caption) => clean(caption).slice(0, MAX_TIKTOK_CAPTION_LENGTH);
 
-export const pickTikTokPrivacyLevel = (options = []) => {
+export const pickTikTokPrivacyLevel = (options = [], { unaudited = true } = {}) => {
   const allowed = Array.isArray(options) ? options.map(clean).filter(Boolean) : [];
+  // App CHƯA audit chỉ được đăng SELF_ONLY. Chọn bất kỳ level nào khác đều bị
+  // TikTok chặn với "unaudited_client_can_only_post_to_private_accounts".
+  // Khi app audit xong, đặt unaudited=false để ưu tiên đăng công khai.
+  if (unaudited) {
+    return allowed.find(item => item === 'SELF_ONLY') || 'SELF_ONLY';
+  }
   return allowed.find(item => item === 'PUBLIC_TO_EVERYONE')
     || allowed.find(item => item === 'MUTUAL_FOLLOW_FRIENDS')
     || allowed.find(item => item === 'FOLLOWER_OF_CREATOR')
@@ -246,7 +257,7 @@ export const publishTikTokVideo = async ({
     creatorInfo = await queryTikTokCreatorInfo({ accessToken, apiBase, fetchImpl });
   }
 
-  const privacyLevel = pickTikTokPrivacyLevel(creatorInfo.privacy_level_options);
+  const privacyLevel = pickTikTokPrivacyLevel(creatorInfo.privacy_level_options, { unaudited: TIKTOK_APP_UNAUDITED });
 
   setStatus('Đang khởi tạo phiên đăng TikTok...');
   const initData = await initTikTokVideoPublish({

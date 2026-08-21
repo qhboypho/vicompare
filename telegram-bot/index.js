@@ -2889,8 +2889,14 @@ export function getTikTokApiErrorMessage(payload = {}, fallback = "TikTok API er
   ]);
 }
 
-export function pickTikTokPrivacyLevel(options = []) {
+// App TikTok chưa audit → CHỈ đăng SELF_ONLY. Sau khi audit xong đổi false.
+const TIKTOK_APP_UNAUDITED = true;
+
+export function pickTikTokPrivacyLevel(options = [], { unaudited = true } = {}) {
   const allowed = Array.isArray(options) ? options.map(cleanString).filter(Boolean) : [];
+  if (unaudited) {
+    return allowed.find(item => item === "SELF_ONLY") || "SELF_ONLY";
+  }
   return allowed.find(item => item === "PUBLIC_TO_EVERYONE")
     || allowed.find(item => item === "MUTUAL_FOLLOW_FRIENDS")
     || allowed.find(item => item === "FOLLOWER_OF_CREATOR")
@@ -2991,7 +2997,7 @@ async function publishTikTokVideo(videoBuffer, caption, env) {
   }
 
   const creatorInfo = await queryTikTokCreatorInfo(accessToken);
-  const privacyLevel = pickTikTokPrivacyLevel(creatorInfo.privacy_level_options);
+  const privacyLevel = pickTikTokPrivacyLevel(creatorInfo.privacy_level_options, { unaudited: TIKTOK_APP_UNAUDITED });
   const initData = await initTikTokVideoPublish(accessToken, caption, videoBuffer.byteLength, privacyLevel, creatorInfo);
 
   const uploadRes = await fetch(initData.upload_url, {

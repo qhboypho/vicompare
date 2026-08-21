@@ -9,10 +9,17 @@ import {
   publishTikTokVideo
 } from './tiktokPublisher.js';
 
-test('picks the broadest available TikTok privacy option', () => {
-  assert.equal(pickTikTokPrivacyLevel(['SELF_ONLY', 'PUBLIC_TO_EVERYONE']), 'PUBLIC_TO_EVERYONE');
-  assert.equal(pickTikTokPrivacyLevel(['FOLLOWER_OF_CREATOR', 'SELF_ONLY']), 'FOLLOWER_OF_CREATOR');
+test('picks SELF_ONLY when app is unaudited (default)', () => {
+  // Mặc định app chưa audit → luôn SELF_ONLY dù có option công khai
+  assert.equal(pickTikTokPrivacyLevel(['SELF_ONLY', 'PUBLIC_TO_EVERYONE']), 'SELF_ONLY');
+  assert.equal(pickTikTokPrivacyLevel(['FOLLOWER_OF_CREATOR', 'MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY']), 'SELF_ONLY');
   assert.equal(pickTikTokPrivacyLevel([]), 'SELF_ONLY');
+});
+
+test('picks the broadest option when app is audited', () => {
+  assert.equal(pickTikTokPrivacyLevel(['SELF_ONLY', 'PUBLIC_TO_EVERYONE'], { unaudited: false }), 'PUBLIC_TO_EVERYONE');
+  assert.equal(pickTikTokPrivacyLevel(['FOLLOWER_OF_CREATOR', 'SELF_ONLY'], { unaudited: false }), 'FOLLOWER_OF_CREATOR');
+  assert.equal(pickTikTokPrivacyLevel([], { unaudited: false }), 'SELF_ONLY');
 });
 
 test('builds TikTok direct post init payload for a one chunk file upload', () => {
