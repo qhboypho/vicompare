@@ -125,6 +125,7 @@ export const queryTikTokCreatorInfo = async ({
     }
   });
   const data = await res.json().catch(() => ({}));
+  console.log('[TikTok creator_info] HTTP', res.status, JSON.stringify(data.data || data));
   if (!res.ok || data.error?.code !== 'ok') {
     throw new Error(getTikTokApiErrorMessage(data, 'Không lấy được TikTok creator info.'));
   }
