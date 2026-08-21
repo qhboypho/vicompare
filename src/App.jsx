@@ -2247,6 +2247,35 @@ export default function App() {
     return mergedSettings;
   };
 
+  // Xóa key YouTube CŨ còn kẹt trong localStorage + socialAccounts trên máy,
+  // rồi nạp lại cặp clientId/secret MỚI từ cloud. Dùng khi cloud đã đúng key
+  // mới nhưng máy vẫn giữ cặp cũ → "client secret is invalid".
+  const handleResyncYouTubeKeysFromCloud = async () => {
+    // 1. Xóa cặp clientId/secret khỏi localStorage để không tự khôi phục lại.
+    try {
+      localStorage.removeItem('yt_client_id');
+      localStorage.removeItem('yt_client_secret');
+      localStorage.removeItem('yt_access_token');
+    } catch {}
+    // 2. Xóa clientId/secret/accessToken khỏi mọi account YouTube trong state.
+    setSocialAccounts(prev => {
+      const next = { ...prev };
+      next.youtube = (prev.youtube || []).map(acc => ({
+        ...acc,
+        credentials: { ...(acc.credentials || {}), clientId: '', clientSecret: '', accessToken: '' }
+      }));
+      try { localStorage.setItem(SOCIAL_ACCOUNT_STORAGE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+    // 3. Dọn state để hydrate từ cloud không bị "chỉ bơm khi rỗng" chặn lại.
+    setYtClientId('');
+    setYtClientSecret('');
+    setYtAccessToken('');
+    // 4. Nạp lại từ cloud (đã có cặp mới) — hydrate sẽ đổ cặp mới vào account.
+    const restored = await loadAppSettingsFromCloud();
+    return Boolean(restored);
+  };
+
   // 1. Đồng bộ danh sách Mẫu Kênh sang Cloudflare Worker của Telegram Bot
   const syncChannelProfilesToTelegram = async (profiles, credentialOverrides = {}) => {
     const list = profiles || channelProfiles;
@@ -7893,6 +7922,19 @@ export default function App() {
                     style={{ fontSize: '0.72rem', padding: '0.35rem 0.65rem' }}
                   >
                     ⬆ Lưu cloud
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleResyncYouTubeKeysFromCloud()
+                      .then(ok => alert(ok
+                        ? 'Đã xóa key YouTube cũ và nạp lại key mới từ Cloud. Thử đăng lại nhé!'
+                        : 'Không tải được key từ Cloud. Kiểm tra kết nối rồi thử lại.'))
+                      .catch(err => alert(`Lỗi đồng bộ key YouTube: ${err.message}`))}
+                    style={{ fontSize: '0.72rem', padding: '0.35rem 0.65rem' }}
+                    title="Xóa cặp clientId/secret YouTube cũ trên máy và nạp lại cặp mới từ Cloud"
+                  >
+                    🔄 Xóa key YT cũ
                   </button>
                 </div>
 
