@@ -5379,7 +5379,37 @@ export default function App() {
       if (config.imageGlowOpacity !== undefined) setImageGlowOpacity(config.imageGlowOpacity);
 
       if (Array.isArray(config.socialAccounts?.facebook) || Array.isArray(config.socialAccounts?.youtube) || Array.isArray(config.socialAccounts?.tiktok)) {
-        const normalizedAccounts = normalizeSocialAccounts(config.socialAccounts);
+        // Cloud lưu socialAccounts với token bị lược rỗng (token thật nằm ở
+        // credentials top-level). Bơm token top-level vào account active/đầu
+        // tiên của mỗi platform để tài khoản không hiện "trống token" → văng ra.
+        const hydrateAccountsFromCredentials = (rawAccounts) => {
+          const cloned = JSON.parse(JSON.stringify(rawAccounts || {}));
+          const fillFirst = (platform, mapping) => {
+            const list = Array.isArray(cloned[platform]) ? cloned[platform] : [];
+            const target = list[0];
+            if (!target) return;
+            target.credentials = target.credentials || {};
+            for (const [accKey, credKey] of Object.entries(mapping)) {
+              const value = credentials[credKey];
+              if ((!target.credentials[accKey] || String(target.credentials[accKey]).trim() === '')
+                && typeof value === 'string' && value.trim() !== '') {
+                target.credentials[accKey] = value;
+              }
+            }
+          };
+          fillFirst('facebook', { pageId: 'fbPageId', accessToken: 'fbAccessToken', displayName: 'fbDisplayName' });
+          fillFirst('youtube', {
+            channelId: 'ytChannelId', accessToken: 'ytAccessToken', refreshToken: 'ytRefreshToken',
+            clientId: 'ytClientId', clientSecret: 'ytClientSecret', displayName: 'ytDisplayName'
+          });
+          fillFirst('tiktok', {
+            sessionId: 'ttSessionId', accessToken: 'ttAccessToken', refreshToken: 'ttRefreshToken',
+            clientKey: 'ttClientKey', clientSecret: 'ttClientSecret', openId: 'ttOpenId',
+            redirectUri: 'ttRedirectUri', displayName: 'ttDisplayName'
+          });
+          return cloned;
+        };
+        const normalizedAccounts = normalizeSocialAccounts(hydrateAccountsFromCredentials(config.socialAccounts));
         const normalizedActiveIds = getActiveSocialAccountIds(normalizedAccounts, config.activeSocialAccountIds || {});
         const normalizedSelectedIds = getSelectedSocialAccountIds(normalizedAccounts, config.selectedSocialAccountIds || {});
         setSocialAccounts(normalizedAccounts);
