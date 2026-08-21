@@ -146,6 +146,31 @@ const base64ToBlob = (base64, mimeType = 'audio/mpeg') => {
 
 
 
+// scheduledPosts được persist vào localStorage chỉ để theo dõi trạng thái đăng
+// và cho AI bot quản lý bình luận. Các field nặng (video, cấu hình dự án đầy đủ
+// gồm ảnh/audio base64) KHÔNG cần lưu — chúng gây QuotaExceededError. Chỉ giữ
+// metadata nhẹ; projectConfig chỉ giữ vài trường hiển thị cần thiết.
+const HEAVY_POST_FIELDS = ['videoUrl', 'projectConfig', 'audioUrl', 'videoBlob', 'renderedVideoBlob'];
+const LIGHT_PROJECT_CONFIG_FIELDS = ['headerTitle', 'customFilename', 'duration'];
+
+const stripHeavyPostFields = (post) => {
+  if (!post || typeof post !== 'object') return post;
+  const light = { ...post };
+  for (const field of HEAVY_POST_FIELDS) delete light[field];
+  // Giữ lại một projectConfig tối giản để hiển thị tên/tiêu đề nếu cần
+  if (post.projectConfig && typeof post.projectConfig === 'object') {
+    const slim = {};
+    for (const key of LIGHT_PROJECT_CONFIG_FIELDS) {
+      if (post.projectConfig[key] !== undefined) slim[key] = post.projectConfig[key];
+    }
+    if (Object.keys(slim).length > 0) light.projectConfig = slim;
+  }
+  return light;
+};
+
+const serializeScheduledPostsForStorage = (posts) =>
+  Array.isArray(posts) ? posts.map(stripHeavyPostFields) : [];
+
 // A reusable component to render password-type input fields with view eye toggle and copy button
 const ApiKeyInput = ({ value, onChange, placeholder = "Nhập API Key...", className = "", style = {}, ...props }) => {
   const [show, setShow] = useState(false);
@@ -1737,7 +1762,15 @@ export default function App() {
       console.error('Failed to serialize socialAccounts to localStorage:', err);
     }
     try {
-      localStorage.setItem('scheduledPosts', JSON.stringify(scheduledPosts));
+      const lightPosts = serializeScheduledPostsForStorage(scheduledPosts);
+      try {
+        localStorage.setItem('scheduledPosts', JSON.stringify(lightPosts));
+      } catch (quotaErr) {
+        // Vẫn đầy dù đã lược field nặng → cắt giữ 50 bài gần nhất
+        console.warn('scheduledPosts vượt quota, cắt bớt bài cũ:', quotaErr);
+        const trimmed = lightPosts.slice(0, 50);
+        localStorage.setItem('scheduledPosts', JSON.stringify(trimmed));
+      }
     } catch (err) {
       console.error('Failed to serialize scheduledPosts to localStorage:', err);
     }
@@ -8833,7 +8866,7 @@ export default function App() {
                             </td>
                             <td style={{ padding: '0.5rem 0.75rem', textAlign: 'center' }}>
                               <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'center' }}>
-                                {post.projectConfig && (
+                                {post.projectConfig?.comparisons && (
                                   <button
                                     className="btn btn-secondary btn-sm"
                                     style={{ padding: '0.2rem', height: '22px', border: '1px solid var(--accent-indigo)', color: 'var(--accent-indigo)', background: 'rgba(99, 102, 241, 0.05)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
