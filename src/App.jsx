@@ -1997,10 +1997,19 @@ export default function App() {
 
     const boot = async () => {
       let cloudSettings = null;
-      try {
-        cloudSettings = await loadAppSettingsFromCloud();
-      } catch (err) {
-        console.warn('Không tải được cloud settings, dùng local/disk fallback:', err);
+      // Retry vài lần: nếu lần load cloud đầu lỗi mạng/CORS mà không thử lại,
+      // credentials (FB/YT/TikTok) sẽ không được khôi phục và UI trông như
+      // "mất key" dù cloud vẫn còn đủ. Backoff ngắn để không chặn boot lâu.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          cloudSettings = await loadAppSettingsFromCloud();
+          if (cloudSettings) break;
+        } catch (err) {
+          console.warn(`Không tải được cloud settings (lần ${attempt + 1}/3):`, err);
+        }
+        if (attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 800 * (attempt + 1)));
+        }
       }
       const credentialOverrides = cloudSettings?.credentials || await loadFromDisk();
       await syncChannelProfilesToTelegram(cloudSettings?.channelProfiles || channelProfiles, credentialOverrides);
@@ -5438,6 +5447,30 @@ export default function App() {
       if (nextTtRefreshToken !== undefined) setTtRefreshToken(nextTtRefreshToken);
       if (nextTtOpenId !== undefined) setTtOpenId(nextTtOpenId);
       if (nextTtRedirectUri !== undefined) setTtRedirectUri(nextTtRedirectUri);
+
+      // Ghi bền vững credential đã khôi phục xuống localStorage NGAY, thay vì
+      // chỉ set React state. Nếu không, cloud vẫn còn key nhưng máy này reload
+      // trước khi cloud load xong (hoặc load lỗi 1 lần) sẽ thấy trống → "văng
+      // ra mất key". Chỉ ghi giá trị KHÔNG rỗng để không đè key tốt bằng rỗng.
+      const persistCredential = (storageKey, value) => {
+        if (typeof value === 'string' && value.trim() !== '') {
+          try { localStorage.setItem(storageKey, value); } catch {}
+        }
+      };
+      persistCredential('fb_page_id', nextFbPageId);
+      persistCredential('fb_access_token', nextFbAccessToken);
+      persistCredential('yt_channel_id', nextYtChannelId);
+      persistCredential('yt_access_token', nextYtAccessToken);
+      persistCredential('yt_client_id', nextYtClientId);
+      persistCredential('yt_client_secret', nextYtClientSecret);
+      persistCredential('yt_refresh_token', nextYtRefreshToken);
+      persistCredential('tt_session_id', nextTtSessionId);
+      persistCredential('tt_access_token', nextTtAccessToken);
+      persistCredential('tt_client_key', nextTtClientKey);
+      persistCredential('tt_client_secret', nextTtClientSecret);
+      persistCredential('tt_refresh_token', nextTtRefreshToken);
+      persistCredential('tt_open_id', nextTtOpenId);
+      persistCredential('tt_redirect_uri', nextTtRedirectUri);
       if (config.botEnabled !== undefined) setBotEnabled(config.botEnabled);
       const nextCommentAiProvider = readConfigValue('commentAiProvider', 'comment_ai_provider');
       const nextCommentAiApiKey = readConfigValue('commentAiApiKey', 'comment_ai_api_key');
