@@ -30,13 +30,16 @@ export const pickTikTokPrivacyLevel = (options = []) => {
     || 'SELF_ONLY';
 };
 
-export const buildTikTokVideoInitPayload = ({ caption, videoSize, privacyLevel, chunkSize }) => ({
+export const buildTikTokVideoInitPayload = ({ caption, videoSize, privacyLevel, chunkSize, creatorInfo = {} }) => ({
   post_info: {
     title: normalizeTikTokCaption(caption),
     privacy_level: privacyLevel,
-    disable_duet: false,
-    disable_comment: false,
-    disable_stitch: false,
+    // Phải tôn trọng ràng buộc account trả về từ creator_info. Nếu creator
+    // tắt comment/duet/stitch mà ta gửi false, TikTok từ chối với lỗi
+    // "Please review our integration guidelines".
+    disable_comment: creatorInfo.comment_disabled === true,
+    disable_duet: creatorInfo.duet_disabled === true,
+    disable_stitch: creatorInfo.stitch_disabled === true,
     video_cover_timestamp_ms: 1000
   },
   source_info: {
@@ -116,6 +119,7 @@ export const initTikTokVideoPublish = async ({
   caption,
   videoSize,
   privacyLevel,
+  creatorInfo = {},
   apiBase = DEFAULT_API_BASE,
   fetchImpl = fetch
 }) => {
@@ -123,7 +127,8 @@ export const initTikTokVideoPublish = async ({
     caption,
     videoSize,
     privacyLevel,
-    chunkSize: videoSize
+    chunkSize: videoSize,
+    creatorInfo
   });
 
   const res = await fetchImpl(`${apiBase}${TIKTOK_DIRECT_POST_ENDPOINTS.videoInit}`, {
@@ -135,6 +140,7 @@ export const initTikTokVideoPublish = async ({
     body: JSON.stringify(payload)
   });
   const data = await res.json().catch(() => ({}));
+  console.log('[TikTok video/init] payload:', JSON.stringify(payload.post_info), '| response:', res.status, JSON.stringify(data));
   if (!res.ok || data.error?.code !== 'ok' || !data.data?.publish_id || !data.data?.upload_url) {
     throw new Error(getTikTokApiErrorMessage(data, 'Không khởi tạo được phiên đăng TikTok.'));
   }
@@ -230,6 +236,7 @@ export const publishTikTokVideo = async ({
     caption,
     videoSize: videoBlob.size ?? videoBlob.byteLength,
     privacyLevel,
+    creatorInfo,
     apiBase,
     fetchImpl
   });

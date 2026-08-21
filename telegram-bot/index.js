@@ -2923,7 +2923,7 @@ async function queryTikTokCreatorInfo(accessToken) {
   return data.data || {};
 }
 
-async function initTikTokVideoPublish(accessToken, caption, videoSize, privacyLevel) {
+async function initTikTokVideoPublish(accessToken, caption, videoSize, privacyLevel, creatorInfo = {}) {
   const res = await fetch("https://open.tiktokapis.com/v2/post/publish/video/init/", {
     method: "POST",
     headers: {
@@ -2934,9 +2934,11 @@ async function initTikTokVideoPublish(accessToken, caption, videoSize, privacyLe
       post_info: {
         title: cleanString(caption).slice(0, 2200),
         privacy_level: privacyLevel,
-        disable_duet: false,
-        disable_comment: false,
-        disable_stitch: false,
+        // Tôn trọng ràng buộc account từ creator_info, nếu không TikTok trả
+        // "Please review our integration guidelines".
+        disable_comment: creatorInfo.comment_disabled === true,
+        disable_duet: creatorInfo.duet_disabled === true,
+        disable_stitch: creatorInfo.stitch_disabled === true,
         video_cover_timestamp_ms: 1000
       },
       source_info: {
@@ -2948,6 +2950,7 @@ async function initTikTokVideoPublish(accessToken, caption, videoSize, privacyLe
     })
   });
   const data = await res.json().catch(() => ({}));
+  console.log('[TikTok video/init] HTTP', res.status, JSON.stringify(data));
   if (!res.ok || data.error?.code !== "ok" || !data.data?.publish_id || !data.data?.upload_url) {
     throw new Error(getTikTokApiErrorMessage(data, "Không khởi tạo được phiên đăng TikTok."));
   }
@@ -2975,7 +2978,7 @@ async function publishTikTokVideo(videoBuffer, caption, env) {
 
   const creatorInfo = await queryTikTokCreatorInfo(accessToken);
   const privacyLevel = pickTikTokPrivacyLevel(creatorInfo.privacy_level_options);
-  const initData = await initTikTokVideoPublish(accessToken, caption, videoBuffer.byteLength, privacyLevel);
+  const initData = await initTikTokVideoPublish(accessToken, caption, videoBuffer.byteLength, privacyLevel, creatorInfo);
 
   const uploadRes = await fetch(initData.upload_url, {
     method: "PUT",

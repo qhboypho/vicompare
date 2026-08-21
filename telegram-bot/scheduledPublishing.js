@@ -204,6 +204,7 @@ async function publishTikTok({ account, video, caption, fetchImpl = fetch }) {
   if (!creatorResponse.ok || creatorPayload.error?.code !== 'ok') throw new Error(`TikTok creator info: ${responseError(creatorPayload, creatorResponse)}`);
   const privacyOptions = creatorPayload.data?.privacy_level_options || [];
   const privacyLevel = privacyOptions.includes('PUBLIC_TO_EVERYONE') ? 'PUBLIC_TO_EVERYONE' : privacyOptions[0] || 'SELF_ONLY';
+  const creatorData = creatorPayload.data || {};
   const initResponse = await fetchImpl('https://open.tiktokapis.com/v2/post/publish/video/init/', {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json; charset=UTF-8' },
@@ -211,9 +212,9 @@ async function publishTikTok({ account, video, caption, fetchImpl = fetch }) {
       post_info: {
         title: caption.slice(0, 2200),
         privacy_level: privacyLevel,
-        disable_duet: false,
-        disable_comment: false,
-        disable_stitch: false,
+        disable_comment: creatorData.comment_disabled === true,
+        disable_duet: creatorData.duet_disabled === true,
+        disable_stitch: creatorData.stitch_disabled === true,
         video_cover_timestamp_ms: 1000
       },
       source_info: { source: 'FILE_UPLOAD', video_size: video.size, chunk_size: video.size, total_chunk_count: 1 }
