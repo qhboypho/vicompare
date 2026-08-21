@@ -689,8 +689,20 @@ function drawFollowCta(ctx, w, currentTime, label, channelName) {
     ctx.fillText(channelName, centerX, 470);
   }
 
-  const btnW = 360 * pulse;
   const btnH = 96 * pulse;
+
+  // Đo trước bố cục [chuông] + gap + [chữ] để nút tự co giãn vừa nội dung,
+  // không bao giờ tràn/đè. Chuông và chữ được căn giữa theo cụm.
+  const bellScale = (btnH / 96);
+  const bellHalfW = 22 * bellScale;
+  const gap = 16 * bellScale;
+  const labelText = String(label || 'ĐĂNG KÝ').toUpperCase();
+  const fontPx = Math.round(38 * bellScale);
+  ctx.font = `900 ${fontPx}px "Be Vietnam Pro", Arial, sans-serif`;
+  const textW = ctx.measureText(labelText).width;
+  const groupW = bellHalfW * 2 + gap + textW;
+  const sidePadding = 44 * pulse;
+  const btnW = Math.max(360 * pulse, groupW + sidePadding * 2);
   const btnY = 560 - btnH / 2;
   const btnX = centerX - btnW / 2;
   const radius = btnH / 2;
@@ -712,10 +724,13 @@ function drawFollowCta(ctx, w, currentTime, label, channelName) {
   ctx.fillStyle = btnGrad;
   ctx.fill();
 
-  // Icon chuông (bell) bên trái nhãn, rung nhẹ theo nhịp
-  const bellCx = btnX + btnH * 0.62;
+  // Vị trí cụm chuông+chữ căn giữa nút
+  const groupLeft = centerX - groupW / 2;
+  const bellCx = groupLeft + bellHalfW;
   const bellCy = btnY + btnH / 2;
-  const bellScale = (btnH / 96);
+  const textStartX = bellCx + bellHalfW + gap;
+
+  // Icon chuông (bell), rung nhẹ theo nhịp
   const bellTilt = 0.18 * Math.sin(currentTime * Math.PI * 6);
   ctx.save();
   ctx.translate(bellCx, bellCy);
@@ -739,11 +754,13 @@ function drawFollowCta(ctx, w, currentTime, label, channelName) {
   ctx.fill();
   ctx.restore();
 
-  // Nhãn chữ (ĐĂNG KÝ / THEO DÕI / ...)
-  const labelText = String(label || 'ĐĂNG KÝ').toUpperCase();
-  ctx.font = `900 ${Math.round(40 * (btnH / 96))}px "Be Vietnam Pro", Arial, sans-serif`;
+  // Nhãn chữ căn trái tại textStartX (đã trừ chuông + gap nên không đè)
+  ctx.font = `900 ${fontPx}px "Be Vietnam Pro", Arial, sans-serif`;
   ctx.fillStyle = '#FFFFFF';
-  ctx.fillText(labelText, bellCx + btnW * 0.16, btnY + btnH / 2 + 2);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(labelText, textStartX, btnY + btnH / 2 + 2);
+  ctx.textAlign = 'center';
 
   // Emoji ngón tay chỉ nhấp nháy dưới nút (gợi ý bấm)
   ctx.font = `${Math.round(56 * pulse)}px sans-serif`;
@@ -993,11 +1010,11 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     ctx.restore();
   };
 
-  // Left Label
-  drawFittedTitle(activeComp.leftTitle, leftLayout.x + leftLayout.w / 2, leftLayout.y - 25, leftScale, activeComp.leftColor || '#FF9800', leftOpacity);
-
-  // Right Label
-  drawFittedTitle(activeComp.rightTitle, rightLayout.x + rightLayout.w / 2, rightLayout.y - 25, rightScale, activeComp.rightColor || '#10B981', rightOpacity);
+  // Left & Right Label — ẩn ở cảnh outro (CTA Follow)
+  if (!state.isOutro) {
+    drawFittedTitle(activeComp.leftTitle, leftLayout.x + leftLayout.w / 2, leftLayout.y - 25, leftScale, activeComp.leftColor || '#FF9800', leftOpacity);
+    drawFittedTitle(activeComp.rightTitle, rightLayout.x + rightLayout.w / 2, rightLayout.y - 25, rightScale, activeComp.rightColor || '#10B981', rightOpacity);
+  }
 
   const drawPanelGlow = (layout, color, alpha) => {
     const effectiveAlpha = Math.max(0, Math.min(1, alpha * glowOpacity));
