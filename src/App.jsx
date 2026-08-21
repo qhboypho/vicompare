@@ -582,6 +582,8 @@ export default function App() {
   // General Setup
   const [headerTitle, setHeaderTitle] = useState(() => localStorage.getItem('headerTitle') || 'Mèo Thông Thái');
   const [customFilename, setCustomFilename] = useState(() => localStorage.getItem('customFilename') || 'so_sanh_meo_thong_thai');
+  const [outroCtaText, setOutroCtaText] = useState(() => localStorage.getItem('outroCtaText') || '');
+  const [outroFollowLabel, setOutroFollowLabel] = useState(() => localStorage.getItem('outroFollowLabel') || 'ĐĂNG KÝ');
   const [headerLogoUrl, setHeaderLogoUrl] = useState(() => localStorage.getItem('headerLogoUrl') || '/vicompare-app-icon.png');
   const [logoFileName, setLogoFileName] = useState(() => localStorage.getItem('logoFileName') || '');
   const [bgColor, setBgColor] = useState(() => localStorage.getItem('bgColor') || '#FAF6F0');
@@ -1795,6 +1797,8 @@ export default function App() {
     localStorage.setItem('globalImageZoom', globalImageZoom.toString());
     localStorage.setItem('imageGlowOpacity', imageGlowOpacity.toString());
     localStorage.setItem('customFilename', customFilename);
+    localStorage.setItem('outroCtaText', outroCtaText);
+    localStorage.setItem('outroFollowLabel', outroFollowLabel);
   }, [
     fbConnected,
     ytConnected,
@@ -1830,7 +1834,9 @@ export default function App() {
     imageFrameHeight,
     globalImageZoom,
     imageGlowOpacity,
-    customFilename
+    customFilename,
+    outroCtaText,
+    outroFollowLabel
   ]);
 
   // Lớp thứ 2: Tự động sao lưu cấu hình và API key xuống ổ cứng máy khách qua API Local
@@ -2084,6 +2090,8 @@ export default function App() {
       channelProfiles,
       headerTitle,
       customFilename,
+      outroCtaText,
+      outroFollowLabel,
       bgColor,
       headerPosition,
       headerTitleColor,
@@ -2315,6 +2323,8 @@ export default function App() {
     channelProfiles,
     headerTitle,
     customFilename,
+    outroCtaText,
+    outroFollowLabel,
     bgColor,
     headerPosition,
     headerTitleColor,
@@ -3791,6 +3801,11 @@ export default function App() {
       const sourceBlocks = timelineBlocks.filter(block => String(block.text || '').trim());
       if (sourceBlocks.length === 0) throw new Error('Chưa có dòng phụ đề/kịch bản để tạo giọng.');
 
+      // Lời thoại CTA cuối video (tuỳ chọn). Có chữ thì thêm 1 câu voice + 1
+      // block outro (cảnh Follow, không sub, không panel) vào cuối timeline.
+      const outroText = String(outroCtaText || '').trim();
+      const hasOutro = outroText.length > 0;
+
       setIsGeneratingVoice(true);
       const audioBuffers = [];
       for (let index = 0; index < sourceBlocks.length; index += 1) {
@@ -3799,22 +3814,35 @@ export default function App() {
         const decoded = await decodeAudioBlob(blob);
         audioBuffers.push(decoded);
       }
+      if (hasOutro) {
+        const outroBlob = await requestSegmentAudioBlob(provider, outroText, options);
+        audioBuffers.push(await decodeAudioBlob(outroBlob));
+      }
+
+      // Danh sách block để tính timeline: block phụ đề + (tuỳ chọn) block outro.
+      const timelineSourceBlocks = hasOutro
+        ? [...sourceBlocks, { id: 'outro-cta', text: outroText, isOutro: true, pose: 'default', highlight: 'none' }]
+        : sourceBlocks;
 
       const segmentDurations = audioBuffers.map(buffer => buffer.duration);
       const speechRegions = audioBuffers.map(buffer => analyzeSegmentSpeech(buffer));
-      const timed = buildSegmentTimeline(sourceBlocks, segmentDurations, {
+      const timed = buildSegmentTimeline(timelineSourceBlocks, segmentDurations, {
         introDelay: 0,
         segmentGap: 0.06,
         outroPadding: 0.22,
         speechRegions
       });
-      const actionEvents = buildActionSfxEvents(timed.blocks, {
+      // Đánh dấu block outro: không phụ đề, render cảnh Follow.
+      const finalBlocks = timed.blocks.map(block => block.isOutro
+        ? { ...block, isOutro: true, followLabel: outroFollowLabel || 'ĐĂNG KÝ', text: '' }
+        : block);
+      const actionEvents = buildActionSfxEvents(finalBlocks, {
         enabled: actionSfxEnabled,
         offset: 0.02
       });
       const mergedBuffer = await renderSegmentedAudio({
         audioBuffers,
-        timelineBlocks: timed.blocks,
+        timelineBlocks: finalBlocks,
         actionEvents,
         sfxVolume: actionSfxVolume,
         actionSfxPresets
@@ -3825,13 +3853,13 @@ export default function App() {
 
       setAudioUrl(localBlobUrl);
       setAudioFileName(filename);
-      setTimelineBlocks(timed.blocks);
+      setTimelineBlocks(finalBlocks);
       setDuration(Math.max(timed.duration, mergedBuffer.duration));
       setIsPlaying(false);
       setCurrentTime(0);
       await saveAudioToStorage(mergedBlob, filename);
       rememberCurrentAudioFileName(filename);
-      alert(`Đã tạo giọng theo từng câu, khớp sub bằng duration thật${actionEvents.length ? ` và thêm ${actionEvents.length} hiệu ứng hành động` : ''}!`);
+      alert(`Đã tạo giọng theo từng câu, khớp sub bằng duration thật${hasOutro ? ' + lời thoại kêu gọi Follow cuối video' : ''}${actionEvents.length ? ` và thêm ${actionEvents.length} hiệu ứng hành động` : ''}!`);
     } catch (err) {
       alert('Lỗi tạo Voice theo từng câu: ' + err.message);
     } finally {
@@ -4322,6 +4350,8 @@ export default function App() {
       timelineBlocks,
       comparisons,
       subtitleText: activeBlock ? activeBlock.text : '',
+      isOutro: activeBlock ? Boolean(activeBlock.isOutro) : false,
+      followLabel: activeBlock?.followLabel || outroFollowLabel || 'ĐĂNG KÝ',
       mascotPose: activeBlock ? activeBlock.pose : 'default',
       highlight: activeBlock ? activeBlock.highlight : 'none',
       blockStart: activeBlock ? activeBlock.start : 0,
@@ -5265,6 +5295,8 @@ export default function App() {
       }
       if (config.headerTitle !== undefined) setHeaderTitle(config.headerTitle);
       if (config.customFilename !== undefined) setCustomFilename(config.customFilename);
+      if (config.outroCtaText !== undefined) setOutroCtaText(config.outroCtaText);
+      if (config.outroFollowLabel !== undefined) setOutroFollowLabel(config.outroFollowLabel);
       if (config.logoFileName !== undefined) setLogoFileName(config.logoFileName);
       if (config.headerLogoUrl !== undefined) {
         if (config.headerLogoUrl && config.headerLogoUrl.startsWith('idb:')) {
@@ -5695,6 +5727,7 @@ export default function App() {
           bgColor,
           comparisons,
           timelineBlocks,
+          outroFollowLabel,
           showSubtitles,
           subtitleY,
           subtitleColor,
@@ -8012,6 +8045,31 @@ export default function App() {
                       value={customFilename}
                       onChange={(e) => setCustomFilename(e.target.value.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, ''))}
                       placeholder="so_sanh_meo_thong_thai"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Lời thoại kêu gọi cuối video (CTA) — để trống nếu không dùng</label>
+                    <textarea
+                      value={outroCtaText}
+                      onChange={(e) => setOutroCtaText(e.target.value)}
+                      placeholder="VD: Bấm đăng ký theo dõi Mèo Thông Thái để cập nhật những thông tin bổ ích nhé!"
+                      rows={2}
+                      style={{ width: '100%', resize: 'vertical', fontSize: '0.85rem' }}
+                    />
+                    <small style={{ opacity: 0.7, fontSize: '0.72rem' }}>
+                      Khi tạo Voice, câu này được đọc ở cuối video kèm cảnh nút Follow (không phụ đề).
+                    </small>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Chữ trên nút Follow cuối video</label>
+                    <input
+                      type="text"
+                      value={outroFollowLabel}
+                      onChange={(e) => setOutroFollowLabel(e.target.value)}
+                      placeholder="ĐĂNG KÝ"
+                      maxLength={16}
                     />
                   </div>
 

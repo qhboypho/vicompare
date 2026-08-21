@@ -665,8 +665,98 @@ export function getMascotWithWhiteBacking(mascotCanvas) {
 }
 
 /**
+ * Vẽ nút "kêu gọi Follow" cho cảnh cuối video (outro CTA).
+ * Gồm: (tuỳ chọn) tên kênh phía trên, nút bo tròn màu đỏ với icon chuông +
+ * nhãn chữ tuỳ chỉnh, và hiệu ứng nhấp nháy/phóng nhẹ để thu hút bấm theo dõi.
+ */
+function drawFollowCta(ctx, w, currentTime, label, channelName) {
+  const centerX = w / 2;
+  const pulse = 1 + 0.05 * Math.sin(currentTime * Math.PI * 2.2);
+  const glowPulse = 0.5 + 0.5 * Math.sin(currentTime * Math.PI * 2.2);
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Tên kênh phía trên nút (nếu có)
+  if (channelName) {
+    ctx.font = '800 34px "Be Vietnam Pro", Arial, sans-serif';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.strokeText(channelName, centerX, 470);
+    ctx.fillStyle = '#111827';
+    ctx.fillText(channelName, centerX, 470);
+  }
+
+  const btnW = 360 * pulse;
+  const btnH = 96 * pulse;
+  const btnY = 560 - btnH / 2;
+  const btnX = centerX - btnW / 2;
+  const radius = btnH / 2;
+
+  // Quầng sáng nhấp nháy quanh nút
+  ctx.save();
+  ctx.shadowColor = `rgba(255, 0, 0, ${0.35 + 0.4 * glowPulse})`;
+  ctx.shadowBlur = 40 + 25 * glowPulse;
+  drawRoundedRect(ctx, btnX, btnY, btnW, btnH, radius);
+  ctx.fillStyle = '#FF0000';
+  ctx.fill();
+  ctx.restore();
+
+  // Nút đỏ (YouTube subscribe style)
+  drawRoundedRect(ctx, btnX, btnY, btnW, btnH, radius);
+  const btnGrad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH);
+  btnGrad.addColorStop(0, '#FF3B30');
+  btnGrad.addColorStop(1, '#CC0000');
+  ctx.fillStyle = btnGrad;
+  ctx.fill();
+
+  // Icon chuông (bell) bên trái nhãn, rung nhẹ theo nhịp
+  const bellCx = btnX + btnH * 0.62;
+  const bellCy = btnY + btnH / 2;
+  const bellScale = (btnH / 96);
+  const bellTilt = 0.18 * Math.sin(currentTime * Math.PI * 6);
+  ctx.save();
+  ctx.translate(bellCx, bellCy);
+  ctx.rotate(bellTilt);
+  ctx.scale(bellScale, bellScale);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.moveTo(0, -20);
+  ctx.bezierCurveTo(16, -20, 18, -4, 18, 8);
+  ctx.lineTo(22, 16);
+  ctx.lineTo(-22, 16);
+  ctx.lineTo(-18, 8);
+  ctx.bezierCurveTo(-18, -4, -16, -20, 0, -20);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0, -24, 4.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0, 22, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Nhãn chữ (ĐĂNG KÝ / THEO DÕI / ...)
+  const labelText = String(label || 'ĐĂNG KÝ').toUpperCase();
+  ctx.font = `900 ${Math.round(40 * (btnH / 96))}px "Be Vietnam Pro", Arial, sans-serif`;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText(labelText, bellCx + btnW * 0.16, btnY + btnH / 2 + 2);
+
+  // Emoji ngón tay chỉ nhấp nháy dưới nút (gợi ý bấm)
+  ctx.font = `${Math.round(56 * pulse)}px sans-serif`;
+  ctx.globalAlpha = 0.6 + 0.4 * glowPulse;
+  ctx.fillText('👆', centerX, btnY + btnH + 60);
+  ctx.globalAlpha = 1;
+
+  ctx.restore();
+}
+
+/**
  * Main draw frame function
- * @param {HTMLCanvasElement} canvas 
+ * @param {HTMLCanvasElement} canvas
  * @param {Object} state - Current configuration & state
  * @param {number} currentTime - Current time in seconds
  * @param {Object} loadedImages - Pre-loaded Image elements
@@ -996,7 +1086,11 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
     ctx.restore();
   };
 
-  if (isLeftActive) {
+  if (state.isOutro) {
+    // Cảnh cuối video (CTA): không vẽ panel so sánh & VS. Vẽ nút Follow phía
+    // trên mascot với hiệu ứng nhấp nháy để kêu gọi theo dõi.
+    drawFollowCta(ctx, w, currentTime, state.followLabel || 'ĐĂNG KÝ', state.headerTitle || '');
+  } else if (isLeftActive) {
     drawPanelImage(activeComp.rightImageUrl, rightLayout.x, rightLayout.y, rightLayout.w, rightLayout.h, rightLayout, 'right');
     drawPanelGlow(leftLayout, activeComp.leftColor || '#FF9800', leftGlowAlpha);
     drawPanelImage(activeComp.leftImageUrl, leftLayout.x, leftLayout.y, leftLayout.w, leftLayout.h, leftLayout, 'left');
@@ -1012,6 +1106,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   }
 
   // Draw central VS badge after panels so it stays visually centered above them.
+  if (!state.isOutro) {
   ctx.save();
   const vsX = 360;
   const vsY = panelY + panelH / 2;
@@ -1042,6 +1137,7 @@ export function drawFrame(canvas, state, currentTime, loadedImages = {}) {
   ctx.shadowBlur = 12;
   ctx.fillText('VS', vsX, vsY + 2);
   ctx.restore();
+  }
 
   // 5. Draw Mascot (Bottom Center)
   let mascotPose = state.mascotPose || 'default';

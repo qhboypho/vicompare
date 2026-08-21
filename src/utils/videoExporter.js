@@ -422,6 +422,8 @@ export async function exportVideo({
         const currentState = {
           ...state,
           subtitleText: activeBlock ? activeBlock.text : '',
+          isOutro: activeBlock ? Boolean(activeBlock.isOutro) : false,
+          followLabel: activeBlock?.followLabel || state.outroFollowLabel || 'ĐĂNG KÝ',
           mascotPose: activeBlock ? activeBlock.pose : 'default',
           highlight: activeBlock ? activeBlock.highlight : 'none',
           blockStart: activeBlock ? activeBlock.start : 0,
