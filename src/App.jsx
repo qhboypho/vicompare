@@ -45,6 +45,7 @@ import {
 } from './utils/segmentAudio';
 import { buildActionSfxEvents, buildSegmentTimeline, getSpokenWeight } from './utils/segmentTiming';
 import { alignAudioSegmentsToBlocks } from './utils/speechAlignment';
+import { analyzeSegmentSpeech } from './utils/speechOnset';
 import {
   buildTelegramFallbackSession,
   pickTelegramChannelProfile,
@@ -2500,10 +2501,12 @@ export default function App() {
             }
 
             const segmentDurations = audioBuffers.map(buffer => buffer.duration);
+            const speechRegions = audioBuffers.map(buffer => analyzeSegmentSpeech(buffer));
             const timed = buildSegmentTimeline(sourceBlocks, segmentDurations, {
               introDelay: 0,
               segmentGap: 0.06,
-              outroPadding: 0.22
+              outroPadding: 0.22,
+              speechRegions
             });
             const exactTimedBlocks = timed.blocks.map((block, index) => ({
               ...block,
@@ -3756,10 +3759,12 @@ export default function App() {
       }
 
       const segmentDurations = audioBuffers.map(buffer => buffer.duration);
+      const speechRegions = audioBuffers.map(buffer => analyzeSegmentSpeech(buffer));
       const timed = buildSegmentTimeline(sourceBlocks, segmentDurations, {
         introDelay: 0,
         segmentGap: 0.06,
-        outroPadding: 0.22
+        outroPadding: 0.22,
+        speechRegions
       });
       const actionEvents = buildActionSfxEvents(timed.blocks, {
         enabled: actionSfxEnabled,

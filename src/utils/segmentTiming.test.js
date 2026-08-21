@@ -49,6 +49,44 @@ test('buildSegmentTimeline falls back from missing durations without collapsing 
   assert.equal(result.duration, result.blocks[1].end);
 });
 
+test('buildSegmentTimeline anchors captions to voiced onset and strips silence drift', () => {
+  const blocks = [
+    { id: 'a', text: 'Cau mot.' },
+    { id: 'b', text: 'Cau hai.' }
+  ];
+
+  // Each 2s file has 0.3s lead-in silence + 1.4s speech + 0.3s tail silence.
+  const region = { leadIn: 0.3, speechDuration: 1.4, tailOut: 0.3, duration: 2 };
+  const result = buildSegmentTimeline(blocks, [2, 2], {
+    introDelay: 0,
+    segmentGap: 0,
+    speechRegions: [region, region]
+  });
+
+  // Caption 1: voiced onset at 0, lasts only the 1.4s of speech.
+  assert.deepEqual([result.blocks[0].start, result.blocks[0].end], [0, 1.4]);
+  // Buffer starts at 0 (cannot go before the timeline origin) even though its
+  // voiced part begins 0.3s in — the leadIn is clamped at the start.
+  assert.equal(result.blocks[0].audioStart, 0);
+
+  // Caption 2 begins right where caption 1's speech ends — silence removed,
+  // so there is NO accumulated drift between the two lines.
+  assert.deepEqual([result.blocks[1].start, result.blocks[1].end], [1.4, 2.8]);
+  // Its buffer is pulled back by its own lead-in to stay voice-aligned.
+  assert.equal(result.blocks[1].audioStart, 1.1);
+});
+
+test('buildSegmentTimeline stays backward compatible without speech regions', () => {
+  const blocks = [{ id: 'a', text: 'Mot.' }, { id: 'b', text: 'Hai.' }];
+  const result = buildSegmentTimeline(blocks, [1, 1], { introDelay: 0, segmentGap: 0 });
+
+  assert.deepEqual([result.blocks[0].start, result.blocks[0].end], [0, 1]);
+  assert.deepEqual([result.blocks[1].start, result.blocks[1].end], [1, 2]);
+  // No lead-in known → audio plays exactly at caption start.
+  assert.equal(result.blocks[0].audioStart, 0);
+  assert.equal(result.blocks[1].audioStart, 1);
+});
+
 test('buildActionSfxEvents maps mascot actions to stable audio cues', () => {
   const blocks = [
     { id: 'a', start: 0.5, end: 1.5, pose: 'point_left' },

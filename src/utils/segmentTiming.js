@@ -55,23 +55,51 @@ function estimateMissingDurations(blocks, durations, fallbackTotalDuration) {
   });
 }
 
+function normalizeSpeechRegion(region, fileDuration) {
+  const duration = normalizeDuration(fileDuration) || 0;
+  if (!region || duration <= 0) {
+    return { leadIn: 0, speechDuration: duration, tailOut: 0, duration };
+  }
+  const leadIn = Math.min(Math.max(0, Number(region.leadIn) || 0), duration);
+  const rawSpeech = Number(region.speechDuration);
+  const speechDuration = Number.isFinite(rawSpeech) && rawSpeech > 0
+    ? Math.min(rawSpeech, duration - leadIn)
+    : Math.max(0, duration - leadIn);
+  const tailOut = Math.max(0, duration - leadIn - speechDuration);
+  return { leadIn, speechDuration, tailOut, duration };
+}
+
 export function buildSegmentTimeline(blocks, segmentDurations = [], options = {}) {
   const sourceBlocks = Array.isArray(blocks) ? blocks : [];
   const introDelay = Math.max(0, Number(options.introDelay || 0));
   const segmentGap = Math.max(0, Number(options.segmentGap || 0));
   const outroPadding = Math.max(0, Number(options.outroPadding || 0));
   const durations = estimateMissingDurations(sourceBlocks, segmentDurations, options.fallbackTotalDuration);
+  const speechRegions = Array.isArray(options.speechRegions) ? options.speechRegions : [];
 
+  // `cursor` tracks where the next *voiced* onset lands on the master timeline.
+  // Captions are anchored to voiced onset/offset (leading & trailing silence
+  // stripped) so per-segment silence can never accumulate into caption drift.
   let cursor = introDelay;
   const timedBlocks = sourceBlocks.map((block, index) => {
+    const fileDuration = Math.max(DEFAULT_MIN_BLOCK_DURATION, durations[index] || DEFAULT_MIN_BLOCK_DURATION);
+    const { leadIn, speechDuration, tailOut } = normalizeSpeechRegion(speechRegions[index], fileDuration);
+    const spoken = Math.max(DEFAULT_MIN_BLOCK_DURATION, speechDuration || fileDuration);
+
     const start = roundTime(cursor);
-    const duration = Math.max(DEFAULT_MIN_BLOCK_DURATION, durations[index] || DEFAULT_MIN_BLOCK_DURATION);
-    const end = roundTime(start + duration);
+    const end = roundTime(start + spoken);
+    // Where the raw buffer must begin so its voiced part lands on [start, end].
+    // Clamped so a segment never starts before the previous one's tail.
+    const audioStart = roundTime(Math.max(0, start - leadIn));
+
     cursor = end + segmentGap;
     return {
       ...block,
       start,
-      end
+      end,
+      audioStart,
+      leadIn: roundTime(leadIn),
+      tailOut: roundTime(tailOut)
     };
   });
 

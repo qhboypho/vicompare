@@ -116,6 +116,14 @@ export async function renderSegmentedAudio({ audioBuffers, timelineBlocks, actio
   const totalDuration = Math.max(
     1,
     ...timelineBlocks.map(block => Number(block.end || 0)),
+    // A buffer placed at audioStart can run past its caption end (its own tail
+    // silence); size the render so that audio is never clipped.
+    ...audioBuffers.map((buffer, index) => {
+      const block = timelineBlocks[index];
+      if (!buffer || !block) return 0;
+      const playAt = Number.isFinite(Number(block.audioStart)) ? Number(block.audioStart) : Number(block.start || 0);
+      return Math.max(0, playAt) + Number(buffer.duration || 0);
+    }),
     ...actionEvents.map(event => Number(event.time || 0) + getActionSfxDurationHint(event.preset || normalizeActionSfxPresets(actionSfxPresets)[event.type] || normalizeActionSfxPresets(actionSfxPresets).default))
   );
   const offlineCtx = new AudioContextCtor(channelCount, Math.ceil(totalDuration * sampleRate), sampleRate);
@@ -126,7 +134,11 @@ export async function renderSegmentedAudio({ audioBuffers, timelineBlocks, actio
     const source = offlineCtx.createBufferSource();
     source.buffer = buffer;
     source.connect(offlineCtx.destination);
-    source.start(Math.max(0, Number(block.start || 0)));
+    // Anchor playback so the buffer's voiced region lands under its caption.
+    // `audioStart` = caption start minus the segment's leading silence; fall
+    // back to `start` for timelines built without speech-region analysis.
+    const playAt = Number.isFinite(Number(block.audioStart)) ? Number(block.audioStart) : Number(block.start || 0);
+    source.start(Math.max(0, playAt));
   });
 
   const presets = normalizeActionSfxPresets(actionSfxPresets);
