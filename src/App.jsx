@@ -64,6 +64,7 @@ import {
 } from './utils/socialAccounts';
 import { publishTikTokVideo } from './utils/tiktokPublisher';
 import { publishFacebookReel } from './utils/facebookPublisher';
+import { buildAffiliateCommentMessages, postAffiliateComments } from './utils/affiliateComments';
 import { buildCanvasImageCandidates } from './utils/canvasImageSource';
 import {
   getScheduledStatusView,
@@ -512,6 +513,7 @@ const ComparisonImageDropzone = ({ imageUrl, title, onUpload, onRemove }) => (
 
 export default function App() {
   const loadedImagesRef = useRef({});
+  const isSubmittingScheduleRef = useRef(false); // khóa đồng bộ chống double/triple-click tạo lịch trùng
   const triggerCanvasRedrawRef = useRef(null);
 
   const cacheImage = (key, url) => {
@@ -1580,6 +1582,11 @@ export default function App() {
   const [activeConnectModal, setActiveConnectModal] = useState(null); // 'facebook' | 'youtube' | 'tiktok' | null
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishingStatus, setPublishingStatus] = useState('');
+  // chatId từ Telegram — persist vào state để notifyTelegramPublish hoạt động
+  // ngay cả khi URL đã thay đổi sau khi load session.
+  const [telegramChatId, setTelegramChatId] = useState(() =>
+    new URLSearchParams(window.location.search).get('chatId') || ''
+  );
 
   // Facebook credentials
   const DEFAULT_FB_PAGE_ID = safeAtob(['MTIyMzYzNDg0', 'NzQ5OTI2NA=='].join(''));
@@ -1673,6 +1680,22 @@ export default function App() {
   const [socialDisplayName, setSocialDisplayName] = useState('');
 
   const [publishCaption, setPublishCaption] = useState('');
+  // Danh sách link affiliate — mỗi trường (mô tả + link) sẽ đăng thành 1 comment
+  // riêng dưới video Facebook sau khi đăng. Persist để tái dùng cho nhiều video.
+  const [affiliateLinks, setAffiliateLinks] = useState(() => {
+    try {
+      const saved = localStorage.getItem('affiliateLinks');
+      const parsed = saved ? JSON.parse(saved) : null;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map(item => ({
+          id: item.id || `aff-${Math.random().toString(36).slice(2)}`,
+          description: String(item.description || ''),
+          link: String(item.link || '')
+        }));
+      }
+    } catch {}
+    return [{ id: 'aff-default', description: '', link: '' }];
+  });
   const [publishPlatforms, setPublishPlatforms] = useState({ facebook: true, youtube: true, tiktok: true });
   const [publishMode, setPublishMode] = useState('now'); // 'now' or 'schedule'
   const [scheduleDate, setScheduleDate] = useState(() => {
@@ -1689,6 +1712,13 @@ export default function App() {
       return [];
     }
   });
+
+  // Persist affiliate links để tái dùng cho nhiều video
+  useEffect(() => {
+    try {
+      localStorage.setItem('affiliateLinks', JSON.stringify(affiliateLinks));
+    } catch {}
+  }, [affiliateLinks]);
 
   // AI Comment Responder States
   const [botEnabled, setBotEnabled] = useState(() => localStorage.getItem('bot_enabled') === 'true');
@@ -2485,6 +2515,10 @@ export default function App() {
         if (session.actionSfxEnabled !== undefined) setActionSfxEnabled(session.actionSfxEnabled);
         if (session.actionSfxVolume !== undefined) setActionSfxVolume(sessionSfxVolume);
         if (session.actionSfxPresets !== undefined) setActionSfxPresets(normalizeActionSfxPresets(session.actionSfxPresets));
+        // Persist chatId vào state ngay khi load session để notifyTelegramPublish
+        // hoạt động dù URL đã thay đổi hoặc bị clean sau đó.
+        const sessionChatId = urlParams.get('chatId') || session.chatId || '';
+        if (sessionChatId) setTelegramChatId(sessionChatId);
         let parsedTelegramScript = null;
         if (channelId) {
           // Cloud settings already restored the full visual config (logo,
@@ -2685,11 +2719,21 @@ export default function App() {
 
           // Track one-shot (vd Voicefree) đã có voice CTA ghép sẵn ở cuối bởi bot.
           // Chỉ cần thêm 1 block isOutro phủ đoạn đuôi để Web Tool vẽ cảnh Follow.
-          if (outroSegment && sourceAudioBuffer) {
+          // KHÔNG phụ thuộc vào sourceAudioBuffer: khi silence-sync rơi vào nhánh
+          // dự phòng (fetch/decode để đo RMS thất bại) thì audioBuffer trả về null,
+          // trước đây khiến block outro bị bỏ qua → cảnh Follow không hiện khi mở
+          // từ Telegram, phải reload mới thấy. Vẫn tự đo được nhịp mở CTA từ chính
+          // outroSegment, còn mốc kết thúc lấy từ duration của lần sync.
+          if (outroSegment?.base64) {
             try {
               const outroBuffer = await decodeAudioBlob(base64ToBlob(outroSegment.base64, 'audio/mpeg'));
               const round3 = (v) => Math.round(Number(v || 0) * 1000) / 1000;
-              const audioEnd = sourceAudioBuffer.duration;
+              const lastSyncedEnd = syncedBlocks.length > 0 ? syncedBlocks[syncedBlocks.length - 1].end : 0;
+              const audioEnd = round3(Math.max(
+                sourceAudioBuffer?.duration || 0,
+                syncResult?.duration || 0,
+                lastSyncedEnd
+              ));
               const outroStart = round3(Math.max(0, audioEnd - outroBuffer.duration));
               syncedBlocks.push({
                 id: 'outro-cta',
@@ -2703,6 +2747,9 @@ export default function App() {
                 syncSource: 'outro-cta'
               });
               setTimelineBlocks([...syncedBlocks]);
+              // Đảm bảo duration bao trọn block outro để cảnh Follow được vẽ ở
+              // đúng đoạn đuôi (tránh preview cắt trước khi tới CTA).
+              setDuration(prev => Math.max(prev || 0, round3(audioEnd)));
             } catch (outroErr) {
               console.warn('Bỏ qua outro CTA (silence-sync):', outroErr);
             }
@@ -2734,7 +2781,7 @@ export default function App() {
         const isAutoRender = urlParams.get('auto') === 'true' || urlParams.get('autoRender') === 'true';
         if (isAutoRender) {
           setTimeout(() => {
-            handleExportVideo();
+            handleRenderVideo();
           }, 1500);
         } else {
           alert('⚡ Tự động nạp Kịch bản, Voice & Mẫu Kênh từ Telegram thành công! Sẵn sàng xuất video.');
@@ -2786,34 +2833,48 @@ export default function App() {
   };
 
   // 3. Gửi thông báo xuất bản MXH ngược về Telegram
-  const notifyTelegramPublish = async (videoTitle, videoUrl = '') => {
+  const notifyTelegramPublish = async (videoTitle, videoUrl = '', fileExt = '') => {
     try {
-      const urlParams = new URLSearchParams(window.location.search);
-      const chatId = urlParams.get('chatId');
-      if (!chatId) return;
+      const chatId = telegramChatId
+        || new URLSearchParams(window.location.search).get('chatId')
+        || '';
+      if (!chatId) {
+        console.log('[Notify] Không có chatId — bỏ qua notify Telegram (không phải session từ Telegram).');
+        return;
+      }
 
       if (videoUrl) {
         const videoBlob = await fetch(videoUrl).then(r => r.blob());
+        const ext = fileExt || exportedExt || 'webm';
         const formData = new FormData();
         formData.append('chatId', chatId);
         formData.append('videoTitle', videoTitle || headerTitle || 'Video so sánh');
         formData.append('caption', buildSmartPublishCaption());
-        formData.append('video', videoBlob, `${customFilename || 'video_so_sanh'}.${exportedExt || 'webm'}`);
+        formData.append('video', videoBlob, `${customFilename || 'video_so_sanh'}.${ext}`);
 
-        await fetch('https://vicompare-telegram-bot.qhboypho.workers.dev/api/publish-notify', {
+        const res = await fetch('https://vicompare-telegram-bot.qhboypho.workers.dev/api/publish-notify', {
           method: 'POST',
           body: formData
         });
+        if (!res.ok) {
+          const errText = await res.text().catch(() => res.statusText);
+          console.warn('[Notify] Telegram notify thất bại:', res.status, errText);
+        } else {
+          console.log('[Notify] Đã gửi video + thông báo về Telegram thành công.');
+        }
         return;
       }
 
-      await fetch('https://vicompare-telegram-bot.qhboypho.workers.dev/api/publish-notify', {
+      const res = await fetch('https://vicompare-telegram-bot.qhboypho.workers.dev/api/publish-notify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chatId, videoTitle: videoTitle || headerTitle || 'Video so sánh', caption: buildSmartPublishCaption() })
       });
+      if (!res.ok) {
+        console.warn('[Notify] Telegram notify (no video) thất bại:', res.status);
+      }
     } catch (err) {
-      console.warn('Publish notify to Telegram warning:', err);
+      console.warn('[Notify] Telegram publish notify error:', err);
     }
   };
 
@@ -4564,8 +4625,10 @@ export default function App() {
             isSilent = false;
             const endSilence = time;
             const silenceDuration = endSilence - startSilence;
-            // Bắt cả các khoảng ngắt câu nhanh từ 50ms trở lên cho giọng nữ/giọng đọc tốc độ cao
-            if (silenceDuration >= 0.05) {
+            // Bắt khoảng ngắt câu từ 30ms trở lên — Voicefree và TTS one-shot
+            // thường tạo pause rất ngắn (~30-50ms) giữa câu, đặc biệt khi có
+            // từ tiếng Anh dài. Hạ ngưỡng từ 50ms xuống 30ms để bắt được chúng.
+            if (silenceDuration >= 0.03) {
               silences.push({ start: startSilence, end: endSilence, mid: (startSilence + endSilence) / 2 });
             }
           }
@@ -4576,14 +4639,15 @@ export default function App() {
         silences.push({ start: startSilence, end: audioDuration, mid: (startSilence + audioDuration) / 2 });
       }
 
-      // Gộp các khoảng lặng bị đứt đoạn quá ngắn (< 80ms) do nhiễu micro, bảo toàn 100% các khoảng ngắt câu thực tế
+      // Gộp các khoảng lặng bị đứt đoạn quá ngắn (< 50ms) do nhiễu micro.
+      // Giữ 50ms thay vì 80ms để KHÔNG merge 2 ranh giới câu gần nhau thành 1.
       const cleanSilences = [];
       silences.forEach(s => {
         if (cleanSilences.length === 0) {
           cleanSilences.push(s);
         } else {
           const last = cleanSilences[cleanSilences.length - 1];
-          const shouldMerge = (s.start - last.end < 0.08);
+          const shouldMerge = (s.start - last.end < 0.05);
           if (shouldMerge) {
             last.end = s.end;
             last.mid = (last.start + s.end) / 2;
@@ -5825,7 +5889,7 @@ export default function App() {
           setExportedVideoUrl(url);
           setExportedExt(extension);
           setIsExporting(false);
-          notifyTelegramPublish(headerTitle || 'Video so sánh', url);
+          notifyTelegramPublish(headerTitle || 'Video so sánh', url, extension);
         },
         onError: (err) => {
           alert('Lỗi xuất video: ' + err);
@@ -6348,7 +6412,39 @@ export default function App() {
     alert(`Đã thêm Video ID: ${manualVideoId.trim()} vào danh sách theo dõi bình luận!`);
   };
 
+  // --- Quản lý danh sách link affiliate ---
+  const addAffiliateLink = () => {
+    setAffiliateLinks(prev => [
+      ...prev,
+      { id: `aff-${Date.now()}-${prev.length}`, description: '', link: '' }
+    ]);
+  };
+
+  const removeAffiliateLink = (id) => {
+    setAffiliateLinks(prev => {
+      const next = prev.filter(item => item.id !== id);
+      // Luôn giữ ít nhất 1 trường trống để UI không rỗng
+      return next.length > 0 ? next : [{ id: `aff-${Date.now()}`, description: '', link: '' }];
+    });
+  };
+
+  const updateAffiliateLink = (id, field, value) => {
+    setAffiliateLinks(prev => prev.map(item =>
+      item.id === id ? { ...item, [field]: value } : item
+    ));
+  };
+
   const handleAddSchedule = async () => {
+    if (isSubmittingScheduleRef.current) return; // khóa đồng bộ: chặn ngay click thứ 2/3 trước khi state kịp cập nhật
+    isSubmittingScheduleRef.current = true;
+    try {
+      await runAddSchedule();
+    } finally {
+      isSubmittingScheduleRef.current = false;
+    }
+  };
+
+  const runAddSchedule = async () => {
     if (!exportedVideoUrl) {
       alert('Vui lòng tạo (render) video trước khi đăng.');
       return;
@@ -6392,6 +6488,10 @@ export default function App() {
     const newPost = {
       id: newPostId,
       caption: publishCaption,
+      // Chỉ giữ các trường affiliate có link để Worker đăng comment (Facebook)
+      affiliateLinks: affiliateLinks
+        .filter(item => String(item?.link || '').trim())
+        .map(item => ({ description: String(item.description || '').trim(), link: String(item.link || '').trim() })),
       platforms: selectedPlatforms,
       selectedAccounts: Object.fromEntries(
         Object.entries(selectedAccountsByPlatform).map(([platform, accounts]) => [
@@ -6538,6 +6638,21 @@ export default function App() {
               postId: result.id,
               videoId: result.videoId
             }];
+
+            // Đăng link affiliate thành các comment riêng dưới video vừa đăng.
+            // Lỗi từng comment được bỏ qua để không ảnh hưởng video đã đăng.
+            const affiliateMessages = buildAffiliateCommentMessages(affiliateLinks);
+            if (affiliateMessages.length > 0) {
+              const commentResult = await postAffiliateComments({
+                postId: result.id,
+                accessToken: credentials.accessToken || fbAccessToken,
+                messages: affiliateMessages,
+                onStatus: setPublishingStatus
+              });
+              if (commentResult.failed > 0) {
+                console.warn(`[Affiliate] ${accountLabel}: đăng ${commentResult.posted}/${affiliateMessages.length} comment, lỗi:`, commentResult.errors);
+              }
+            }
           } else if (platform === 'youtube') {
           let activeToken = credentials.accessToken || ytAccessToken;
           // clientId + clientSecret là config OAuth app DÙNG CHUNG (cloud là
@@ -6702,11 +6817,13 @@ export default function App() {
             syncToken: cloudSettingsSyncToken
           });
         } catch (err) {
-          alert(`Không xóa được lịch trên cloud: ${err.message}`);
+          // KHÔNG xóa local khi cloud fail — nếu chỉ xóa local, Worker vẫn giữ lịch
+          // trên cloud và đến giờ vẫn đăng. Giữ lại để user thử xóa lại.
+          alert(`Không xóa được lịch trên Cloudflare (Worker vẫn sẽ đăng đúng giờ nếu không xóa được).\n\nLỗi: ${err.message}\n\nVui lòng kiểm tra mạng/token rồi thử xóa lại.`);
           return;
         }
       }
-      setScheduledPosts(scheduledPosts.filter(p => p.id !== id));
+      setScheduledPosts(prev => prev.filter(p => p.id !== id));
     }
   };
 
@@ -9020,13 +9137,90 @@ export default function App() {
                     <button
                       className="btn btn-primary"
                       onClick={handleAddSchedule}
-                      style={{ marginTop: 'auto', padding: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                      disabled={isPublishing}
+                      style={{ marginTop: 'auto', padding: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: isPublishing ? 0.6 : 1, cursor: isPublishing ? 'not-allowed' : 'pointer' }}
                     >
                       {publishMode === 'schedule' ? <Calendar size={14} /> : <Share2 size={14} />}
                       {publishMode === 'schedule' ? 'Xác nhận đặt lịch' : 'Đăng video ngay'}
                     </button>
                   </div>
                 </div>
+              </div>
+
+              {/* Affiliate links block — riêng biệt, dưới phần đăng video. Mỗi
+                  trường có link sẽ đăng thành 1 comment riêng dưới video Facebook. */}
+              <div className="glass-card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                  <h2 className="card-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <Link size={15} /> Link affiliate (Facebook)
+                  </h2>
+                  <span style={{ color: '#64748b', fontSize: '0.72rem' }}>
+                    {buildAffiliateCommentMessages(affiliateLinks).length} comment sẽ được đăng
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '0.6rem' }}>
+                  Mỗi trường có link sẽ được đăng thành 1 comment riêng dưới video sau khi đăng (áp dụng cho Facebook).
+                </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                    gap: '0.6rem',
+                    maxHeight: '230px', // ~3 comment card → tự thêm scroll
+                    overflowY: 'auto',
+                    paddingRight: '0.25rem'
+                  }}
+                >
+                  {affiliateLinks.map((item, idx) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.3rem',
+                        padding: '0.5rem',
+                        background: '#0b0f19',
+                        border: '1px solid var(--border-light)',
+                        borderRadius: '6px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>Comment #{idx + 1}</span>
+                        <button
+                          type="button"
+                          className="btn btn-danger btn-sm"
+                          onClick={() => removeAffiliateLink(item.id)}
+                          title="Xóa trường này"
+                          style={{ padding: '0.15rem 0.3rem', height: '20px', display: 'inline-flex', alignItems: 'center' }}
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={item.description}
+                        onChange={(e) => updateAffiliateLink(item.id, 'description', e.target.value)}
+                        placeholder="Mô tả (vd: 🛒 Mua ngay tại đây)"
+                        style={{ fontSize: '0.75rem', padding: '0.35rem', background: '#020617', color: '#fff', border: '1px solid var(--border-light)', borderRadius: '4px' }}
+                      />
+                      <input
+                        type="text"
+                        value={item.link}
+                        onChange={(e) => updateAffiliateLink(item.id, 'link', e.target.value)}
+                        placeholder="https://... (link affiliate)"
+                        style={{ fontSize: '0.75rem', padding: '0.35rem', background: '#020617', color: '#fff', border: '1px solid var(--border-light)', borderRadius: '4px' }}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={addAffiliateLink}
+                  style={{ marginTop: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem', padding: '0.4rem 0.7rem' }}
+                >
+                  <Plus size={12} /> Thêm trường affiliate
+                </button>
               </div>
 
               {/* Scheduled Posts Queue */}
