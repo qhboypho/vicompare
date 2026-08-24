@@ -2704,37 +2704,53 @@ export default function App() {
             await saveAudioToStorage(localAudioBlob, 'telegram_voice.mp3');
             rememberCurrentAudioFileName('telegram_voice.mp3');
           }
+          // Track one-shot (vd Voicefree): bot đã GHÉP voice CTA vào cuối track
+          // chính. Decode outro TRƯỚC khi sync để biết độ dài đuôi CTA, rồi báo
+          // cho silence-sync "chừa" đoạn đuôi này ra — nếu không, phụ đề bị phân
+          // bổ trên cả phần CTA khiến toàn bộ ranh giới câu trễ nhịp và câu cuối
+          // tràn vào cảnh Follow (đây là gốc lỗi "lệch nhịp/lệch sub" khi mở từ
+          // Telegram; làm trực tiếp trong tool không có đuôi CTA nên vẫn đúng).
+          let outroBuffer = null;
+          if (outroSegment?.base64) {
+            try {
+              outroBuffer = await decodeAudioBlob(base64ToBlob(outroSegment.base64, 'audio/mpeg'));
+            } catch (outroDecodeErr) {
+              console.warn('Không decode được outro CTA để chừa nhịp:', outroDecodeErr);
+            }
+          }
+          const reservedTailSec = outroBuffer ? outroBuffer.duration : 0;
+
           const { syncResult } = await waitForTelegramAudioSync({
             audioUrl: localAudioBlobUrl,
             createAudio: url => new Audio(url),
             syncTimeline: (targetUrl, targetDuration) => runSilenceSyncWithUrl(
               targetUrl,
               targetDuration,
-              parsedTelegramScript?.timelineBlocks
+              parsedTelegramScript?.timelineBlocks,
+              { reservedTailSec }
             )
           });
 
           const syncedBlocks = syncResult?.blocks || [];
           const sourceAudioBuffer = syncResult?.audioBuffer;
 
-          // Track one-shot (vd Voicefree) đã có voice CTA ghép sẵn ở cuối bởi bot.
-          // Chỉ cần thêm 1 block isOutro phủ đoạn đuôi để Web Tool vẽ cảnh Follow.
-          // KHÔNG phụ thuộc vào sourceAudioBuffer: khi silence-sync rơi vào nhánh
-          // dự phòng (fetch/decode để đo RMS thất bại) thì audioBuffer trả về null,
-          // trước đây khiến block outro bị bỏ qua → cảnh Follow không hiện khi mở
-          // từ Telegram, phải reload mới thấy. Vẫn tự đo được nhịp mở CTA từ chính
-          // outroSegment, còn mốc kết thúc lấy từ duration của lần sync.
-          if (outroSegment?.base64) {
+          // Thêm 1 block isOutro phủ đúng đoạn đuôi CTA để Web Tool vẽ cảnh Follow.
+          // Mốc bắt đầu = speechEnd (điểm silence-sync đã chừa) để khớp chính xác
+          // với thời điểm voice CTA bắt đầu vang lên.
+          if (outroBuffer) {
             try {
-              const outroBuffer = await decodeAudioBlob(base64ToBlob(outroSegment.base64, 'audio/mpeg'));
               const round3 = (v) => Math.round(Number(v || 0) * 1000) / 1000;
               const lastSyncedEnd = syncedBlocks.length > 0 ? syncedBlocks[syncedBlocks.length - 1].end : 0;
               const audioEnd = round3(Math.max(
                 sourceAudioBuffer?.duration || 0,
                 syncResult?.duration || 0,
-                lastSyncedEnd
+                lastSyncedEnd + outroBuffer.duration
               ));
-              const outroStart = round3(Math.max(0, audioEnd - outroBuffer.duration));
+              const outroStart = round3(
+                Number.isFinite(syncResult?.speechEnd)
+                  ? Math.max(lastSyncedEnd, syncResult.speechEnd)
+                  : Math.max(0, audioEnd - outroBuffer.duration)
+              );
               syncedBlocks.push({
                 id: 'outro-cta',
                 text: '',
@@ -4568,7 +4584,7 @@ export default function App() {
   };
 
   // Bộ phân tích khoảng lặng và căn khớp nhịp dùng chung (Web Audio API PCM scanner)
-  const runSilenceSyncWithUrl = async (targetUrl, targetDuration, baseBlocks = null) => {
+  const runSilenceSyncWithUrl = async (targetUrl, targetDuration, baseBlocks = null, options = {}) => {
     if (!targetUrl) return;
     const sourceBlocks = Array.isArray(baseBlocks) && baseBlocks.length > 0 ? baseBlocks : timelineBlocks;
     if (!sourceBlocks.length) return;
@@ -4585,6 +4601,15 @@ export default function App() {
       const rawData = audioBuffer.getChannelData(0); // Lấy kênh trái
       const sampleRate = audioBuffer.sampleRate;
       const audioDuration = (targetDuration && targetDuration !== Infinity && !isNaN(targetDuration)) ? targetDuration : audioBuffer.duration;
+
+      // Đoạn voice CTA (outro) được bot GHÉP vào cuối track one-shot. Nếu phân bổ
+      // phụ đề trên TOÀN BỘ audioDuration (gồm cả đuôi CTA) thì mọi ranh giới câu
+      // bị kéo trễ và câu cuối tràn vào cảnh Follow → "lệch nhịp/lệch sub" khi mở
+      // từ Telegram. Chỉ căn phụ đề trong đoạn thoại chính [0, syncDuration].
+      const reservedTail = Math.max(0, Number(options.reservedTailSec) || 0);
+      const syncDuration = reservedTail > 0 && reservedTail < audioDuration
+        ? audioDuration - reservedTail
+        : audioDuration;
 
       // 1. Chia khung đo năng lượng RMS
       const isSimple = silenceSyncMode === 'simple';
@@ -4662,10 +4687,15 @@ export default function App() {
       const neededCount = sourceBlocks.length - 1;
 
       if (neededCount > 0 && totalWeight > 0) {
+        // Chỉ dùng khoảng lặng nằm trong đoạn thoại chính để căn ranh giới câu;
+        // khoảng lặng thuộc đuôi CTA (nếu có) không đại diện cho ranh giới phụ đề.
+        const boundarySilences = syncDuration < audioDuration
+          ? cleanSilences.filter(silence => silence.mid <= syncDuration + 0.15)
+          : cleanSilences;
         const propTransitions = [];
         let acc = 0;
         for (let i = 0; i < neededCount; i++) {
-          acc += (getSpokenWeight(sourceBlocks[i].text) / totalWeight) * audioDuration;
+          acc += (getSpokenWeight(sourceBlocks[i].text) / totalWeight) * syncDuration;
           propTransitions.push(acc);
         }
 
@@ -4678,8 +4708,8 @@ export default function App() {
           let closestDist = Infinity;
           let closestIdx = -1;
 
-          for (let sIdx = lastMatchIdx + 1; sIdx < cleanSilences.length; sIdx++) {
-            const silence = cleanSilences[sIdx];
+          for (let sIdx = lastMatchIdx + 1; sIdx < boundarySilences.length; sIdx++) {
+            const silence = boundarySilences[sIdx];
             const sDur = silence.end - silence.start;
             const dist = Math.abs(silence.mid - targetTime) - Math.min(1.8, sDur * 2.2);
             if (dist < closestDist) {
@@ -4703,35 +4733,39 @@ export default function App() {
           updated[i].end = t;
           updated[i + 1].start = t;
         }
-        updated[updated.length - 1].end = parseFloat(audioDuration.toFixed(2));
+        updated[updated.length - 1].end = parseFloat(syncDuration.toFixed(2));
       }
 
       updated[0].start = 0;
-      updated[updated.length - 1].end = parseFloat(audioDuration.toFixed(2));
+      updated[updated.length - 1].end = parseFloat(syncDuration.toFixed(2));
       setTimelineBlocks(updated);
 
       setDuration(audioDuration);
       setCurrentTime(0);
-      return { blocks: updated, audioBuffer, duration: audioDuration };
+      return { blocks: updated, audioBuffer, duration: audioDuration, speechEnd: syncDuration };
     } catch (err) {
       console.error('Lỗi khi khớp nhịp khoảng lặng:', err);
 
       // Dự phòng
       const totalWeight = sourceBlocks.reduce((sum, b) => sum + getSpokenWeight(b.text), 0);
+      const fbReservedTail = Math.max(0, Number(options.reservedTailSec) || 0);
+      const fbSyncDuration = fbReservedTail > 0 && fbReservedTail < targetDuration
+        ? targetDuration - fbReservedTail
+        : targetDuration;
       if (totalWeight > 0) {
         let acc = 0;
         const fallbackBlocks = sourceBlocks.map(block => {
           const ratio = getSpokenWeight(block.text) / totalWeight;
-          const blockDuration = targetDuration * ratio;
+          const blockDuration = fbSyncDuration * ratio;
           const start = parseFloat(acc.toFixed(2));
           const end = parseFloat((acc + blockDuration).toFixed(2));
           acc += blockDuration;
           return { ...block, start, end };
         });
         setTimelineBlocks(fallbackBlocks);
-        return { blocks: fallbackBlocks, audioBuffer: null, duration: targetDuration };
+        return { blocks: fallbackBlocks, audioBuffer: null, duration: targetDuration, speechEnd: fbSyncDuration };
       }
-      return { blocks: sourceBlocks, audioBuffer: null, duration: targetDuration };
+      return { blocks: sourceBlocks, audioBuffer: null, duration: targetDuration, speechEnd: fbSyncDuration };
     } finally {
       setIsProcessingAudio(false);
     }
