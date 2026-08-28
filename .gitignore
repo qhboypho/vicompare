@@ -29,9 +29,14 @@ credentials_backup.json
 # Local Codex/debug artifacts
 .codegraph/
 .playwright-mcp/
+.playwright-cli/
+.wrangler/
+.tmp-functions-build/
 output/
 social-accounts-compact.png
 desktop.ini
+session_tmp.json
+comparison-renderer-after-fix.png
 
 __pycache__/
 *.py[cod]
