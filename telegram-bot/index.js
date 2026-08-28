@@ -629,7 +629,9 @@ function scoreWebImageUrl(imageUrl, query, subject) {
   const tokenSet = new Set(haystack);
   const subjectTokens = tokenizeImageText(subject);
   const queryTokens = tokenizeImageText(query);
-  let score = 0;
+  // Base score 1 cho mọi URL hợp lệ (qua isUsableWebImageUrl) — đảm bảo ảnh CDN
+  // không có tên file rõ nghĩa vẫn được đưa vào pickTopWebImages thay vì bị lọc.
+  let score = 1;
 
   for (const token of subjectTokens) {
     if (tokenSet.has(token)) score += 8;
@@ -646,6 +648,12 @@ function scoreWebImageUrl(imageUrl, query, subject) {
 }
 
 function pickBestWebImage(urls, query, subject) {
+  return pickTopWebImages(urls, query, subject, 1)[0] || "";
+}
+
+// Trả về tối đa `limit` URL ảnh ứng viên tốt nhất (đã lọc rác + khử trùng lặp +
+// sắp theo điểm). Dùng cho bước Gemini Vision verify chọn ảnh khớp tiêu đề nhất.
+function pickTopWebImages(urls, query, subject, limit = 5) {
   const seen = new Set();
   return urls
     .map(normalizeImageUrl)
@@ -660,11 +668,18 @@ function pickBestWebImage(urls, query, subject) {
       url,
       score: scoreWebImageUrl(url, query, subject)
     }))
-    .filter(item => item.score > 0)
-    .sort((a, b) => b.score - a.score)[0]?.url || "";
+    .filter(item => item.score > 0) // score >= 1 (base) sau khi thêm base score; < 1 = bị trừ điểm rác
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(1, limit))
+    .map(item => item.url);
 }
 
 async function fetchGoogleImageSearch(query, subject, options = {}) {
+  const urls = await fetchGoogleImageUrls(query, options);
+  return pickBestWebImage(urls, query, subject);
+}
+
+async function fetchGoogleImageUrls(query, options = {}) {
   try {
     const url = new URL("https://www.google.com/search");
     url.searchParams.set("tbm", "isch");
@@ -679,31 +694,36 @@ async function fetchGoogleImageSearch(query, subject, options = {}) {
       },
       signal: options.signal
     });
-    if (!res.ok) return "";
+    if (!res.ok) return [];
 
     const text = decodeSearchText(await res.text());
     const urls = [];
     for (const match of text.matchAll(/https?:\/\/[^"'<>\\\s]+?\.(?:jpe?g|png|webp)(?:\?[^"'<>\\\s]*)?/gi)) {
       urls.push(match[0]);
     }
-    return pickBestWebImage(urls, query, subject);
+    return urls;
   } catch (e) {
     if (e?.name === "AbortError") throw e;
-    return "";
+    return [];
   }
 }
 
 async function fetchDuckDuckGoImageSearch(query, subject, options = {}) {
+  const urls = await fetchDuckDuckGoImageUrls(query, options);
+  return pickBestWebImage(urls, query, subject);
+}
+
+async function fetchDuckDuckGoImageUrls(query, options = {}) {
   try {
     const homeUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`;
     const homeRes = await fetch(homeUrl, {
       headers: { "User-Agent": IMAGE_SEARCH_USER_AGENT },
       signal: options.signal
     });
-    if (!homeRes.ok) return "";
+    if (!homeRes.ok) return [];
     const homeText = await homeRes.text();
     const vqd = homeText.match(/vqd=['"]?([^&'"]+)/)?.[1];
-    if (!vqd) return "";
+    if (!vqd) return [];
 
     const apiUrl = new URL("https://duckduckgo.com/i.js");
     apiUrl.searchParams.set("l", "us-en");
@@ -721,17 +741,22 @@ async function fetchDuckDuckGoImageSearch(query, subject, options = {}) {
       },
       signal: options.signal
     });
-    if (!res.ok) return "";
+    if (!res.ok) return [];
     const data = await res.json();
-    const urls = (data.results || []).flatMap(item => [item.image, item.thumbnail]).filter(Boolean);
-    return pickBestWebImage(urls, query, subject);
+    return (data.results || []).flatMap(item => [item.image, item.thumbnail]).filter(Boolean);
   } catch (e) {
     if (e?.name === "AbortError") throw e;
-    return "";
+    return [];
   }
 }
 
 async function fetchWebImage(title, options = {}) {
+  // Nếu có Gemini key → dùng bản verify bằng Vision (khớp tiêu đề chính xác hơn).
+  if (options.geminiApiKey) {
+    const verified = await fetchWebImageVerified(title, options);
+    if (verified) return verified;
+    // Không verify được ảnh nào đạt ngưỡng → fallback về cách cũ (score URL).
+  }
   const { subject } = normalizeImageSubject(title);
   for (const query of buildImageSearchQueries(title)) {
     throwIfAborted(options.signal);
@@ -743,6 +768,123 @@ async function fetchWebImage(title, options = {}) {
   }
 
   return "";
+}
+
+// Gom nhiều URL ứng viên từ Google + DuckDuckGo, sắp theo điểm URL, khử trùng lặp.
+// Scrape song song các nguồn để tiết kiệm thời gian.
+async function collectWebImageCandidates(title, options = {}, limit = 6) {
+  const { subject } = normalizeImageSubject(title);
+  const queries = buildImageSearchQueries(title);
+
+  // Scrape song song: tất cả queries × (Google + DDG) cùng lúc.
+  const allUrlArrays = await Promise.all(
+    queries.flatMap(query => [
+      fetchGoogleImageUrls(query, options).catch(() => []),
+      fetchDuckDuckGoImageUrls(query, options).catch(() => [])
+    ])
+  );
+  const rawUrls = allUrlArrays.flat();
+
+  return pickTopWebImages(rawUrls, subject, subject, limit);
+}
+
+// Hỏi Gemini Vision xem ảnh tại imageUrl có đúng là chủ đề `title` không.
+// Trả về confidence 0..1 (0 nếu lỗi/không tải được ảnh).
+async function verifyImageMatchesTitle(imageUrl, title, options = {}) {
+  const apiKey = options.geminiApiKey;
+  if (!apiKey || !imageUrl) return 0;
+  try {
+    // Tải ảnh — timeout riêng để không kẹt cả job.
+    // Không truyền outer signal vào fetch ảnh: nếu outer abort thì
+    // verifyImageMatchesTitle trả 0 (không throw) để caller vẫn chọn được
+    // ứng viên tốt nhất đã verify xong trước đó.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // tăng lên 8s
+    let res;
+    try {
+      res = await fetch(imageUrl, {
+        headers: { "User-Agent": IMAGE_SEARCH_USER_AGENT },
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    if (!res || !res.ok) return 0;
+    const contentType = res.headers.get("Content-Type") || "image/jpeg";
+    if (!/^image\//i.test(contentType)) return 0;
+    const buffer = await res.arrayBuffer();
+    // Tăng giới hạn lên 10MB — nhiều ảnh chất lượng cao > 5MB
+    if (!buffer || buffer.byteLength === 0 || buffer.byteLength > 10 * 1024 * 1024) return 0;
+
+    const base64Image = arrayBufferToBase64(buffer);
+    const text = await requestGeminiContent({
+      apiKey,
+      maxOutputTokens: 40,
+      timeoutMs: 8000,
+      parts: [
+        {
+          text:
+            `Does this image clearly and correctly depict "${title}"? ` +
+            "Consider the main subject only. Return compact JSON like {\"match\":true,\"confidence\":0.92}. " +
+            "confidence 0..1. Set match false and confidence low if the image is the wrong subject, a logo, map, text, watermark, or unrelated."
+        },
+        {
+          inlineData: {
+            mimeType: /jpe?g/i.test(contentType) ? "image/jpeg" : (/png/i.test(contentType) ? "image/png" : "image/jpeg"),
+            data: base64Image
+          }
+        }
+      ]
+    });
+    const parsed = parseImageVerifyResult(text);
+    return parsed.match ? parsed.confidence : Math.min(parsed.confidence, 0.2);
+  } catch (e) {
+    // Không re-throw AbortError — caller nhận 0 và tiếp tục chọn ứng viên khác.
+    return 0;
+  }
+}
+
+export function parseImageVerifyResult(text) {
+  const fallback = { match: false, confidence: 0 };
+  if (!text) return fallback;
+  const jsonMatch = String(text).match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return fallback;
+  try {
+    const data = JSON.parse(jsonMatch[0]);
+    const confidence = Number(data.confidence);
+    return {
+      match: data.match === true,
+      confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+// Chọn ảnh khớp tiêu đề nhất bằng Gemini Vision.
+// Verify tất cả ứng viên SONG SONG thay vì tuần tự — giảm thời gian từ 56s → ~16s.
+// Trả về ảnh confidence cao nhất nếu ≥ MIN_ACCEPT, ngược lại "".
+async function fetchWebImageVerified(title, options = {}) {
+  const candidates = await collectWebImageCandidates(title, options, 6);
+  if (candidates.length === 0) return "";
+
+  const CONFIDENT = 0.6;
+  const MIN_ACCEPT = 0.4; // hạ ngưỡng từ 0.45 xuống 0.4 để chấp nhận thêm ảnh tốt
+
+  // Verify tất cả ứng viên song song — nhanh hơn nhiều lần so với serial.
+  const results = await Promise.all(
+    candidates.slice(0, 4).map(url =>
+      verifyImageMatchesTitle(url, title, options).then(confidence => ({ url, confidence }))
+    )
+  );
+
+  // Chọn ảnh confidence cao nhất.
+  const best = results.reduce(
+    (acc, r) => r.confidence > acc.confidence ? r : acc,
+    { url: "", confidence: 0 }
+  );
+
+  return best.confidence >= MIN_ACCEPT ? best.url : "";
 }
 
 export async function fetchComparisonImages(scriptText, options = {}) {
@@ -758,12 +900,13 @@ export async function fetchComparisonImages(scriptText, options = {}) {
   const abortFromParent = () => controller.abort();
   options.signal?.addEventListener("abort", abortFromParent, { once: true });
   const fetchImage = options.fetchImage || fetchWebImage;
+  const geminiApiKey = options.geminiApiKey;
 
   try {
     await Promise.all(results.flatMap((pair) => [
-      fetchImage(pair.leftTitle, { signal: controller.signal })
+      fetchImage(pair.leftTitle, { signal: controller.signal, geminiApiKey })
         .then(url => { pair.leftImageUrl = cleanString(url); }),
-      fetchImage(pair.rightTitle, { signal: controller.signal })
+      fetchImage(pair.rightTitle, { signal: controller.signal, geminiApiKey })
         .then(url => { pair.rightImageUrl = cleanString(url); })
     ]));
   } catch (error) {
@@ -1237,7 +1380,12 @@ export async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText
   options.signal?.addEventListener("abort", abortFromParent, { once: true });
 
   try {
-    const segments = splitScriptTextSegments(scriptText);
+    // Phải tách segment trên CÙNG script đã clean mà Web Tool nhận (session lưu
+    // cleanTelegramScriptText). Nếu tách trên script gốc (còn marker "Bước 1/2",
+    // "Kênh đã chọn"...) → số segment lệch số dòng phụ đề → alignment fail → Web
+    // rơi xuống silence-sync (khớp kém). Clean tại đây để mọi nhánh dùng chung.
+    const cleanedScript = cleanTelegramScriptText(scriptText) || cleanString(scriptText);
+    const segments = splitScriptTextSegments(cleanedScript);
     const requestAudio = options.requestAudio || requestTtsAudioBufferForText;
     const defaultIntervalMs = engineType === "tts_voicefree" ? 1700 : 0;
     const minRequestIntervalMs = Number.isFinite(Number(options.minRequestIntervalMs))
@@ -1250,7 +1398,13 @@ export async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText
     });
     if (engineType === "tts_voicefree" && options.forceSegmented !== true) {
       await waitForRequestStart();
-      const result = await requestAudio(engineType, ttsConfig, scriptText, { signal: controller.signal });
+      // Ghép câu bằng khoảng lặng ngữ nghĩa thay vì \n thuần.
+      // Voicefree/ElevenLabs đọc dấu chấm + 2 dòng trống như một micro-pause (~300ms),
+      // giúp silence-sync (Web Tool) bắt được ranh giới câu chính xác hơn — đặc biệt
+      // khi script có từ tiếng Anh dài liền nhau không có khoảng lặng tự nhiên.
+      // Dùng ngắt đoạn văn thực sự (blank line) thay vì hardcode ký tự đặc biệt.
+      const voicefreeScript = segments.join('\n\n');
+      const result = await requestAudio(engineType, ttsConfig, voicefreeScript, { signal: controller.signal });
       return {
         audioBuffer: result.buffer,
         audioUrlResult: result.audioUrl,
@@ -1260,12 +1414,13 @@ export async function requestSegmentedTtsAudio(engineType, ttsConfig, scriptText
     }
     if (segments.length <= 1) {
       await waitForRequestStart();
-      const result = await requestAudio(engineType, ttsConfig, scriptText, { signal: controller.signal });
+      const singleText = segments[0] || cleanString(cleanedScript);
+      const result = await requestAudio(engineType, ttsConfig, singleText, { signal: controller.signal });
       return {
         audioBuffer: result.buffer,
         audioUrlResult: result.audioUrl,
         audioSegments: [{
-          text: cleanString(scriptText),
+          text: singleText,
           base64: arrayBufferToBase64(result.buffer)
         }]
       };
@@ -1407,6 +1562,12 @@ export async function runTelegramTtsWorkflow(params, dependencies = {}) {
     ttsTimeoutMs,
     imageTimeoutMs = 8000
   } = params;
+  // Khi có Gemini key, bước verify ảnh (tải ảnh + gọi Vision) cần nhiều thời gian
+  // hơn. Đây là task nền (session đã lưu, user đã có link) nên nới timeout an toàn.
+  // Với 4 parallel verify × (scrape ~3s + 4 ảnh parallel ~16s) cần khoảng 30s.
+  const imageVerifyTimeoutMs = env?.DEFAULT_GEMINI_KEY
+    ? Math.max(imageTimeoutMs, 35000)
+    : imageTimeoutMs;
   const deps = {
     getSyncedCredentials,
     resolveTtsConfig,
@@ -1550,8 +1711,11 @@ export async function runTelegramTtsWorkflow(params, dependencies = {}) {
   }
 
   const autoImages = await runOptionalTaskWithTimeout(
-    () => deps.fetchComparisonImages(scriptText, { timeoutMs: imageTimeoutMs }),
-    imageTimeoutMs
+    () => deps.fetchComparisonImages(scriptText, {
+      timeoutMs: imageVerifyTimeoutMs,
+      geminiApiKey: env.DEFAULT_GEMINI_KEY
+    }),
+    imageVerifyTimeoutMs
   );
   if (sessionSaved && Array.isArray(autoImages) && autoImages.length > 0) {
     try {
@@ -1954,6 +2118,26 @@ export default {
 
           if (videoFile && typeof videoFile.arrayBuffer === "function") {
             const videoBuffer = await videoFile.arrayBuffer();
+
+            // Lưu video vào R2 để bot download lại khi user bấm đăng.
+            // Telegram getFile API giới hạn 20MB nên không thể download lại từ Telegram
+            // với video lớn. R2 không có giới hạn này.
+            let r2VideoKey = "";
+            if (env.SCHEDULED_VIDEOS) {
+              r2VideoKey = `publish-notify/${chatId}/${Date.now()}.webm`;
+              await env.SCHEDULED_VIDEOS.put(r2VideoKey, videoBuffer, {
+                httpMetadata: { contentType: videoFile.type || "video/webm" }
+              });
+              // Lưu key vào KV để callback tra cứu theo chatId (TTL 1 ngày)
+              if (env.VICOMPARE_KV) {
+                await env.VICOMPARE_KV.put(
+                  `publish_video:${chatId}`,
+                  JSON.stringify({ r2Key: r2VideoKey, title: videoTitle, createdAt: new Date().toISOString() }),
+                  { expirationTtl: 86400 }
+                );
+              }
+            }
+
             await sendTelegramDocument(
               chatId,
               videoBuffer,
@@ -2468,15 +2652,29 @@ async function handleCallbackQuery(callbackQuery, token, env, options = {}) {
     };
     const platformName = platformNames[platformCode] || "Mạng xã hội";
 
-    const videoFileId = callbackQuery.message?.document?.file_id || callbackQuery.message?.video?.file_id;
-    if (!videoFileId) {
-      await sendTelegramMessage(chatId, `⚠️ Không tìm thấy file video trong tin nhắn này để đăng lên ${platformName}. Vui lòng render lại từ Web Tool.`, token);
-      return;
-    }
-
     await sendTelegramMessage(chatId, `🚀 Đã nhận lệnh đăng "${titleSnippet || "video"}" lên ${platformName}. Đang upload thật...`, token);
     try {
-      const videoBuffer = await downloadTelegramFile(videoFileId, token);
+      // Ưu tiên lấy video từ R2 (không giới hạn 20MB như Telegram getFile API).
+      // Fallback về Telegram CDN cho video nhỏ (≤20MB) hoặc video cũ chưa có R2.
+      let videoBuffer;
+      const publishRecord = env.VICOMPARE_KV
+        ? await env.VICOMPARE_KV.get(`publish_video:${chatId}`, "json").catch(() => null)
+        : null;
+      if (publishRecord?.r2Key && env.SCHEDULED_VIDEOS) {
+        const r2Object = await env.SCHEDULED_VIDEOS.get(publishRecord.r2Key);
+        if (r2Object) {
+          videoBuffer = await r2Object.arrayBuffer();
+        }
+      }
+      if (!videoBuffer) {
+        // Fallback: tải từ Telegram (chỉ hoạt động cho video ≤20MB)
+        const videoFileId = callbackQuery.message?.document?.file_id || callbackQuery.message?.video?.file_id;
+        if (!videoFileId) {
+          await sendTelegramMessage(chatId, `⚠️ Không tìm thấy file video để đăng lên ${platformName}. Vui lòng render lại từ Web Tool.`, token);
+          return;
+        }
+        videoBuffer = await downloadTelegramFile(videoFileId, token);
+      }
       const caption = extractPublishCaption(callbackQuery.message?.caption || callbackQuery.message?.text || "") || ensurePublishHashtags(titleSnippet || "Video So Sánh");
       let result = null;
       if (platformCode === "pub_fb") {

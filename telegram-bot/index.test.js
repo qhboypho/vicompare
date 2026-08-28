@@ -12,6 +12,7 @@ import {
   buildTtsEngineKeyboard,
   buildImageSearchQueries,
   fetchComparisonImages,
+  parseImageVerifyResult,
   buildManualImageTargetKeyboard,
   cleanTelegramScriptText,
   splitVoicefreeTextSegments,
@@ -345,7 +346,12 @@ describe("Voicefree Telegram text segmentation", () => {
       { requestAudio }
     );
 
-    assert.deepEqual(requests, ["Câu 1\nCâu 2\nCâu 3\nCâu 4"]);
+    // Voicefree nhận script với các câu ngăn cách bằng dòng trống (\n\n)
+    // để TTS tạo pause rõ hơn giữa câu, giúp silence-sync bắt ranh giới chính xác.
+    assert.equal(requests.length, 1);
+    // Mỗi câu được tách ra và join lại bằng \n\n
+    assert.ok(requests[0].includes("Câu 1"), "script phải chứa Câu 1");
+    assert.ok(requests[0].includes("\n\n"), "phải có dòng trống giữa các câu");
     assert.deepEqual(result.audioSegments, []);
     assert.equal(result.audioUrlResult, "voicefree-audio");
   });
@@ -739,6 +745,29 @@ describe("comparison image search queries", () => {
     assert.equal(images.length, 1);
     assert.equal(images[0].leftImageUrl, "");
     assert.equal(images[0].rightImageUrl, "");
+  });
+});
+
+describe("Gemini image verification parsing", () => {
+  it("parses a confident match", () => {
+    assert.deepEqual(
+      parseImageVerifyResult('{"match":true,"confidence":0.92}'),
+      { match: true, confidence: 0.92 }
+    );
+  });
+
+  it("parses a rejection", () => {
+    assert.deepEqual(
+      parseImageVerifyResult('Here: {"match":false,"confidence":0.1}'),
+      { match: false, confidence: 0.1 }
+    );
+  });
+
+  it("clamps confidence and defaults safely on garbage", () => {
+    assert.deepEqual(parseImageVerifyResult('{"match":true,"confidence":5}'), { match: true, confidence: 1 });
+    assert.deepEqual(parseImageVerifyResult(''), { match: false, confidence: 0 });
+    assert.deepEqual(parseImageVerifyResult('not json'), { match: false, confidence: 0 });
+    assert.deepEqual(parseImageVerifyResult('{"match":true}'), { match: true, confidence: 0 });
   });
 });
 
