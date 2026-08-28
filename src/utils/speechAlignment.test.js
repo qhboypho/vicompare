@@ -44,5 +44,41 @@ test('rejects reordered or unrelated segments instead of silently syncing the wr
   );
 
   assert.equal(result.ok, false);
-  assert.match(result.reason, /không khớp/i);
+  assert.match(result.reason, /không khớp|không đáng tin/i);
+});
+
+test('keeps order-based pairing when only a few lines drift slightly (avoids silence-sync fallback)', () => {
+  // 5 dòng, chỉ 1 dòng lệch text hẳn → vẫn ghép theo thứ tự (không rơi silence-sync)
+  const blocks = [
+    { id: '1', text: 'Câu một.' },
+    { id: '2', text: 'Câu hai.' },
+    { id: '3', text: 'Câu ba khác hẳn.' },
+    { id: '4', text: 'Câu bốn.' },
+    { id: '5', text: 'Câu năm.' }
+  ];
+  const segments = [
+    { text: 'Câu một', base64: 'A' },
+    { text: 'Câu hai', base64: 'B' },
+    { text: 'Nội dung bot đọc lệch', base64: 'C' },
+    { text: 'Câu bốn', base64: 'D' },
+    { text: 'Câu năm', base64: 'E' }
+  ];
+  const result = alignAudioSegmentsToBlocks(blocks, segments);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.pairs.map(p => p.segment.base64), ['A', 'B', 'C', 'D', 'E']);
+});
+
+test('rejects when too many lines drift (order untrustworthy)', () => {
+  const blocks = [
+    { id: '1', text: 'Alpha.' },
+    { id: '2', text: 'Bravo.' },
+    { id: '3', text: 'Charlie.' }
+  ];
+  const segments = [
+    { text: 'Xxxx', base64: 'A' },
+    { text: 'Yyyy', base64: 'B' },
+    { text: 'Charlie', base64: 'C' }
+  ];
+  const result = alignAudioSegmentsToBlocks(blocks, segments);
+  assert.equal(result.ok, false);
 });
