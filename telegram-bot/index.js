@@ -3118,8 +3118,9 @@ export function getTikTokApiErrorMessage(payload = {}, fallback = "TikTok API er
   ]);
 }
 
-// App TikTok chưa audit → CHỈ đăng SELF_ONLY. Sau khi audit xong đổi false.
-const TIKTOK_APP_UNAUDITED = true;
+// App TikTok đã QUA audit Content Posting API (được duyệt đăng public) → cho
+// phép PUBLIC_TO_EVERYONE. Nếu cần quay lại private-only, đặt lại true.
+const TIKTOK_APP_UNAUDITED = false;
 
 export function pickTikTokPrivacyLevel(options = [], { unaudited = true } = {}) {
   const allowed = Array.isArray(options) ? options.map(cleanString).filter(Boolean) : [];

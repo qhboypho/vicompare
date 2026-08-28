@@ -249,10 +249,11 @@ async function publishTikTok({ account, video, caption, fetchImpl = fetch }) {
   const creatorPayload = await readPayload(creatorResponse);
   if (!creatorResponse.ok || creatorPayload.error?.code !== 'ok') throw new Error(`TikTok creator info: ${responseError(creatorPayload, creatorResponse)}`);
   const privacyOptions = creatorPayload.data?.privacy_level_options || [];
-  // App chưa audit → chỉ SELF_ONLY. Sau khi audit xong đổi TIKTOK_UNAUDITED=false.
-  const TIKTOK_UNAUDITED = true;
+  // App TikTok đã QUA audit Content Posting API (được duyệt đăng public) → ưu
+  // tiên PUBLIC_TO_EVERYONE. Nếu cần quay lại private-only, đặt lại true.
+  const TIKTOK_UNAUDITED = false;
   const privacyLevel = TIKTOK_UNAUDITED
-    ? (privacyOptions.includes('SELF_ONLY') ? 'SELF_ONLY' : 'SELF_ONLY')
+    ? 'SELF_ONLY'
     : (privacyOptions.includes('PUBLIC_TO_EVERYONE') ? 'PUBLIC_TO_EVERYONE' : privacyOptions[0] || 'SELF_ONLY');
   const creatorData = creatorPayload.data || {};
   const initResponse = await fetchImpl('https://open.tiktokapis.com/v2/post/publish/video/init/', {
