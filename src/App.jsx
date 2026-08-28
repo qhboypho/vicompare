@@ -46,6 +46,7 @@ import {
 import { buildActionSfxEvents, buildSegmentTimeline, getSpokenWeight } from './utils/segmentTiming';
 import { alignAudioSegmentsToBlocks } from './utils/speechAlignment';
 import { analyzeSegmentSpeech } from './utils/speechOnset';
+import { buildSmartCaptionFromScript, generateSmartCaption } from './utils/smartCaption';
 import {
   buildTelegramFallbackSession,
   pickTelegramChannelProfile,
@@ -1680,6 +1681,9 @@ export default function App() {
   const [socialDisplayName, setSocialDisplayName] = useState('');
 
   const [publishCaption, setPublishCaption] = useState('');
+  // Caption do hệ thống tự sinh lần gần nhất — dùng để biết người dùng đã tự
+  // sửa caption tay hay chưa (chỉ auto-ghi đè khi caption vẫn là bản tự sinh).
+  const autoCaptionRef = useRef('');
   // Danh sách link affiliate — mỗi trường (mô tả + link) sẽ đăng thành 1 comment
   // riêng dưới video Facebook sau khi đăng. Persist để tái dùng cho nhiều video.
   const [affiliateLinks, setAffiliateLinks] = useState(() => {
@@ -5065,8 +5069,27 @@ export default function App() {
 
     // Auto switch to timeline beats tab to let user review
     setActiveTab('timeline');
+
+    // Tự sinh caption cho phần đăng MXH & hẹn giờ (mô phỏng cơ chế bot Telegram):
+    // heuristic tức thì từ cặp so sánh, sau đó AI nâng cấp nếu đã cấu hình key
+    // bot bình luận. Chỉ ghi khi người dùng chưa tự sửa caption tay.
     if (shouldNotify) {
       alert(`Đã nhận diện thành công: ${parsedComparisons.length} So Sánh & ${parsedBlocks.length} nhịp đọc!`);
+      const autoCaption = buildSmartCaptionFromScript(parsedComparisons, headerTitle);
+      if (!publishCaption.trim() || publishCaption === autoCaptionRef.current) {
+        setPublishCaption(autoCaption);
+        autoCaptionRef.current = autoCaption;
+        generateSmartCaption({
+          provider: commentAiProvider,
+          apiKey: commentAiApiKey,
+          scriptText: sourceScript
+        }).then(aiCaption => {
+          if (aiCaption && autoCaptionRef.current === autoCaption) {
+            setPublishCaption(aiCaption);
+            autoCaptionRef.current = aiCaption;
+          }
+        }).catch(() => {});
+      }
     }
 
     return {
@@ -5074,6 +5097,28 @@ export default function App() {
       comparisons: parsedComparisons,
       duration: estimatedTotal
     };
+  };
+
+  // Tạo caption thông minh thủ công (nút "✨ Tạo caption" ở ô caption):
+  // luôn ghi đè caption hiện tại — heuristic trước, AI nâng cấp nếu có key.
+  const handleGenerateCaption = async () => {
+    if (!scriptText.trim() && comparisons.length === 0) {
+      alert('Cần có kịch bản hội thoại trước khi tạo caption. Hãy nhập kịch bản và bấm "Phân tích hội thoại".');
+      return;
+    }
+    const fallbackCaption = buildSmartCaptionFromScript(comparisons, headerTitle);
+    setPublishCaption(fallbackCaption);
+    autoCaptionRef.current = fallbackCaption;
+    if (!commentAiApiKey.trim()) return;
+    const aiCaption = await generateSmartCaption({
+      provider: commentAiProvider,
+      apiKey: commentAiApiKey,
+      scriptText
+    });
+    if (aiCaption && autoCaptionRef.current === fallbackCaption) {
+      setPublishCaption(aiCaption);
+      autoCaptionRef.current = aiCaption;
+    }
   };
 
   // Add/Remove comparison rounds manually
@@ -9146,9 +9191,28 @@ export default function App() {
                     </div>
 
                     <div className="form-group">
-                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span>Nội dung mô tả (Caption)</span>
-                        <span style={{ color: '#64748b' }}>{publishCaption.length} ký tự</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ color: '#64748b' }}>{publishCaption.length} ký tự</span>
+                          <button
+                            type="button"
+                            onClick={handleGenerateCaption}
+                            title="Tạo caption thông minh từ kịch bản hội thoại (kèm hashtag #shorts #reels)"
+                            style={{
+                              fontSize: '0.65rem',
+                              padding: '0.18rem 0.5rem',
+                              background: 'var(--primary)',
+                              border: 'none',
+                              borderRadius: '4px',
+                              color: '#fff',
+                              cursor: 'pointer',
+                              fontWeight: 600
+                            }}
+                          >
+                            ✨ Tạo caption
+                          </button>
+                        </span>
                       </label>
                       <textarea
                         value={publishCaption}
