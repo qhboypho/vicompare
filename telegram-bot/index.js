@@ -2081,6 +2081,8 @@ export default {
     }
 
     // 4. POST /api/publish-notify - Gửi thông báo xuất bản MXH ngược về Telegram
+    //    type=render (mặc định): video render xong + nút đăng nhanh
+    //    type=publish_result: báo kết quả đăng lên từng nền tảng
     if (url.pathname === "/api/publish-notify" && request.method === "POST") {
       try {
         const token = env.TELEGRAM_BOT_TOKEN;
@@ -2089,18 +2091,48 @@ export default {
         let videoTitle = "Video so sánh";
         let publishCaption = "";
         let videoFile = null;
+        let notifyType = "render";
+        let publishResults = [];
 
         if (contentType.includes("multipart/form-data")) {
           const form = await request.formData();
           chatId = cleanString(form.get("chatId"));
           videoTitle = cleanString(form.get("videoTitle")) || videoTitle;
           publishCaption = ensurePublishHashtags(cleanString(form.get("caption")) || videoTitle);
+          notifyType = cleanString(form.get("type")) || "render";
           videoFile = form.get("video");
         } else {
           const body = await request.json();
-          chatId = body.chatId;
-          videoTitle = body.videoTitle || videoTitle;
-          publishCaption = ensurePublishHashtags(body.caption || videoTitle);
+          chatId = cleanString(body.chatId);
+          videoTitle = cleanString(body.videoTitle) || videoTitle;
+          publishCaption = ensurePublishHashtags(cleanString(body.caption) || videoTitle);
+          notifyType = cleanString(body.type) || "render";
+          publishResults = Array.isArray(body.results) ? body.results : [];
+        }
+
+        if (!token) {
+          return new Response(JSON.stringify({ error: "Missing TELEGRAM_BOT_TOKEN" }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+        if (!chatId) {
+          return new Response(JSON.stringify({ error: "Missing chatId" }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        // Báo kết quả đăng bài (thành công/thất bại từng nền tảng) — không kèm nút.
+        if (notifyType === "publish_result") {
+          const platformLabels = { facebook: "📘 Facebook", youtube: "🔴 YouTube", tiktok: "🎵 TikTok" };
+          const lines = (publishResults.length > 0 ? publishResults : [{ platform: "", ok: false, error: "không có kết quả" }])
+            .map(item => (item && item.ok
+              ? `✅ ${platformLabels[item.platform] || item.platform || "Nền tảng"}: đã đăng${item.postId ? ` (ID: ${item.postId})` : ""}`
+              : `❌ ${platformLabels[item?.platform] || item?.platform || "Đăng bài"}: ${item?.error || "thất bại"}`));
+          const msg = `📤 Kết quả đăng bài "${videoTitle}":\n\n${lines.join("\n")}`;
+          await sendTelegramMessage(chatId, msg, token);
+          return new Response(JSON.stringify({ success: true }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
         }
 
         if (chatId && token) {

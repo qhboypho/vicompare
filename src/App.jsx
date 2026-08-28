@@ -1586,8 +1586,17 @@ export default function App() {
   // chatId từ Telegram — persist vào state để notifyTelegramPublish hoạt động
   // ngay cả khi URL đã thay đổi sau khi load session.
   const [telegramChatId, setTelegramChatId] = useState(() =>
-    new URLSearchParams(window.location.search).get('chatId') || ''
+    new URLSearchParams(window.location.search).get('chatId')
+    || localStorage.getItem('telegram_chat_id') || ''
   );
+  // Persist chatId xuống localStorage: URL bị replaceState xoá query (OAuth
+  // TikTok) và reload trang sẽ làm mất ?chatId= — không persist thì
+  // notifyTelegramPublish lặng lẽ bỏ qua, Telegram không bao giờ nhận báo.
+  useEffect(() => {
+    if (telegramChatId) {
+      try { localStorage.setItem('telegram_chat_id', telegramChatId); } catch {}
+    }
+  }, [telegramChatId]);
 
   // Facebook credentials
   const DEFAULT_FB_PAGE_ID = safeAtob(['MTIyMzYzNDg0', 'NzQ5OTI2NA=='].join(''));
@@ -2957,14 +2966,17 @@ export default function App() {
   };
 
   // 3. Gửi thông báo xuất bản MXH ngược về Telegram
+  const getTelegramNotifyChatId = () => telegramChatId
+    || new URLSearchParams(window.location.search).get('chatId')
+    || localStorage.getItem('telegram_chat_id')
+    || '';
+
   const notifyTelegramPublish = async (videoTitle, videoUrl = '', fileExt = '') => {
     try {
-      const chatId = telegramChatId
-        || new URLSearchParams(window.location.search).get('chatId')
-        || '';
+      const chatId = getTelegramNotifyChatId();
       if (!chatId) {
         console.log('[Notify] Không có chatId — bỏ qua notify Telegram (không phải session từ Telegram).');
-        return;
+        return { ok: false, skipped: true, reason: 'Không có chatId (mở tool trực tiếp, không qua Telegram)' };
       }
 
       if (videoUrl) {
@@ -2983,10 +2995,10 @@ export default function App() {
         if (!res.ok) {
           const errText = await res.text().catch(() => res.statusText);
           console.warn('[Notify] Telegram notify thất bại:', res.status, errText);
-        } else {
-          console.log('[Notify] Đã gửi video + thông báo về Telegram thành công.');
+          return { ok: false, reason: `HTTP ${res.status} — ${String(errText).slice(0, 160)}` };
         }
-        return;
+        console.log('[Notify] Đã gửi video + thông báo về Telegram thành công.');
+        return { ok: true };
       }
 
       const res = await fetch('https://vicompare-telegram-bot.qhboypho.workers.dev/api/publish-notify', {
@@ -2995,10 +3007,35 @@ export default function App() {
         body: JSON.stringify({ chatId, videoTitle: videoTitle || headerTitle || 'Video so sánh', caption: buildSmartPublishCaption() })
       });
       if (!res.ok) {
+        const errText = await res.text().catch(() => res.statusText);
         console.warn('[Notify] Telegram notify (no video) thất bại:', res.status);
+        return { ok: false, reason: `HTTP ${res.status} — ${String(errText).slice(0, 160)}` };
       }
+      return { ok: true };
     } catch (err) {
       console.warn('[Notify] Telegram publish notify error:', err);
+      return { ok: false, reason: err.message };
+    }
+  };
+
+  // Báo kết quả đăng bài lên từng nền tảng về Telegram (best-effort).
+  const notifyTelegramPublishResult = async (publishResults) => {
+    try {
+      const chatId = getTelegramNotifyChatId();
+      if (!chatId) return;
+      const res = await fetch('https://vicompare-telegram-bot.qhboypho.workers.dev/api/publish-notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId,
+          type: 'publish_result',
+          videoTitle: headerTitle || 'Video so sánh',
+          results: publishResults
+        })
+      });
+      if (!res.ok) console.warn('[Notify] publish-result thất bại:', res.status);
+    } catch (err) {
+      console.warn('[Notify] publish-result error:', err);
     }
   };
 
@@ -6060,7 +6097,11 @@ export default function App() {
           setExportedVideoUrl(url);
           setExportedExt(extension);
           setIsExporting(false);
-          notifyTelegramPublish(headerTitle || 'Video so sánh', url, extension);
+          notifyTelegramPublish(headerTitle || 'Video so sánh', url, extension).then(result => {
+            if (result && !result.ok && !result.skipped) {
+              alert('⚠️ Video đã render xong nhưng KHÔNG gửi được thông báo về Telegram: ' + (result.reason || 'lỗi không xác định'));
+            }
+          });
         },
         onError: (err) => {
           alert('Lỗi xuất video: ' + err);
@@ -6918,10 +6959,24 @@ export default function App() {
       setScheduledPosts(prev => prev.map(p => p.id === newPostId ? { ...p, status: 'published', postId: fbPostId, postIds } : p));
       setPublishCaption('');
       alert('Đã xuất bản video thành công lên các mạng xã hội!');
+      // Báo kết quả về Telegram (nếu session đến từ Telegram)
+      const successResults = Object.entries(postIds).map(([platform, refs]) => ({
+        platform,
+        ok: true,
+        postId: Array.isArray(refs) ? refs.map(r => r?.postId).filter(Boolean).join(', ') : ''
+      }));
+      await notifyTelegramPublishResult(successResults);
     } catch (error) {
       console.error(error);
       setScheduledPosts(prev => prev.map(p => p.id === newPostId ? { ...p, status: 'failed' } : p));
       alert(`Đăng bài thất bại: ${error.message}`);
+      const partialResults = Object.entries(postIds).map(([platform, refs]) => ({
+        platform,
+        ok: true,
+        postId: Array.isArray(refs) ? refs.map(r => r?.postId).filter(Boolean).join(', ') : ''
+      }));
+      partialResults.push({ platform: 'Lỗi đăng bài', ok: false, error: error.message });
+      await notifyTelegramPublishResult(partialResults).catch(() => {});
     } finally {
       setIsPublishing(false);
       setPublishingStatus('');
