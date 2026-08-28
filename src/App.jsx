@@ -2349,6 +2349,14 @@ export default function App() {
         clientSecret: ytClientSecret.trim(),
         refreshToken: globalRefresh.trim(),
         source: 'cloud key'
+      } : null,
+      // 4. Key của account + refresh token toàn cục — cứu khi account chỉ thiếu
+      // token (thấp ưu tiên hơn vì cặp account vừa có thể đã fail ở mục 1).
+      (acc.clientId?.trim() && acc.clientSecret?.trim() && globalRefresh.trim()) ? {
+        clientId: acc.clientId.trim(),
+        clientSecret: acc.clientSecret.trim(),
+        refreshToken: globalRefresh.trim(),
+        source: 'account key + token cloud'
       } : null
     ].filter(Boolean);
     const seen = new Set();
@@ -5787,9 +5795,13 @@ export default function App() {
       if (nextFbAccessToken !== undefined) setFbAccessToken(nextFbAccessToken);
       if (nextYtChannelId !== undefined) setYtChannelId(nextYtChannelId);
       if (nextYtAccessToken !== undefined) setYtAccessToken(nextYtAccessToken);
-      if (nextYtClientId !== undefined) setYtClientId(nextYtClientId);
-      if (nextYtClientSecret !== undefined) setYtClientSecret(nextYtClientSecret);
-      if (nextYtRefreshToken !== undefined) setYtRefreshToken(nextYtRefreshToken);
+      // OAuth YouTube: KHÔNG cho giá trị rỗng từ cloud xoá state vừa được fill
+      // từ account (account block chạy trước). Nếu không, cloud thiếu top-level
+      // ytClientId/secret sẽ "xoá sạch" bộ key hợp lệ → lúc đăng chỉ còn bộ ba
+      // của account, mất khả năng thử cặp cloud dự phòng.
+      if (typeof nextYtClientId === 'string' && nextYtClientId.trim()) setYtClientId(nextYtClientId.trim());
+      if (typeof nextYtClientSecret === 'string' && nextYtClientSecret.trim()) setYtClientSecret(nextYtClientSecret.trim());
+      if (typeof nextYtRefreshToken === 'string' && nextYtRefreshToken.trim()) setYtRefreshToken(nextYtRefreshToken.trim());
       if (nextTtSessionId !== undefined) setTtSessionId(nextTtSessionId);
       if (nextTtAccessToken !== undefined) setTtAccessToken(nextTtAccessToken);
       if (nextTtClientKey !== undefined) setTtClientKey(nextTtClientKey);
