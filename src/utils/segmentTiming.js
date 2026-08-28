@@ -1,5 +1,23 @@
 const DEFAULT_MIN_BLOCK_DURATION = 0.45;
 
+// Ước tính số syllable của 1 token.
+// - Tiếng Việt: mỗi từ viết = 1 syllable (âm tiết đơn).
+// - Tiếng Anh và ngôn ngữ Latin khác: đếm vowel group làm proxy syllable.
+// - Quy tắc: 1 cụm nguyên âm liên tiếp ≈ 1 syllable, tối thiểu 1.
+function estimateSyllables(token) {
+  const letters = String(token || '');
+  if (letters.length === 0) return 1;
+
+  // Phát hiện token tiếng Việt: có dấu thanh/dấu mũ hoặc ký tự đặc trưng
+  // (đ, ă, â, ê, ô, ơ, ư…). Tiếng Việt đơn âm tiết → 1 syllable/token.
+  const hasVietnamese = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸĐ]/.test(letters);
+  if (hasVietnamese) return 1;
+
+  // Tiếng Anh/Latin: đếm cụm nguyên âm (vowel cluster) làm proxy syllable.
+  const vowelGroups = letters.toLowerCase().match(/[aeiouy]+/g) || [];
+  return Math.max(1, vowelGroups.length);
+}
+
 export function getSpokenWeight(text) {
   const source = String(text || '').normalize('NFKC');
   const tokens = source.match(/[\p{L}\p{M}\p{N}]+(?:[.,][\p{N}]+)*%?/gu) || [];
@@ -13,7 +31,10 @@ export function getSpokenWeight(text) {
       return sum + numericWeight + (token.endsWith('%') ? 0.65 : 0);
     }
     const isAcronym = letters >= 2 && token === token.toLocaleUpperCase('und');
-    return sum + (isAcronym ? Math.max(1.25, letters * 0.75) : 1);
+    if (isAcronym) return sum + Math.max(1.25, letters * 0.75);
+    // Dùng syllable estimate thay vì cố định = 1, để từ dài tiếng Anh
+    // ("Brachiosaurus" ≈ 5 syllable) được phân bổ thời gian dài hơn "là" (1 syl).
+    return sum + estimateSyllables(token);
   }, 0);
 
   const punctuationPause = (source.match(/[,;:]/g) || []).length * 0.12

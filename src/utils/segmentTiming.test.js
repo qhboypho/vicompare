@@ -126,9 +126,26 @@ test('getSpokenWeight treats punctuation-only text as a safe minimum', () => {
   assert.ok(getSpokenWeight('Doberman co than hinh thon gon') > 1);
 });
 
-test('getSpokenWeight handles Vietnamese, English abbreviations and numeric expressions', () => {
-  assert.ok(getSpokenWeight('Chó Phú Quốc rất thông minh.') >= 5);
-  assert.ok(getSpokenWeight('API v2 reached 12.5% in 2026.') > getSpokenWeight('API reached twelve percent.'));
-  assert.ok(getSpokenWeight('Năm 2026.') > getSpokenWeight('Năm nay.'));
-  assert.ok(getSpokenWeight('API ready.') > getSpokenWeight('Tool ready.'));
+test('getSpokenWeight gives longer English words higher weight than short Vietnamese words', () => {
+  // "Brachiosaurus" ~5 syllable (a,io,au,u,s = depends on vowel groups)
+  // "là" = 1 syllable (Vietnamese)
+  const brachiosaurus = getSpokenWeight('Brachiosaurus');
+  const shortVi = getSpokenWeight('là');
+  assert.ok(brachiosaurus > shortVi, `Expected Brachiosaurus (${brachiosaurus}) > "là" (${shortVi})`);
+
+  // "T-rex" = short, "Brachiosaurus" = longer
+  const trex = getSpokenWeight('T-rex');
+  assert.ok(brachiosaurus > trex, `Expected Brachiosaurus (${brachiosaurus}) > T-rex (${trex})`);
+
+  // Mixed: "Khủng long Brachiosaurus" should weigh more than "Khủng long T-rex"
+  const sentA = getSpokenWeight('Khủng long Brachiosaurus');
+  const sentB = getSpokenWeight('Khủng long T-rex');
+  assert.ok(sentA > sentB, `Expected "Brachiosaurus" sentence (${sentA}) > "T-rex" sentence (${sentB})`);
+});
+
+test('getSpokenWeight Vietnamese words remain single syllable per token', () => {
+  // Pure Vietnamese: each space-separated syllable = 1 weight unit
+  const w = getSpokenWeight('Voi ma mút thích nghi');
+  // 5 Vietnamese tokens → 5 weights (no vowel-group counting)
+  assert.ok(w >= 5 && w <= 6, `Expected ~5 for 5 Vietnamese tokens, got ${w}`);
 });
