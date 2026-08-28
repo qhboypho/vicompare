@@ -1,25 +1,53 @@
 // src/utils/videoExporter.js
 import { drawFrame } from './canvasRenderer';
+import { buildCanvasImageCandidates } from './canvasImageSource';
 
 /**
- * Preloads an image URL into an HTMLImageElement
+ * Preloads an image URL into an HTMLImageElement.
+ *
+ * QUAN TRỌNG: ảnh remote (http/https, vd ảnh tự tìm từ Telegram) phải load QUA
+ * cors-proxy giống hệt luồng preview (buildCanvasImageCandidates). Nếu load thẳng
+ * URL gốc với crossOrigin='anonymous', server ảnh thường KHÔNG trả CORS header →
+ * onerror → ảnh null → khi render video canvas trống (dù preview vẫn hiện vì proxy).
+ * Ta thử lần lượt: [proxy, url gốc] và trả về ảnh đầu tiên load được.
  */
-export function preloadImage(url) {
-  return new Promise((resolve, reject) => {
+export function preloadImage(url, appOrigin = '') {
+  return new Promise((resolve) => {
     if (!url) {
       resolve(null);
       return;
     }
-    const img = new Image();
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      img.crossOrigin = 'anonymous';
+
+    const candidates = buildCanvasImageCandidates(url, appOrigin);
+    if (candidates.length === 0) {
+      resolve(null);
+      return;
     }
-    img.onload = () => resolve(img);
-    img.onerror = () => {
-      console.warn('Failed to load image:', url);
-      resolve(null); // Resolve with null so loading doesn't break entirely
+
+    const tryCandidate = (index) => {
+      const candidateUrl = candidates[index];
+      if (!candidateUrl) {
+        console.warn('Failed to load image (all candidates):', url);
+        resolve(null);
+        return;
+      }
+      const img = new Image();
+      if (candidateUrl.startsWith('http://') || candidateUrl.startsWith('https://')) {
+        img.crossOrigin = 'anonymous';
+      }
+      img.onload = async () => {
+        try {
+          await img.decode?.();
+        } catch {
+          // decode có thể bị từ chối với ảnh đã decode/SVG; onload là đủ.
+        }
+        resolve(img);
+      };
+      img.onerror = () => tryCandidate(index + 1);
+      img.src = candidateUrl;
     };
-    img.src = url;
+
+    tryCandidate(0);
   });
 }
 
@@ -28,30 +56,31 @@ export function preloadImage(url) {
  */
 export async function preloadAllAssets(state, mascotPoses = {}) {
   const loaded = {};
+  const appOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 
   // 1. Load Header Logo
   if (state.headerLogoUrl) {
-    loaded[state.headerLogoUrl] = await preloadImage(state.headerLogoUrl);
+    loaded[state.headerLogoUrl] = await preloadImage(state.headerLogoUrl, appOrigin);
   }
 
   // 2. Load Left Panel Image (Global Fallback)
   if (state.leftImageUrl) {
-    loaded[state.leftImageUrl] = await preloadImage(state.leftImageUrl);
+    loaded[state.leftImageUrl] = await preloadImage(state.leftImageUrl, appOrigin);
   }
 
   // 3. Load Right Panel Image (Global Fallback)
   if (state.rightImageUrl) {
-    loaded[state.rightImageUrl] = await preloadImage(state.rightImageUrl);
+    loaded[state.rightImageUrl] = await preloadImage(state.rightImageUrl, appOrigin);
   }
 
   // 4. Load all comparison round images
   if (state.comparisons && state.comparisons.length > 0) {
     for (const comp of state.comparisons) {
       if (comp.leftImageUrl && !loaded[comp.leftImageUrl]) {
-        loaded[comp.leftImageUrl] = await preloadImage(comp.leftImageUrl);
+        loaded[comp.leftImageUrl] = await preloadImage(comp.leftImageUrl, appOrigin);
       }
       if (comp.rightImageUrl && !loaded[comp.rightImageUrl]) {
-        loaded[comp.rightImageUrl] = await preloadImage(comp.rightImageUrl);
+        loaded[comp.rightImageUrl] = await preloadImage(comp.rightImageUrl, appOrigin);
       }
     }
   }
@@ -61,7 +90,7 @@ export async function preloadAllAssets(state, mascotPoses = {}) {
   for (const pose of poses) {
     const url = mascotPoses[pose];
     if (url) {
-      loaded[pose] = await preloadImage(url);
+      loaded[pose] = await preloadImage(url, appOrigin);
     }
   }
 
