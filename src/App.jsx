@@ -2314,6 +2314,102 @@ export default function App() {
     return Boolean(restored);
   };
 
+  // ===== YouTube OAuth: chọn bộ ba (clientId/clientSecret/refreshToken) =====
+  // Google trả "invalid_client: The provided client secret is invalid" khi id
+  // và secret KHÔNG cùng một OAuth app. State toàn cục bị ghi bởi nhiều nguồn
+  // (modal account, cloud, localStorage, default) nên không được trộn id/secret
+  // của nguồn này với refresh token của nguồn khác. Thử TỪNG bộ ba cùng nguồn
+  // theo thứ tự an toàn, và TỰ HỒI PHỤC: ghi ngược cặp thắng cuộc vào state +
+  // localStorage + account để các lần refresh sau dùng đúng một nguồn.
+  const shortYtClientId = (clientId) => String(clientId || '')
+    .replace(/\.apps\.googleusercontent\.com$/, '')
+    .slice(0, 20);
+
+  const buildYouTubeOAuthCandidates = (accountCredentials = {}) => {
+    const acc = accountCredentials || {};
+    const globalRefresh = ytRefreshToken?.trim() ? ytRefreshToken : (acc.refreshToken || '');
+    const raw = [
+      // 1. Đủ bộ ba của account — cùng nguồn, đúng kênh định đăng.
+      (acc.clientId?.trim() && acc.clientSecret?.trim() && acc.refreshToken?.trim()) ? {
+        clientId: acc.clientId.trim(),
+        clientSecret: acc.clientSecret.trim(),
+        refreshToken: acc.refreshToken.trim(),
+        source: 'account'
+      } : null,
+      // 2. Cặp id+secret toàn cục (cloud là nguồn chân lý) + refresh token của account.
+      (ytClientId?.trim() && ytClientSecret?.trim() && acc.refreshToken?.trim()) ? {
+        clientId: ytClientId.trim(),
+        clientSecret: ytClientSecret.trim(),
+        refreshToken: acc.refreshToken.trim(),
+        source: 'cloud key + token account'
+      } : null,
+      // 3. Đủ bộ ba toàn cục — chặn cuối khi account thiếu token.
+      (ytClientId?.trim() && ytClientSecret?.trim() && globalRefresh.trim()) ? {
+        clientId: ytClientId.trim(),
+        clientSecret: ytClientSecret.trim(),
+        refreshToken: globalRefresh.trim(),
+        source: 'cloud key'
+      } : null
+    ].filter(Boolean);
+    const seen = new Set();
+    return raw.filter(item => {
+      const key = `${item.clientId}|${item.clientSecret}|${item.refreshToken}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
+  const refreshYouTubeTokenSmart = async ({ accountCredentials = {}, onStatus = () => {} } = {}) => {
+    const candidates = buildYouTubeOAuthCandidates(accountCredentials);
+    if (candidates.length === 0) {
+      return { ok: false, skipped: true, error: 'Thiếu Client ID / Client Secret / Refresh Token' };
+    }
+    const failures = [];
+    for (const candidate of candidates) {
+      try {
+        onStatus(`Đang tự động làm mới YouTube Access Token (${candidate.source})...`);
+        const tokenRes = await fetch('/google-token/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id: candidate.clientId,
+            client_secret: candidate.clientSecret,
+            refresh_token: candidate.refreshToken,
+            grant_type: 'refresh_token'
+          })
+        });
+        if (!tokenRes.ok) {
+          const errData = await tokenRes.json().catch(() => ({}));
+          failures.push(`[${candidate.source} · ${shortYtClientId(candidate.clientId)}] ${errData.error_description || errData.error || tokenRes.statusText}`);
+          continue;
+        }
+        const tokenData = await tokenRes.json();
+        // Hội tụ về bộ thắng cuộc: cập nhật state + localStorage + mọi account
+        // đang dùng cùng refresh token để lần sau hết lệch cặp key.
+        setYtClientId(candidate.clientId);
+        setYtClientSecret(candidate.clientSecret);
+        try {
+          localStorage.setItem('yt_client_id', candidate.clientId);
+          localStorage.setItem('yt_client_secret', candidate.clientSecret);
+        } catch {}
+        setSocialAccounts(prev => ({
+          ...prev,
+          youtube: (prev.youtube || []).map(accItem => (
+            accItem.credentials?.refreshToken === candidate.refreshToken
+              ? { ...accItem, credentials: { ...(accItem.credentials || {}), clientId: candidate.clientId, clientSecret: candidate.clientSecret } }
+              : accItem
+          ))
+        }));
+        onStatus('Làm mới YouTube Token thành công!');
+        return { ok: true, accessToken: tokenData.access_token, source: candidate.source };
+      } catch (err) {
+        failures.push(`[${candidate.source}] ${err.message}`);
+      }
+    }
+    return { ok: false, error: failures.join(' | ') };
+  };
+
   // 1. Đồng bộ danh sách Mẫu Kênh sang Cloudflare Worker của Telegram Bot
   const syncChannelProfilesToTelegram = async (profiles, credentialOverrides = {}) => {
     const list = profiles || channelProfiles;
@@ -3255,34 +3351,18 @@ export default function App() {
           const accountLabel = account?.label || 'YouTube Shorts';
           const credentials = account?.credentials || {};
           let activeToken = credentials.accessToken || ytAccessToken;
-          // clientId + clientSecret là config OAuth app DÙNG CHUNG (cloud là
-          // nguồn chân lý), KHÔNG phải per-account. Ưu tiên state (đã nạp từ
-          // cloud); chỉ fallback về account khi state rỗng. Tránh dùng cặp
-          // cũ/sai còn kẹt trong account → Google báo "client secret is invalid".
-          const accountClientId = (ytClientId?.trim() ? ytClientId : credentials.clientId) || '';
-          const accountClientSecret = (ytClientSecret?.trim() ? ytClientSecret : credentials.clientSecret) || '';
-          const accountRefreshToken = credentials.refreshToken || ytRefreshToken;
-          if (accountClientId.trim() && accountClientSecret.trim() && accountRefreshToken.trim()) {
-            try {
-              const tokenRes = await fetch('/google-token/token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: new URLSearchParams({
-                  client_id: accountClientId.trim(),
-                  client_secret: accountClientSecret.trim(),
-                  refresh_token: accountRefreshToken.trim(),
-                  grant_type: 'refresh_token'
-                })
-              });
-              if (tokenRes.ok) {
-                const tokenData = await tokenRes.json();
-                activeToken = tokenData.access_token;
-                setYtAccessToken(activeToken);
-                localStorage.setItem('yt_access_token', activeToken);
-              }
-            } catch (err) {
-              console.warn('Gia hạn YouTube token thất bại trong Scheduler:', err);
-            }
+          // Thử từng bộ ba OAuth cùng nguồn (account → cloud), tự hội tụ cặp
+          // key thắng cuộc; hết trộn id app này với secret app khác.
+          const refreshResult = await refreshYouTubeTokenSmart({
+            accountCredentials: credentials,
+            onStatus: setPublishingStatus
+          });
+          if (refreshResult.ok) {
+            activeToken = refreshResult.accessToken;
+            setYtAccessToken(activeToken);
+            localStorage.setItem('yt_access_token', activeToken);
+          } else if (!refreshResult.skipped) {
+            console.warn('Gia hạn YouTube token thất bại trong Scheduler:', refreshResult.error);
           }
 
           const metadata = {
@@ -6689,40 +6769,26 @@ export default function App() {
             }
           } else if (platform === 'youtube') {
           let activeToken = credentials.accessToken || ytAccessToken;
-          // clientId + clientSecret là config OAuth app DÙNG CHUNG (cloud là
-          // nguồn chân lý), KHÔNG phải per-account. Ưu tiên state (đã nạp từ
-          // cloud); chỉ fallback về account khi state rỗng. Tránh dùng cặp
-          // cũ/sai còn kẹt trong account → Google báo "client secret is invalid".
-          const accountClientId = (ytClientId?.trim() ? ytClientId : credentials.clientId) || '';
-          const accountClientSecret = (ytClientSecret?.trim() ? ytClientSecret : credentials.clientSecret) || '';
-          const accountRefreshToken = credentials.refreshToken || ytRefreshToken;
-          if (accountClientId.trim() && accountClientSecret.trim() && accountRefreshToken.trim()) {
-            setPublishingStatus('Đang tự động làm mới YouTube Access Token...');
-            try {
-              // Call Google OAuth Token endpoint via proxy
-              const tokenRes = await fetch('/google-token/token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: new URLSearchParams({
-                  client_id: accountClientId.trim(),
-                  client_secret: accountClientSecret.trim(),
-                  refresh_token: accountRefreshToken.trim(),
-                  grant_type: 'refresh_token'
-                })
-              });
-              if (!tokenRes.ok) {
-                const errData = await tokenRes.json();
-                throw new Error(errData.error_description || errData.error || tokenRes.statusText);
-              }
-              const tokenData = await tokenRes.json();
-              activeToken = tokenData.access_token;
-              // Save it to state and localStorage for subsequent requests in the same session
-              setYtAccessToken(activeToken);
-              localStorage.setItem('yt_access_token', activeToken);
-              setPublishingStatus('Làm mới YouTube Token thành công!');
-            } catch (refreshErr) {
-              throw new Error(`Không thể tự động gia hạn YouTube Token: ${refreshErr.message}`);
+          // Thử từng bộ ba OAuth cùng nguồn (account → cloud), tự hội tụ cặp
+          // key thắng cuộc; hết trộn id app này với secret app khác.
+          const refreshResult = await refreshYouTubeTokenSmart({
+            accountCredentials: credentials,
+            onStatus: setPublishingStatus
+          });
+          if (!refreshResult.ok) {
+            if (!refreshResult.skipped) {
+              throw new Error(
+                `Không thể tự động gia hạn YouTube Token. Đã thử: ${refreshResult.error}. `
+                + 'Kiểm tra lại Client ID + Client Secret (phải cùng một OAuth app trên Google Cloud Console), '
+                + 'hoặc bấm "Xóa key YT cũ" trong Cài đặt để nạp lại key mới từ Cloud.'
+              );
             }
+            setPublishingStatus('Bỏ qua gia hạn YouTube Token (thiếu key), dùng token hiện có...');
+          }
+          if (refreshResult.ok) {
+            activeToken = refreshResult.accessToken;
+            setYtAccessToken(activeToken);
+            localStorage.setItem('yt_access_token', activeToken);
           }
 
           // Now, do the actual YouTube Video Upload (Shorts)
