@@ -24,6 +24,44 @@ function getAccounts(schedule, platform) {
     : [];
 }
 
+// Dựng danh sách comment affiliate: mỗi trường có link → 1 message (mô tả + link).
+function buildAffiliateCommentMessages(affiliateLinks = []) {
+  if (!Array.isArray(affiliateLinks)) return [];
+  const messages = [];
+  for (const item of affiliateLinks) {
+    const link = clean(item?.link);
+    if (!link) continue;
+    const description = clean(item?.description);
+    messages.push(description ? `${description}\n${link}` : link);
+  }
+  return messages;
+}
+
+// Đăng lần lượt các comment lên post Facebook. Lỗi từng comment được bỏ qua.
+async function postAffiliateComments({ postId, accessToken, messages = [], fetchImpl = fetch }) {
+  const cleanPostId = clean(postId);
+  const cleanToken = clean(accessToken);
+  if (!cleanPostId || !cleanToken || messages.length === 0) return { posted: 0, failed: 0 };
+  let posted = 0;
+  let failed = 0;
+  for (const message of messages) {
+    try {
+      const response = await fetchImpl(`https://graph.facebook.com/v21.0/${encodeURIComponent(cleanPostId)}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ access_token: cleanToken, message })
+      });
+      const payload = await readPayload(response);
+      if (!response.ok || payload.error) throw new Error(responseError(payload, response));
+      posted++;
+    } catch (err) {
+      failed++;
+      console.warn('[Affiliate] Lỗi đăng comment:', err?.message || err);
+    }
+  }
+  return { posted, failed };
+}
+
 export function collectDueSchedules(schedules = [], now = Date.now()) {
   return (Array.isArray(schedules) ? schedules : []).filter((schedule) => {
     if (schedule?.status !== 'pending') return false;
@@ -55,7 +93,7 @@ export async function executeScheduledPost(schedule, dependencies) {
       try {
         const video = await deps.getVideo(schedule, platform, account);
         if (!video) throw new Error('Không tìm thấy video đã lưu trên cloud.');
-        const result = await publish({ schedule, account, video, caption: schedule.caption || '' });
+        const result = await publish({ schedule, account, video, caption: schedule.caption || '', affiliateLinks: schedule.affiliateLinks || [] });
         postIds[platform] = [...(postIds[platform] || []), {
           accountId: account.id || '',
           label: account.label || platform,
@@ -75,7 +113,7 @@ export async function executeScheduledPost(schedule, dependencies) {
   return { ...schedule, status: 'published', postIds, publishedAt: new Date().toISOString(), error: '' };
 }
 
-async function publishFacebook({ account, video, caption, fetchImpl = fetch }) {
+async function publishFacebook({ account, video, caption, affiliateLinks = [], fetchImpl = fetch }) {
   const pageId = clean(account?.credentials?.pageId);
   const accessToken = clean(account?.credentials?.accessToken);
   if (!pageId || !accessToken) throw new Error('Thiếu Page ID hoặc Access Token Facebook.');
@@ -120,7 +158,15 @@ async function publishFacebook({ account, video, caption, fetchImpl = fetch }) {
   if (!finishResponse.ok || finishPayload.success === false) {
     throw new Error(`Hoàn tất Facebook Reel: ${responseError(finishPayload, finishResponse)}`);
   }
-  return { postId: String(finishPayload.fb_id || finishPayload.id || startPayload.video_id), videoId: String(startPayload.video_id) };
+  const postId = String(finishPayload.fb_id || finishPayload.id || startPayload.video_id);
+
+  // Đăng link affiliate thành các comment riêng dưới video. Lỗi được bỏ qua.
+  const affiliateMessages = buildAffiliateCommentMessages(affiliateLinks);
+  if (affiliateMessages.length > 0) {
+    await postAffiliateComments({ postId, accessToken, messages: affiliateMessages, fetchImpl });
+  }
+
+  return { postId, videoId: String(startPayload.video_id) };
 }
 
 async function refreshYouTubeToken(credentials, fetchImpl) {
@@ -310,6 +356,11 @@ export async function handleScheduleApiRequest(request, env, corsHeaders = {}) {
     caption: clean(metadata.caption),
     platforms: metadata.platforms,
     selectedAccounts: metadata.selectedAccounts || {},
+    affiliateLinks: Array.isArray(metadata.affiliateLinks)
+      ? metadata.affiliateLinks
+          .filter(item => clean(item?.link))
+          .map(item => ({ description: clean(item?.description), link: clean(item?.link) }))
+      : [],
     dueAt,
     videoKey,
     status: 'pending',

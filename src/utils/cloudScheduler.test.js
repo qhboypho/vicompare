@@ -44,8 +44,36 @@ test('uploads schedule metadata and the rendered video to the Worker', async () 
     caption: 'Bai viet',
     platforms: ['facebook'],
     selectedAccounts: { facebook: [{ id: 'page-1', credentials: { pageId: '1', accessToken: 'token' } }] },
+    affiliateLinks: [],
     dueAt: '2026-08-17T01:30:00.000Z'
   });
+  assert.equal(response.status, 'pending');
+});
+
+test('forwards affiliate links in the uploaded metadata', async () => {
+  let request = null;
+  const response = await createCloudSchedule({
+    endpoint: 'https://worker.example.com/api/schedules',
+    syncToken: 't',
+    post: {
+      id: 'post-9',
+      caption: 'c',
+      platforms: ['facebook'],
+      selectedAccounts: {},
+      affiliateLinks: [{ description: 'Mua ngay', link: 'https://a.com' }],
+      dueAt: '2026-08-17T01:30:00.000Z'
+    },
+    videoBlob: new Blob(['v'], { type: 'video/webm' }),
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return new Response(JSON.stringify({ success: true, schedule: { id: 'post-9', status: 'pending' } }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  });
+  const metadata = JSON.parse(request.options.body.get('metadata'));
+  assert.deepEqual(metadata.affiliateLinks, [{ description: 'Mua ngay', link: 'https://a.com' }]);
   assert.equal(response.status, 'pending');
 });
 

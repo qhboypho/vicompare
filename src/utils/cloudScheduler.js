@@ -37,6 +37,7 @@ export async function createCloudSchedule({
     caption: post.caption,
     platforms: post.platforms,
     selectedAccounts: post.selectedAccounts,
+    affiliateLinks: Array.isArray(post.affiliateLinks) ? post.affiliateLinks : [],
     dueAt: post.dueAt
   };
   const formData = new FormData();
