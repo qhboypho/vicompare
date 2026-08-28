@@ -2,10 +2,10 @@ const DEFAULT_API_BASE = '/tiktok-api';
 const DEFAULT_UPLOAD_BASE = '/tiktok-upload';
 const MAX_TIKTOK_CAPTION_LENGTH = 2200;
 
-// App TikTok chưa qua audit Content Posting API → CHỈ đăng được SELF_ONLY.
-// SAU KHI TikTok duyệt audit xong, đổi thành false để đăng công khai
-// (PUBLIC_TO_EVERYONE). Đây là công tắc duy nhất cần đổi.
-export const TIKTOK_APP_UNAUDITED = true;
+// App TikTok đã QUA audit Content Posting API (được duyệt đăng public) → cho
+// phép PUBLIC_TO_EVERYONE. Nếu sau này cần quay lại chế độ private-only,
+// đặt lại true.
+export const TIKTOK_APP_UNAUDITED = false;
 
 export const TIKTOK_DIRECT_POST_ENDPOINTS = {
   token: '/v2/oauth/token/',
