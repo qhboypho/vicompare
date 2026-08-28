@@ -6098,8 +6098,11 @@ export default function App() {
           setExportedExt(extension);
           setIsExporting(false);
           notifyTelegramPublish(headerTitle || 'Video so sánh', url, extension).then(result => {
-            if (result && !result.ok && !result.skipped) {
-              alert('⚠️ Video đã render xong nhưng KHÔNG gửi được thông báo về Telegram: ' + (result.reason || 'lỗi không xác định'));
+            if (result && !result.ok) {
+              const hint = result.skipped
+                ? ' — Thiếu chatId Telegram. Hãy mở tool qua nút "Mở Web Tool" trong bot Telegram một lần để kết nối lại.'
+                : (result.reason || 'lỗi không xác định');
+              alert('⚠️ Video đã render xong nhưng KHÔNG gửi được thông báo về Telegram: ' + hint);
             }
           });
         },

@@ -2170,14 +2170,26 @@ export default {
               }
             }
 
-            await sendTelegramDocument(
-              chatId,
-              videoBuffer,
-              `${videoTitle.replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80) || "video_so_sanh"}.webm`,
-              token,
-              `🎉 Video "${videoTitle}" đã render xong.\n\n📝 Caption sẽ đăng:\n${publishCaption}\n\nCAPTION:${publishCaption}\n\n👇 Bấm nút dưới đây để đăng trực tiếp:`,
-              replyMarkup
-            );
+            try {
+              await sendTelegramDocument(
+                chatId,
+                videoBuffer,
+                `${videoTitle.replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80) || "video_so_sanh"}.webm`,
+                token,
+                `🎉 Video "${videoTitle}" đã render xong.\n\n📝 Caption sẽ đăng:\n${publishCaption}\n\nCAPTION:${publishCaption}\n\n👇 Bấm nút dưới đây để đăng trực tiếp:`,
+                replyMarkup
+              );
+            } catch (docErr) {
+              // Video vượt giới hạn 50MB của Telegram sendDocument (hoặc lỗi tạm
+              // thời) — vẫn phải báo render xong kèm nút đăng vì video đã nằm
+              // sẵn trên R2, các nút pub_* vẫn hoạt động bình thường.
+              console.warn("[publish-notify] sendDocument lỗi, fallback tin nhắn text:", docErr?.message || docErr);
+              const fallbackMsg =
+                `🎉 Video "${videoTitle}" đã render xong.\n` +
+                `⚠️ File quá lớn (${Math.round(videoBuffer.byteLength / 1024 / 1024)}MB > 50MB) nên không đính kèm được, nhưng đã lưu trên cloud — nút đăng vẫn hoạt động.\n\n` +
+                `📝 Caption sẽ đăng:\n${publishCaption}\n\nCAPTION:${publishCaption}\n\n👇 Bấm nút dưới đây để đăng trực tiếp:`;
+              await sendTelegramMessage(chatId, fallbackMsg, token, replyMarkup);
+            }
           } else {
             const msg = `🎉 **Video "${videoTitle}" đã được tạo xong trên Web Tool!**\n\n📝 Caption sẽ đăng:\n${publishCaption}\n\nCAPTION:${publishCaption}\n\n👇 Chọn nền tảng Mạng xã hội để xuất bản ngay lập tức:`;
             await sendTelegramMessage(chatId, msg, token, replyMarkup, "Markdown");
