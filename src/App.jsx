@@ -5622,8 +5622,21 @@ export default function App() {
       }
       if (config.headerTitle !== undefined) setHeaderTitle(config.headerTitle);
       if (config.customFilename !== undefined) setCustomFilename(config.customFilename);
-      if (config.outroCtaText !== undefined) setOutroCtaText(config.outroCtaText);
-      if (config.outroFollowLabel !== undefined) setOutroFollowLabel(config.outroFollowLabel);
+      // Lời thoại CTA: ưu tiên giá trị từ credentials (KV app_credentials —
+      // kho tích luỹ mà bot đang dùng, giá trị cũ không bao giờ bị xoá), fallback
+      // về top-level. Không vậy thì khi app_settings.outroCtaText rỗng, bot vẫn
+      // đọc được CTA cũ nhưng tool tạo voice trực tiếp sẽ mất CTA.
+      const cloudCreds = config.credentials || {};
+      const pickOutroValue = (key) => {
+        const fromCreds = typeof cloudCreds[key] === 'string' ? cloudCreds[key].trim() : '';
+        if (fromCreds) return fromCreds;
+        const fromTop = typeof config[key] === 'string' ? config[key].trim() : '';
+        return fromTop || undefined;
+      };
+      const nextOutroCtaText = pickOutroValue('outroCtaText');
+      if (nextOutroCtaText) setOutroCtaText(nextOutroCtaText);
+      const nextOutroFollowLabel = pickOutroValue('outroFollowLabel');
+      if (nextOutroFollowLabel) setOutroFollowLabel(nextOutroFollowLabel);
       if (config.logoFileName !== undefined) setLogoFileName(config.logoFileName);
       if (config.headerLogoUrl !== undefined) {
         if (config.headerLogoUrl && config.headerLogoUrl.startsWith('idb:')) {
